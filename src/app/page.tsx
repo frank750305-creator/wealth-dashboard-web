@@ -3,10 +3,9 @@
 import { useState } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line, ComposedChart } from "recharts";
 
-// 💥 新增：一個帶有科技感的 AI 圖示
 const AIIcon = () => (
   <svg className="w-6 h-6 text-emerald-400" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM12 6C13.66 6 15 7.34 15 9C15 10.66 13.66 12 12 12C10.34 12 9 10.66 9 9C9 7.34 10.34 6 12 6ZM12 20.2C9.5 20.2 7.29 18.93 6 17C6.03 15.01 10 13.9 12 13.9C13.99 13.9 17.97 15.01 18 17C16.71 18.93 14.5 20.2 12 20.2Z" fill="currentColor"/>
+    <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 6ZM12 6C13.66 6 15 7.34 15 9C15 10.66 13.66 12 12 12C10.34 12 9 10.66 9 9C9 7.34 10.34 6 12 6ZM12 20.2C9.5 20.2 7.29 18.93 6 17C6.03 15.01 10 13.9 12 13.9C13.99 13.9 17.97 15.01 18 17C16.71 18.93 14.5 20.2 12 20.2Z" fill="currentColor"/>
   </svg>
 );
 
@@ -14,15 +13,17 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const [simulationResult, setSimulationResult] = useState<any>(null);
 
-  // 動態狀態
+  // 基礎參數
   const [currentAge, setCurrentAge] = useState(65);
   const [lifeExpectancy, setLifeExpectancy] = useState(85);
-  const [initialCash, setInitialCash] = useState(8000); // 預設 8000 萬實戰案例
-  
+  const [initialCash, setInitialCash] = useState(8000); 
+
+  // 新增：勞退與收支參數
   const [mainSalary, setMainSalary] = useState(50000);
   const [baseExp, setBaseExp] = useState(30000);
   const [pensionMode, setPensionMode] = useState("💼 一般勞工");
   const [lbYears, setLbYears] = useState(10);
+
   const handleSimulate = async () => {
     setIsLoading(true);
     try {
@@ -55,25 +56,20 @@ export default function Home() {
           kids: [], siblings: [], daily_tool_val: 0, job_tool_val: 0
         },
         pension: {
-          mode: pensionMode, // 👈 改成變數
+          mode: pensionMode, 
           lb_salary: 45800, 
-          lb_current_years: lbYears, // 👈 改成變數
+          lb_current_years: lbYears, 
           national_years: 0, lb_age: 65, has_old_sys: false,
           lt_bal: 0, lt_vol: 0, lt_roi: 0, pb_salary: 0, pb_years: 0, pb_type: "", tf_sys: "", tf_salary: 0, tf_years: 0, tf_bal: 0, tf_sal: 0, tf_vol: 0,
           mil_rank: "", mil_salary: 0, mil_years: 0, mil_type: "", is_rich: false, fm_wage: 0, fm_vol: 0
         },
-        main_salary: mainSalary, // 👈 改成變數
-        base_m_exp: baseExp      // 👈 改成變數
+        main_salary: mainSalary, 
+        base_m_exp: baseExp      
       };
 
-      // 改為指向您的 Render 雲端後端
       const response = await fetch("https://wealth-dashboard-api.onrender.com/api/v1/wealth/simulate", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Tenant-ID": "cd3c0826-8a5b-4926-ad75-2f4240a49658",
-          "X-Advisor-ID": "3b965287-5119-451c-8859-2d00f8d4f62e",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
 
@@ -82,7 +78,7 @@ export default function Home() {
       setSimulationResult(data);
 
     } catch (error: any) {
-      alert("連線後端引擎失敗。");
+      alert("連線後端引擎失敗。請確認 Render 伺服器是否清醒。");
     } finally {
       setIsLoading(false);
     }
@@ -106,21 +102,17 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-slate-950 text-white p-8 font-sans overflow-x-hidden">
-      <div className="max-w-[1600px] mx-auto"> {/* 放大容器以適應三欄佈局 */}
+      <div className="max-w-[1600px] mx-auto">
         
         <header className="flex justify-between items-center border-b border-slate-800 pb-6 mb-8">
           <div>
-            <h1 className="text-3xl font-bold tracking-wider text-slate-100">
-              高資產客戶傳承與稅務戰情室
-            </h1>
-            <p className="text-slate-400 mt-2 text-sm">
-              AI-Driven Wealth & Succession Planning System (Phase 3: AI 武裝)
-            </p>
+            <h1 className="text-3xl font-bold tracking-wider text-slate-100">高資產客戶傳承與稅務戰情室</h1>
+            <p className="text-slate-400 mt-2 text-sm">AI-Driven Wealth & Succession Planning System (Phase 3: AI 武裝)</p>
           </div>
           <div className="flex items-center gap-4">
              <div className="bg-slate-900 px-4 py-2 rounded border border-slate-800 text-sm text-emerald-400 flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                台灣稅制引擎 1.0 運轉中
+                全端微服務 V2 運轉中
               </div>
           </div>
         </header>
@@ -153,7 +145,7 @@ export default function Home() {
                 <input type="number" value={initialCash} onChange={(e) => setInitialCash(Number(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white text-lg font-mono focus:border-blue-500"/>
               </div>
 
-              {/* 👇 新增這區：收支與勞退面板 */}
+              {/* 🎯 新增區塊：收支與勞退面板 */}
               <div className="pt-6 mt-6 border-t border-slate-800 space-y-6">
                 <h3 className="text-md font-semibold text-blue-300">💰 收支與勞退設定</h3>
                 
@@ -189,10 +181,16 @@ export default function Home() {
                 )}
               </div>
 
+            </div>
+            
+            <button onClick={handleSimulate} disabled={isLoading} className={`w-full py-4 mt-8 rounded-lg font-bold tracking-wide transition-all ${isLoading ? "bg-slate-700 text-slate-400" : "bg-blue-600 hover:bg-blue-500 text-white shadow-[0_0_20px_rgba(37,99,235,0.5)]"}`}>
+              {isLoading ? "核心引擎精算中..." : "🚀 一鍵啟動全端精算"}
+            </button>
+          </div>
+
           {/* 右側：圖表與 AI 講稿區 */}
           <div className="xl:col-span-9 space-y-8">
             
-            {/* 1. 圖表戰情室 */}
             <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl shadow-2xl h-[500px] flex flex-col">
               <h2 className="text-xl font-semibold mb-6 text-emerald-400 flex items-center gap-2 underline underline-offset-8 decoration-emerald-500/50 shrink-0">
                 ▍ 終身資產與台灣遺產稅缺口分析
@@ -218,7 +216,6 @@ export default function Home() {
               </div>
             </div>
 
-            {/* 2. 💥 新增：AI 大腦精算摘要與互動講稿區 */}
             {!simulationResult ? null : (
                 <div className="bg-slate-900 border-2 border-emerald-900 p-6 rounded-xl shadow-2xl animate-fade-in">
                     <div className="flex items-center gap-3 mb-5 pb-4 border-b border-slate-800">
@@ -242,7 +239,7 @@ export default function Home() {
                         </div>
                         <div className="bg-slate-950 p-4 rounded-lg border border-emerald-800 leading-relaxed italic text-slate-300">
                             <p className="text-emerald-400 font-bold not-italic mb-2">▍ [推薦談判話術] (面對客戶)</p>
-                            「{initialCash > 5000 ? '王總' : '陳先生'}，這張圖表展現了一個需要引起您高度重視的警訊。雖然您現在實力雄厚，但隨著資產自然的增值，未來的繼承人可能面臨極大的考驗。依照目前政府的計算方式，您的家人在繼承時，必須在短短六個月內籌措出近 <span className="text-emerald-300 font-bold">{(simulationResult.trajectory.slice(-1)[0].預估遺產稅_萬 / 10).toLocaleString()} 萬</span> 的現金交給國庫，否則無法順利繼承。這對家族資產的流動性將是巨大的打擊...」
+                            「{initialCash > 5000 ? '董座' : '先生/女士'}，這張圖表展現了一個需要引起您高度重視的警訊。雖然您現在實力雄厚，但隨著資產自然的增值，未來的繼承人可能面臨極大的考驗。依照目前政府的計算方式，您的家人在繼承時，必須在短短六個月內籌措出近 <span className="text-emerald-300 font-bold">{(simulationResult.trajectory.slice(-1)[0].預估遺產稅_萬 / 10).toLocaleString()} 萬</span> 的現金交給國庫，否則無法順利繼承。這對家族資產的流動性將是巨大的打擊...」
                         </div>
                     </div>
                 </div>
