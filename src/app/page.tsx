@@ -18,7 +18,11 @@ export default function Home() {
   const [currentAge, setCurrentAge] = useState(65);
   const [lifeExpectancy, setLifeExpectancy] = useState(85);
   const [initialCash, setInitialCash] = useState(8000); // 預設 8000 萬實戰案例
-
+  
+  const [mainSalary, setMainSalary] = useState(50000);
+  const [baseExp, setBaseExp] = useState(30000);
+  const [pensionMode, setPensionMode] = useState("💼 一般勞工");
+  const [lbYears, setLbYears] = useState(10);
   const handleSimulate = async () => {
     setIsLoading(true);
     try {
@@ -51,12 +55,15 @@ export default function Home() {
           kids: [], siblings: [], daily_tool_val: 0, job_tool_val: 0
         },
         pension: {
-          mode: "💼 一般勞工", lb_salary: 45800, lb_current_years: 5, national_years: 0, lb_age: 65, has_old_sys: false,
+          mode: pensionMode, // 👈 改成變數
+          lb_salary: 45800, 
+          lb_current_years: lbYears, // 👈 改成變數
+          national_years: 0, lb_age: 65, has_old_sys: false,
           lt_bal: 0, lt_vol: 0, lt_roi: 0, pb_salary: 0, pb_years: 0, pb_type: "", tf_sys: "", tf_salary: 0, tf_years: 0, tf_bal: 0, tf_sal: 0, tf_vol: 0,
           mil_rank: "", mil_salary: 0, mil_years: 0, mil_type: "", is_rich: false, fm_wage: 0, fm_vol: 0
         },
-        main_salary: 50000,
-        base_m_exp: 30000
+        main_salary: mainSalary, // 👈 改成變數
+        base_m_exp: baseExp      // 👈 改成變數
       };
 
       // 改為指向您的 Render 雲端後端
@@ -145,12 +152,42 @@ export default function Home() {
                 <label className="block text-sm text-slate-400 mb-2">初始現金資產 (萬)</label>
                 <input type="number" value={initialCash} onChange={(e) => setInitialCash(Number(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white text-lg font-mono focus:border-blue-500"/>
               </div>
-            </div>
-            
-            <button onClick={handleSimulate} disabled={isLoading} className={`w-full py-4 mt-8 rounded-lg font-bold tracking-wide transition-all ${isLoading ? "bg-slate-700 text-slate-400" : "bg-blue-600 hover:bg-blue-500 text-white shadow-[0_0_20px_rgba(37,99,235,0.5)]"}`}>
-              {isLoading ? "核心引擎精算中..." : "🚀 一鍵啟動全端精算"}
-            </button>
-          </div>
+
+              {/* 👇 新增這區：收支與勞退面板 */}
+              <div className="pt-6 mt-6 border-t border-slate-800 space-y-6">
+                <h3 className="text-md font-semibold text-blue-300">💰 收支與勞退設定</h3>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">主業月薪 (元)</label>
+                    <input type="number" step="1000" value={mainSalary} onChange={(e) => setMainSalary(Number(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white font-mono focus:border-blue-500"/>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">每月開銷 (元)</label>
+                    <input type="number" step="1000" value={baseExp} onChange={(e) => setBaseExp(Number(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white font-mono focus:border-blue-500"/>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">職業別 / 退休金制度</label>
+                  <select value={pensionMode} onChange={(e) => setPensionMode(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white focus:border-blue-500">
+                    <option value="💼 一般勞工">💼 一般勞工 (勞保+勞退)</option>
+                    <option value="🏛️ 公教人員">🏛️ 公教人員</option>
+                    <option value="🎖️ 軍職人員">🎖️ 軍職人員</option>
+                    <option value="🚫 暫不設定">🚫 暫不設定</option>
+                  </select>
+                </div>
+
+                {pensionMode === "💼 一般勞工" && (
+                  <div>
+                    <label className="flex justify-between text-xs text-slate-400 mb-2">
+                      <span>目前勞保年資</span>
+                      <span className="text-blue-400 font-bold">{lbYears} 年</span>
+                    </label>
+                    <input type="range" min="0" max="40" value={lbYears} onChange={(e) => setLbYears(Number(e.target.value))} className="w-full accent-blue-500"/>
+                  </div>
+                )}
+              </div>
 
           {/* 右側：圖表與 AI 講稿區 */}
           <div className="xl:col-span-9 space-y-8">
