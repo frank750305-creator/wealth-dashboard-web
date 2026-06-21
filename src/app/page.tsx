@@ -23,14 +23,40 @@ export default function Home() {
     setIsLoading(true);
     try {
       const payload = {
-        timeline: { current_age: currentAge, life_expectancy: lifeExpectancy, retire_age: currentAge },
+        timeline: { 
+          current_age: currentAge, 
+          life_expectancy: lifeExpectancy, 
+          retire_age: 65,
+          salary_growth: 0.012,
+          inflation_rate: 0.02,
+          replacement_rate: 0.7,
+          roi_after_retire: 0.03
+        },
         assets: [
           {
-            id: "asset_1", name: "現金與定存", type: "cash",
-            value: initialCash, rate: 0.02, monthly_add: 0, add_years: 0, tax_type: "taxable"
+            id: "asset_1", name: "日常活存", type: "現金",
+            value: initialCash, rate: 0.01, monthly_add: 0, add_years: 0, tax_type: "國內利息(計入27萬)"
           }
         ],
-        insurances: []
+        insurances: [],
+        mortgages: [],
+        debts: [],
+        extra_incomes: [],
+        family: {
+          has_spouse: false, has_father: false, has_mother: false, has_grand: false,
+          sp_age: 30, sp_life: 88, sp_salary: 0, sp_other_inc: 0, sp_wealth: 0, sp_add: 0, sp_rate: 0, sp_disabled: false, sp_ltc: false,
+          fa_age: 65, fa_life: 85, fa_claim_tax: false, fa_tax_inc: 0, fa_disabled: false, fa_ltc: false,
+          mo_age: 65, mo_life: 85, mo_claim_tax: false, mo_tax_inc: 0, mo_disabled: false, mo_ltc: false,
+          gp_count: 0, gp_age: 75, gp_life: 85, gp_claim_tax: false, gp_tax_inc: 0, gp_dependent: false, gp_disabled_count: 0, gp_ltc_count: 0,
+          kids: [], siblings: [], daily_tool_val: 0, job_tool_val: 0
+        },
+        pension: {
+          mode: "💼 一般勞工", lb_salary: 45800, lb_current_years: 5, national_years: 0, lb_age: 65, has_old_sys: false,
+          lt_bal: 0, lt_vol: 0, lt_roi: 0, pb_salary: 0, pb_years: 0, pb_type: "", tf_sys: "", tf_salary: 0, tf_years: 0, tf_bal: 0, tf_sal: 0, tf_vol: 0,
+          mil_rank: "", mil_salary: 0, mil_years: 0, mil_type: "", is_rich: false, fm_wage: 0, fm_vol: 0
+        },
+        main_salary: 50000,
+        base_m_exp: 30000
       };
 
       // 改為指向您的 Render 雲端後端
