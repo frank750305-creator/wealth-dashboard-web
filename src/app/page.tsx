@@ -33,7 +33,8 @@ export default function Home() {
         insurances: []
       };
 
-      const response = await fetch("http://localhost:8000/api/v1/wealth/simulate", {
+      // 改為指向您的 Render 雲端後端
+      const response = await fetch("https://wealth-dashboard-api.onrender.com/api/v1/wealth/simulate", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
