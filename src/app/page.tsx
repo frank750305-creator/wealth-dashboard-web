@@ -25,6 +25,13 @@ interface InsurancePolicy {
   survival_age: number;
 }
 
+interface ExtraIncome {
+  id: string;
+  name: string;
+  type: string;
+  amount: number;
+}
+
 export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const [simulationResult, setSimulationResult] = useState<any>(null);
@@ -38,12 +45,18 @@ export default function Home() {
   const [stockAsset, setStockAsset] = useState(2000); 
   const [stockRate, setStockRate] = useState(6.0); 
 
-  // --- 2. 收支與勞退設定 (展開消費細節版) ---
+  // --- 2. 收入與開銷 (全配多元收入版) ---
   const [mainSalary, setMainSalary] = useState(50000);
   const [pensionMode, setPensionMode] = useState("💼 一般勞工");
   const [lbYears, setLbYears] = useState(10);
   
-  // 消費 6 大細項
+  // 動態額外收入模組
+  const [extraIncomes, setExtraIncomes] = useState<ExtraIncome[]>([]);
+  const [tmpIncName, setTmpIncName] = useState("兼職/收租");
+  const [tmpIncType, setTmpIncType] = useState("執行業務-一般(9A, 扣30%成本)");
+  const [tmpIncAmt, setTmpIncAmt] = useState(15000);
+  
+  // 6 大消費細項
   const [mLiving, setMLiving] = useState(15000);
   const [mRent, setMRent] = useState(0);
   const [mInsurance, setMInsurance] = useState(2000);
@@ -51,8 +64,17 @@ export default function Home() {
   const [mParents, setMParents] = useState(5000);
   const [mOther, setMOther] = useState(6000);
   
-  // 動態加總總開銷
   const baseExp = mLiving + mRent + mInsurance + mLaborHealth + mParents + mOther;
+
+  const addExtraIncome = () => {
+    if (tmpIncAmt > 0) {
+      setExtraIncomes([...extraIncomes, { id: `inc_${Date.now()}`, name: tmpIncName, type: tmpIncType, amount: tmpIncAmt }]);
+    }
+  };
+
+  const removeExtraIncome = (id: string) => {
+    setExtraIncomes(extraIncomes.filter(inc => inc.id !== id));
+  };
 
   // --- 3. 房產購屋與房貸寬限期模組 ---
   const [hasHouse, setHasHouse] = useState(false);
@@ -140,7 +162,9 @@ export default function Home() {
           years: 30, grace: graceYears, rate: mortgageRate, method: "本利平均", replace_rent: true, claim_tax: true
         }] : [],
         debts: [],
-        extra_incomes: [],
+        extra_incomes: extraIncomes.map(inc => ({
+          id: inc.id, name: inc.name, type: inc.type, monthly_amt: inc.amount
+        })),
         family: {
           has_spouse: hasSpouse, has_father: hasFather, has_mother: hasMother, has_grand: false,
           sp_age: spAge, sp_life: 88, sp_salary: 0, sp_other_inc: 0, sp_wealth: 0, sp_add: 0, sp_rate: 0, sp_disabled: spLtc, sp_ltc: spLtc,
@@ -157,7 +181,7 @@ export default function Home() {
           mil_rank: "", mil_salary: 0, mil_years: 0, mil_type: "", is_rich: false, fm_wage: 0, fm_vol: 0
         },
         main_salary: mainSalary, 
-        base_m_exp: baseExp // 這裡將加總後的總開銷送給後端
+        base_m_exp: baseExp 
       };
 
       const response = await fetch("https://wealth-dashboard-api.onrender.com/api/v1/wealth/simulate", {
@@ -245,14 +269,13 @@ export default function Home() {
             </h2>
             
             {/* 模組 1: 時間軸與基本資產 */}
-            <div className="border border-slate-800 rounded-lg overflow-hidden">
-              <button onClick={() => toggleSection('timeline')} className="w-full bg-slate-950 px-4 py-3 text-left font-semibold text-slate-200 flex justify-between items-center hover:bg-slate-900 transition-colors">
+            <div className="border border-slate-800 rounded-lg overflow-hidden bg-slate-900/50">
+              <button onClick={() => toggleSection('timeline')} className="w-full bg-slate-950 px-4 py-3 text-left font-semibold text-slate-200 flex justify-between items-center hover:bg-slate-900 transition-colors border-b border-slate-800">
                 <span>📊 基礎資產與全局時間軸</span>
                 <span className="text-xs text-blue-400">{activeSection === 'timeline' ? '▲' : '▼'}</span>
               </button>
               {activeSection === 'timeline' && (
-                // ⚠️ 這裡將 p-4 改成了 p-5 pb-6，加大底部留白防止截斷
-                <div className="p-5 pb-8 bg-slate-900/50 space-y-5 border-t border-slate-800 text-sm">
+                <div className="p-5 space-y-5 text-sm">
                   <div>
                     <label className="flex justify-between text-xs text-slate-400 mb-2">
                       <span>客戶目前年齡</span>
@@ -281,30 +304,65 @@ export default function Home() {
                       <input type="number" step="0.1" value={stockRate} onChange={(e) => setStockRate(Number(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-1.5 text-white font-mono focus:border-blue-500"/>
                     </div>
                   </div>
+                  {/* 👇 這個強制隱形墊片確保輸入框絕對不會被裁切 */}
+                  <div className="h-4 w-full shrink-0"></div>
                 </div>
               )}
             </div>
 
-            {/* 模組 2: 收支與勞退設定 (細項展開版) */}
-            <div className="border border-slate-800 rounded-lg overflow-hidden">
-              <button onClick={() => toggleSection('pension')} className="w-full bg-slate-950 px-4 py-3 text-left font-semibold text-slate-200 flex justify-between items-center hover:bg-slate-900 transition-colors">
+            {/* 模組 2: 收支與勞退設定 (全配多元收入版) */}
+            <div className="border border-slate-800 rounded-lg overflow-hidden bg-slate-900/50">
+              <button onClick={() => toggleSection('pension')} className="w-full bg-slate-950 px-4 py-3 text-left font-semibold text-slate-200 flex justify-between items-center hover:bg-slate-900 transition-colors border-b border-slate-800">
                 <span>💰 收入、開銷明細與社會保險</span>
                 <span className="text-xs text-blue-400">{activeSection === 'pension' ? '▲' : '▼'}</span>
               </button>
               {activeSection === 'pension' && (
-                <div className="p-5 pb-8 bg-slate-900/50 space-y-6 border-t border-slate-800 text-sm">
+                <div className="p-5 space-y-6 text-sm">
                   
-                  {/* 薪資輸入 */}
-                  <div>
-                    <label className="block text-xs text-slate-400 mb-1">主業月薪 (元)</label>
-                    <input type="number" step="1000" value={mainSalary} onChange={(e) => setMainSalary(Number(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-1.5 text-white font-mono focus:border-blue-500"/>
+                  {/* 薪資與動態額外所得 */}
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-xs text-emerald-400 font-bold mb-1">💵 主業薪資/月 (元)</label>
+                      <input type="number" step="1000" value={mainSalary} onChange={(e) => setMainSalary(Number(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-1.5 text-white font-mono focus:border-emerald-500"/>
+                    </div>
+                    
+                    <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-3">
+                      <label className="block text-xs text-emerald-400 font-bold">➕ 其他各類所得 (月收)</label>
+                      <select value={tmpIncType} onChange={(e) => setTmpIncType(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-white text-xs">
+                        <option value="執行業務-一般(9A, 扣30%成本)">執行業務-一般(9A, 扣30%成本)</option>
+                        <option value="執行業務-講演/稿費(9B, 享18萬免稅)">執行業務-講演/稿費(9B, 享18萬免稅)</option>
+                        <option value="租賃所得(51, 扣43%成本)">租賃所得(51, 扣43%成本)</option>
+                        <option value="營利/股利所得(54)">營利所得(54)</option>
+                        <option value="其他所得(92)">其他所得(92)</option>
+                      </select>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input type="text" value={tmpIncName} onChange={(e) => setTmpIncName(e.target.value)} placeholder="兼職/收租名稱" className="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-white text-xs"/>
+                        <input type="number" step="1000" value={tmpIncAmt} onChange={(e) => setTmpIncAmt(Number(e.target.value))} placeholder="月收(元)" className="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-white text-xs font-mono"/>
+                      </div>
+                      <button onClick={addExtraIncome} className="w-full bg-emerald-900/50 hover:bg-emerald-800 border border-emerald-800 text-emerald-300 py-1.5 rounded text-xs transition-colors font-bold">➕ 新增額外所得</button>
+                      
+                      {/* 已新增的動態所得列表 */}
+                      {extraIncomes.length > 0 && (
+                        <div className="pt-2 border-t border-slate-800 space-y-2 max-h-[120px] overflow-y-auto pr-1">
+                          {extraIncomes.map(inc => (
+                            <div key={inc.id} className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-700 text-xs">
+                              <div>
+                                <p className="font-bold text-emerald-300">{inc.name}</p>
+                                <p className="text-[10px] text-slate-400">{inc.type.split(',')[0]} - <span className="font-mono text-white">{inc.amount}</span> 元/月</p>
+                              </div>
+                              <button onClick={() => removeExtraIncome(inc.id)} className="text-red-400 hover:text-red-300 font-bold px-1">✕</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   {/* 6 大消費細項面板 */}
                   <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 space-y-4">
                     <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                      <span className="text-sm font-bold text-slate-300">每月總開銷 (元)</span>
-                      <span className="text-orange-400 font-bold text-lg font-mono">{baseExp.toLocaleString()}</span>
+                      <span className="text-sm font-bold text-orange-400">💸 每月總開銷 (元)</span>
+                      <span className="text-orange-300 font-bold text-lg font-mono">{baseExp.toLocaleString()}</span>
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div>
@@ -316,7 +374,7 @@ export default function Home() {
                         <input type="number" step="500" value={mRent} onChange={(e) => setMRent(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-white font-mono focus:border-orange-500"/>
                       </div>
                       <div>
-                        <label className="block text-[11px] text-slate-400 mb-1">一般醫療/壽險</label>
+                        <label className="block text-[11px] text-slate-400 mb-1">一般醫療/壽險保費</label>
                         <input type="number" step="500" value={mInsurance} onChange={(e) => setMInsurance(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-white font-mono focus:border-orange-500"/>
                       </div>
                       <div>
@@ -328,16 +386,16 @@ export default function Home() {
                         <input type="number" step="500" value={mParents} onChange={(e) => setMParents(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-white font-mono focus:border-orange-500"/>
                       </div>
                       <div>
-                        <label className="block text-[11px] text-slate-400 mb-1">娛樂/其他</label>
+                        <label className="block text-[11px] text-slate-400 mb-1">娛樂/旅遊/其他</label>
                         <input type="number" step="500" value={mOther} onChange={(e) => setMOther(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-white font-mono focus:border-orange-500"/>
                       </div>
                     </div>
                   </div>
 
                   {/* 勞保設定 */}
-                  <div className="space-y-3">
+                  <div className="space-y-3 border-t border-slate-800 pt-4">
                     <div>
-                      <label className="block text-xs text-slate-400 mb-1">職業退休金制度別</label>
+                      <label className="block text-xs text-slate-400 mb-1">職業社會保險制度別</label>
                       <select value={pensionMode} onChange={(e) => setPensionMode(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-1.5 text-white focus:border-blue-500">
                         <option value="💼 一般勞工">💼 一般勞工 (勞保+勞退自動擇優)</option>
                         <option value="🏛️ 公教人員">🏛️ 公教人員 (退撫舊制/新改個人專戶)</option>
@@ -355,18 +413,21 @@ export default function Home() {
                       </div>
                     )}
                   </div>
+                  
+                  {/* 隱形墊片 */}
+                  <div className="h-4 w-full shrink-0"></div>
                 </div>
               )}
             </div>
 
             {/* 模組 3: 不動產與貸款精算 */}
-            <div className="border border-slate-800 rounded-lg overflow-hidden">
-              <button onClick={() => toggleSection('house')} className="w-full bg-slate-950 px-4 py-3 text-left font-semibold text-slate-200 flex justify-between items-center hover:bg-slate-900 transition-colors">
+            <div className="border border-slate-800 rounded-lg overflow-hidden bg-slate-900/50">
+              <button onClick={() => toggleSection('house')} className="w-full bg-slate-950 px-4 py-3 text-left font-semibold text-slate-200 flex justify-between items-center hover:bg-slate-900 transition-colors border-b border-slate-800">
                 <span>🏠 不動產置換與貸款寬限期</span>
                 <span className="text-xs text-blue-400">{activeSection === 'house' ? '▲' : '▼'}</span>
               </button>
               {activeSection === 'house' && (
-                <div className="p-5 pb-8 bg-slate-900/50 space-y-4 border-t border-slate-800 text-sm">
+                <div className="p-5 space-y-4 text-sm">
                   <div className="flex items-center justify-between bg-slate-950 p-2 rounded border border-slate-800 mb-2">
                     <span className="text-xs text-slate-300">啟用購屋增置計劃</span>
                     <input type="checkbox" checked={hasHouse} onChange={(e) => setHasHouse(e.target.checked)} className="w-4 h-4 accent-orange-500 rounded cursor-pointer"/>
@@ -376,37 +437,39 @@ export default function Home() {
                       <div className="grid grid-cols-2 gap-4">
                         <div>
                           <label className="block text-xs text-slate-400 mb-1">房屋總價 (萬)</label>
-                          <input type="number" value={housePrice} onChange={(e) => setHousePrice(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white focus:border-orange-500"/>
+                          <input type="number" value={housePrice} onChange={(e) => setHousePrice(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-white focus:border-orange-500"/>
                         </div>
                         <div>
                           <label className="block text-xs text-slate-400 mb-1">自備款比例 (%)</label>
-                          <input type="number" value={downPct} onChange={(e) => setDownPct(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white focus:border-orange-500"/>
+                          <input type="number" value={downPct} onChange={(e) => setDownPct(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-white focus:border-orange-500"/>
                         </div>
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
                           <label className="block text-xs text-slate-400 mb-1">貸款利率 (%)</label>
-                          <input type="number" step="0.1" value={mortgageRate} onChange={(e) => setMortgageRate(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white focus:border-orange-500"/>
+                          <input type="number" step="0.1" value={mortgageRate} onChange={(e) => setMortgageRate(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-white focus:border-orange-500"/>
                         </div>
                         <div>
                           <label className="block text-xs text-slate-400 mb-1">貸款寬限期 (年)</label>
-                          <input type="number" max="5" value={graceYears} onChange={(e) => setGraceYears(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white focus:border-orange-500"/>
+                          <input type="number" max="5" value={graceYears} onChange={(e) => setGraceYears(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-white focus:border-orange-500"/>
                         </div>
                       </div>
                     </div>
                   )}
+                  {/* 隱形墊片 */}
+                  <div className="h-4 w-full shrink-0"></div>
                 </div>
               )}
             </div>
 
             {/* 模組 4: 家族成員與稅務扣除額 */}
-            <div className="border border-slate-800 rounded-lg overflow-hidden">
-              <button onClick={() => toggleSection('family')} className="w-full bg-slate-950 px-4 py-3 text-left font-semibold text-slate-200 flex justify-between items-center hover:bg-slate-900 transition-colors">
+            <div className="border border-slate-800 rounded-lg overflow-hidden bg-slate-900/50">
+              <button onClick={() => toggleSection('family')} className="w-full bg-slate-950 px-4 py-3 text-left font-semibold text-slate-200 flex justify-between items-center hover:bg-slate-900 transition-colors border-b border-slate-800">
                 <span>👨‍👩‍👧‍👦 家族成員與長照特扣額</span>
                 <span className="text-xs text-blue-400">{activeSection === 'family' ? '▲' : '▼'}</span>
               </button>
               {activeSection === 'family' && (
-                <div className="p-5 pb-8 bg-slate-900/50 space-y-4 border-t border-slate-800 text-sm">
+                <div className="p-5 space-y-4 text-sm">
                   {/* 配偶區塊 */}
                   <div className="bg-slate-950 p-2.5 rounded border border-slate-800 space-y-2">
                     <div className="flex items-center justify-between">
@@ -415,7 +478,7 @@ export default function Home() {
                     </div>
                     {hasSpouse && (
                       <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-800">
-                        <input type="number" value={spAge} placeholder="現年" onChange={(e) => setSpAge(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white text-xs"/>
+                        <input type="number" value={spAge} placeholder="現年" onChange={(e) => setSpAge(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-white text-xs"/>
                         <label className="flex items-center gap-2 cursor-pointer">
                           <input type="checkbox" checked={spLtc} onChange={(e) => setSpLtc(e.target.checked)} className="accent-purple-500"/>
                           <span className="text-[11px] text-purple-400">符合長照特扣</span>
@@ -433,7 +496,7 @@ export default function Home() {
                       </div>
                       {hasFather && (
                         <div className="space-y-2 pt-2 border-t border-slate-800">
-                          <input type="number" value={faAge} placeholder="年齡" onChange={(e) => setFaAge(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-0.5 text-white text-xs"/>
+                          <input type="number" value={faAge} placeholder="年齡" onChange={(e) => setFaAge(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white text-xs"/>
                           <label className="flex items-center gap-1 cursor-pointer text-[10px] text-purple-400">
                             <input type="checkbox" checked={faLtc} onChange={(e) => setFaLtc(e.target.checked)}/> <span>長照手冊</span>
                           </label>
@@ -447,7 +510,7 @@ export default function Home() {
                       </div>
                       {hasMother && (
                         <div className="space-y-2 pt-2 border-t border-slate-800">
-                          <input type="number" value={moAge} placeholder="年齡" onChange={(e) => setMoAge(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-0.5 text-white text-xs"/>
+                          <input type="number" value={moAge} placeholder="年齡" onChange={(e) => setMoAge(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white text-xs"/>
                           <label className="flex items-center gap-1 cursor-pointer text-[10px] text-purple-400">
                             <input type="checkbox" checked={moLtc} onChange={(e) => setMoLtc(e.target.checked)}/> <span>長照手冊</span>
                           </label>
@@ -466,7 +529,7 @@ export default function Home() {
                     
                     {kids.map((kid, idx) => (
                       <div key={kid.id} className="grid grid-cols-2 gap-2 items-center bg-slate-900 p-2 rounded border border-slate-700 mt-2 text-xs">
-                        <input type="number" value={kid.age} placeholder="小孩年紀" onChange={(e) => updateKid(idx, 'age', Number(e.target.value))} className="bg-slate-950 border border-slate-700 rounded px-2 py-0.5 text-white"/>
+                        <input type="number" value={kid.age} placeholder="小孩年紀" onChange={(e) => updateKid(idx, 'age', Number(e.target.value))} className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-white"/>
                         <label className="flex items-center justify-end gap-1 text-[11px] text-purple-400 cursor-pointer">
                           <input type="checkbox" checked={kid.ltc} onChange={(e) => updateKid(idx, 'ltc', e.target.checked)}/>
                           <span>長照/身障</span>
@@ -474,45 +537,47 @@ export default function Home() {
                       </div>
                     ))}
                   </div>
+                  {/* 隱形墊片 */}
+                  <div className="h-4 w-full shrink-0"></div>
                 </div>
               )}
             </div>
 
             {/* 模組 5: 專案保單與特定傳承規劃 */}
-            <div className="border border-slate-800 rounded-lg overflow-hidden">
-              <button onClick={() => toggleSection('insurance')} className="w-full bg-slate-950 px-4 py-3 text-left font-semibold text-slate-200 flex justify-between items-center hover:bg-slate-900 transition-colors">
+            <div className="border border-slate-800 rounded-lg overflow-hidden bg-slate-900/50">
+              <button onClick={() => toggleSection('insurance')} className="w-full bg-slate-950 px-4 py-3 text-left font-semibold text-slate-200 flex justify-between items-center hover:bg-slate-900 transition-colors border-b border-slate-800">
                 <span>🛡️ 專案保單與特定受益人關係人</span>
                 <span className="text-xs text-blue-400">{activeSection === 'insurance' ? '▲' : '▼'}</span>
               </button>
               {activeSection === 'insurance' && (
-                <div className="p-5 pb-8 bg-slate-900/50 space-y-3 border-t border-slate-800 text-xs">
+                <div className="p-5 space-y-3 text-xs">
                   <div className="bg-slate-950 p-3 rounded border border-slate-800 space-y-2">
-                    <input type="text" value={tmpInsName} onChange={(e) => setTmpInsName(e.target.value)} placeholder="保單自訂子名稱" className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white"/>
+                    <input type="text" value={tmpInsName} onChange={(e) => setTmpInsName(e.target.value)} placeholder="保單自訂子名稱" className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-white"/>
                     <div className="grid grid-cols-2 gap-2">
-                      <select value={tmpInsApp} onChange={(e) => setTmpInsApp(e.target.value)} className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white">
+                      <select value={tmpInsApp} onChange={(e) => setTmpInsApp(e.target.value)} className="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-white">
                         <option value="本人">要保人：本人</option>
                         <option value="配偶">要保人：配偶</option>
                       </select>
-                      <select value={tmpInsIns} onChange={(e) => setTmpInsIns(e.target.value)} className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white">
+                      <select value={tmpInsIns} onChange={(e) => setTmpInsIns(e.target.value)} className="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-white">
                         <option value="本人">被保人：本人</option>
                         <option value="配偶">被保人：配偶</option>
                       </select>
                     </div>
-                    <select value={tmpInsBen} onChange={(e) => setTmpInsBen(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white">
+                    <select value={tmpInsBen} onChange={(e) => setTmpInsBen(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-white">
                       <option value="法定繼承人">身故受益人：法定繼承人</option>
                       <option value="配偶">身故受益人：配偶</option>
                       <option value="指定特定子女">身故受益人：指定特定子女</option>
                     </select>
                     <div className="grid grid-cols-2 gap-2">
-                      <input type="number" value={tmpInsPremium} placeholder="年化保費(萬)" onChange={(e) => setTmpInsPremium(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white"/>
-                      <input type="number" value={tmpInsYears} placeholder="剩餘年期" onChange={(e) => setTmpInsYears(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white"/>
+                      <input type="number" value={tmpInsPremium} placeholder="年化保費(萬)" onChange={(e) => setTmpInsPremium(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-white"/>
+                      <input type="number" value={tmpInsYears} placeholder="剩餘年期" onChange={(e) => setTmpInsYears(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-white"/>
                     </div>
                     <div className="grid grid-cols-3 gap-2">
-                      <input type="number" value={tmpInsCv} placeholder="現有保價金" onChange={(e) => setTmpInsCv(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white"/>
-                      <input type="number" step="0.01" value={tmpInsIrr} placeholder="預期IRR%" onChange={(e) => setTmpInsIrr(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white"/>
-                      <input type="number" value={tmpInsDb} placeholder="身故保額" onChange={(e) => setTmpInsDb(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white"/>
+                      <input type="number" value={tmpInsCv} placeholder="現有保價金" onChange={(e) => setTmpInsCv(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-white"/>
+                      <input type="number" step="0.01" value={tmpInsIrr} placeholder="預期IRR%" onChange={(e) => setTmpInsIrr(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-white"/>
+                      <input type="number" value={tmpInsDb} placeholder="身故保額" onChange={(e) => setTmpInsDb(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-white"/>
                     </div>
-                    <button onClick={addInsurancePolicy} className="w-full bg-purple-900 hover:bg-purple-800 border border-purple-700 text-white py-1.5 rounded font-bold mt-1 transition-colors">
+                    <button onClick={addInsurancePolicy} className="w-full bg-purple-900 hover:bg-purple-800 border border-purple-700 text-white py-2 rounded font-bold mt-1 transition-colors">
                       📥 配置保單並啟動 3740萬 AMT 判定
                     </button>
                   </div>
@@ -530,6 +595,8 @@ export default function Home() {
                       ))}
                     </div>
                   )}
+                  {/* 隱形墊片 */}
+                  <div className="h-4 w-full shrink-0"></div>
                 </div>
               )}
             </div>
