@@ -99,6 +99,18 @@ export default function Home() {
     }
     return null;
   };
+  let realMonthlyPensionWan = "0.00";
+  let pensionCoverage = "0";
+  
+  if (simulationResult && simulationResult.trajectory) {
+    const retireData = simulationResult.trajectory.find((d: any) => d.年紀 === 65);
+    if (retireData) {
+        // 後端傳回的「收_年金收入」是年領總額 (元)，除以 12 換算成月領，再除以 10000 轉成萬
+        const monthlyPensionYuan = retireData.收_年金收入 / 12;
+        realMonthlyPensionWan = (monthlyPensionYuan / 10000).toFixed(2);
+        pensionCoverage = baseExp > 0 ? ((monthlyPensionYuan / baseExp) * 100).toFixed(0) : "0";
+    }
+  }
 
   return (
     <main className="min-h-screen bg-slate-950 text-white p-8 font-sans overflow-x-hidden">
@@ -191,9 +203,10 @@ export default function Home() {
           {/* 右側：圖表與 AI 講稿區 */}
           <div className="xl:col-span-9 space-y-8">
             {simulationResult && (
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
                 {[
-                  { label: "預估勞保月領", value: "約 2.8 萬", color: "text-blue-400" },
+                  // 👇 這裡改用真實變數 realMonthlyPensionWan
+                  { label: "預估年金月領", value: `約 ${realMonthlyPensionWan} 萬`, color: "text-blue-400" },
                   { label: "退休準備達成率", value: "85%", color: "text-emerald-400" },
                   { label: "遺產稅風險缺口", value: `${(simulationResult.trajectory.slice(-1)[0].預估遺產稅_萬 / 10).toFixed(1)} 萬`, color: "text-red-400" },
                   { label: "財務平衡年齡", value: "72 歲", color: "text-purple-400" }
@@ -250,8 +263,8 @@ export default function Home() {
                             
                             {/* 新增的勞退精算段落 */}
                             <p className="text-blue-200">
-                              經勞退引擎推算，於 65 歲退休時預估每月可領取勞保年金 <span className="text-white bg-blue-900 px-1 rounded">約 2.8 萬</span>，
-                              可覆蓋退休後約 <span className="text-white font-bold">{(28000 / baseExp * 100).toFixed(0)}%</span> 的基本開銷。
+                              經勞退引擎推算，於 65 歲退休時預估每月可領取勞保年金 <span className="text-white bg-blue-900 px-1 rounded">約 {realMonthlyPensionWan} 萬</span>，
+                              可覆蓋退休後約 <span className="text-white font-bold">{pensionCoverage}%</span> 的基本開銷。
                             </p>
 
                             <p>依台灣現行稅法，於預期壽命 <span className="text-white bg-emerald-900 px-1 rounded">{lifeExpectancy} 歲</span> 時，總資產將複利滾存至 <span className="text-white font-bold text-lg">{(simulationResult.trajectory.slice(-1)[0].總資產_萬).toLocaleString()} 萬</span>。</p>
