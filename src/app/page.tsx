@@ -700,3 +700,5 @@ export default function Home() {
     </main>
   );
 }
+
+nano src/app/page.tsx
