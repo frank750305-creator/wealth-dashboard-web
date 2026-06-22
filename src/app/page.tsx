@@ -3,6 +3,12 @@
 import { useState, useEffect } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Line, ComposedChart } from "recharts";
 
+const AIIcon = () => (
+  <svg className="w-6 h-6 text-emerald-400" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 6ZM12 6C13.66 6 15 7.34 15 9C15 10.66 13.66 12 12 12C10.34 12 9 10.66 9 9C9 7.34 10.34 6 12 6ZM12 20.2C9.5 20.2 7.29 18.93 6 17C6.03 15.01 10 13.9 12 13.9C13.99 13.9 17.97 15.01 18 17C16.71 18.93 14.5 20.2 12 20.2Z" fill="currentColor"/>
+  </svg>
+);
+
 export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const [simulationResult, setSimulationResult] = useState<any>(null);
@@ -58,7 +64,7 @@ export default function Home() {
   const [kids, setKids] = useState<any[]>([]);
 
   // --- ⚙️ 完美復刻 Streamlit 的 16 大法規常數控制台狀態 ---
-  const [taxParams, setTaxParams] = useState<Dict<string, number>>({
+  const [taxParams, setTaxParams] = useState<Record<string, number>>({
     exemption: 9.7, std_deduction: 13.1, salary_deduction: 21.8, inc_disabled_ded: 21.8,
     savings_limit: 27.0, amt_threshold: 750.0, rent_limit: 18.0, mortgage_limit: 30.0,
     ins_limit: 2.4, retire_exempt: 81.4, manual_itemized: 0.0, basic_living: 21.8,
@@ -70,34 +76,52 @@ export default function Home() {
   };
 
   const addExtraIncome = () => setExtraIncomes([...extraIncomes, { id: `inc_${Date.now()}`, name: tmpIncName, type: tmpIncType, amount: tmpIncAmt }]);
-  const addAssetAccount = () => setAssets([...assets, { id: `ast_${Date.now()}`, name: tmpAssetName, type: tmpAssetType, value: tmpAssetVal, rate: tmpAssetRate / 100, monthly_add: 0, add_years: 0, tax_type: tmpAssetTax }]);
+  const addAssetAccount = () => setAssets([...assets, { id: `ast_${Date.now()}`, name: tmpAssetName, type: tmpAssetType, value: tmpAssetVal, rate: tmpAssetRate, monthly_add: 0, add_years: 0, tax_type: tmpAssetTax }]);
   const addInsurancePolicy = () => setInsurances([...insurances, { id: `ins_${Date.now()}`, name: "傳世富足", type: "人壽保險", app: "本人", ins: "本人", ben: ["法定繼承人"], premium: 20, years: 6, cv: 100, irr: 2.25, db: 500, survival: 0, survival_age: 65 }]);
 
   const handleSimulate = async () => {
     setIsLoading(true);
     try {
+      // 🛡️ 完美對齊後端 Pydantic Schema 的封裝包裹
+      const payload = {
+        timeline: { 
+          current_age: currentAge, life_expectancy: lifeExpectancy, retire_age: retireAge, 
+          salary_growth: salaryGrowth / 100, inflation_rate: inflationRate / 100, replacement_rate: replacementRate / 100, roi_after_retire: roiAfterRetire / 100 
+        },
+        assets: assets.length > 0 ? assets.map(a => ({...a, rate: a.rate / 100})) : [{ id: "c", name: "日常活存", type: "現金", value: 500, rate: 0.01, monthly_add: 0, add_years: 0, tax_type: "國內利息(計入27萬)" }],
+        insurances: insurances.map(ins => ({ ...ins, ben_allocation: "均分比例", custom_ben: "", irr: ins.irr / 100 })),
+        mortgages: hasHouse ? [{ id: "h", name: "自住房", start: currentAge, total_price: tmpHPrice, loan_amount: tmpHPrice * 0.8, years: 30, grace: tmpHGrace, rate: 2.1, method: "本利平均", replace_rent: true, claim_tax: true }] : [],
+        debts: debts,
+        extra_incomes: extraIncomes.map(inc => ({ id: inc.id, name: inc.name, type: inc.type, monthly_amt: inc.amount })),
+        events: [],
+        family: { 
+          has_spouse: hasSpouse, has_father: hasFather, has_mother: hasMother, has_grand: false, 
+          sp_age: currentAge, sp_life: 88, sp_wealth: spWealth, sp_disabled: spLtc, sp_ltc: spLtc, 
+          kids: kids.map(k => ({ id: k.id, age: k.age, dep_age: 22, life: 85, disabled: false, ltc: k.ltc })), 
+          siblings: [], daily_tool_val: 0, job_tool_val: 0 
+        },
+        pension: { mode: "💼 一般勞工", lb_salary: 45800, lb_current_years: 15 },
+        tax_params: taxParams,
+        main_salary: mainSalary,
+        base_m_exp: baseExp
+      };
+
       const response = await fetch("https://wealth-dashboard-api.onrender.com/api/v1/wealth/simulate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          timeline: { current_age: currentAge, life_expectancy: lifeExpectancy, retire_age: retireAge, salary_growth: salaryGrowth, inflation_rate: inflationRate, replacement_rate: replacementRate, roi_after_retire: roiAfterRetire },
-          assets: assets.length > 0 ? assets : [{ id: "c", name: "日常活存", type: "現金", value: 500, rate: 0.01, monthly_add: 0, add_years: 0, tax_type: "國內利息(計入27萬)" }],
-          insurances: insurances,
-          mortgages: hasHouse ? [{ id: "h", name: "自住房", start: currentAge, total_price: tmpHPrice, loan_amount: tmpHPrice * 0.8, years: 30, grace: tmpHGrace, rate: 2.1, method: "本利平均", replace_rent: true, claim_tax: true }] : [],
-          debts: debts,
-          extra_incomes: extraIncomes,
-          events: [],
-          family: { has_spouse: hasSpouse, has_father: hasFather, has_mother: hasMother, has_grand: false, sp_age: currentAge, sp_life: 88, sp_wealth: spWealth, sp_disabled: spLtc, sp_ltc: spLtc, kids: kids, siblings: [], daily_tool_val: 0, job_tool_val: 0 },
-          pension: { mode: "💼 一般勞工", lb_salary: 45800, lb_current_years: 15 },
-          tax_params: taxParams,
-          main_salary: mainSalary,
-          base_m_exp: baseExp
-        }),
+        body: JSON.stringify(payload),
       });
+      
+      // 🛡️ 攔截伺服器詳細報錯訊息，方便未來除錯
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`伺服器拒絕請求 (代碼: ${response.status})\n詳細原因: ${errText}`);
+      }
+      
       const data = await response.json();
       setSimulationResult(data);
-    } catch (e) {
-      alert("全端精算連線異常");
+    } catch (e: any) {
+      alert(`連線或運算異常:\n${e.message}`);
     } finally {
       setIsLoading(false);
     }
@@ -105,13 +129,13 @@ export default function Home() {
 
   const snapReport = simulationResult?.trajectory?.find((d: any) => d.年紀 == selectedReportAge);
 
-  // --- 🏛️ 完美復刻 Streamlit 民法繼承應繼分與特留分雙軌試算函數 ---
+  // --- 🏛️ 完美復刻 Streamlit 民法繼承應繼分與特留分雙軌試算 ---
   const renderInheritanceTable = () => {
     if (!snapReport) return null;
     const base_yuan = snapReport.民法繼承基數 * 10000;
     const payouts = snapReport.保單理賠分配 || {};
     
-    let rows = [];
+    let rows: any[] = [];
     let kids_cnt = kidCount;
     let total_heads = kids_cnt + (hasSpouse ? 1 : 0);
     
@@ -119,14 +143,14 @@ export default function Home() {
       const share_ratio = total_heads > 0 ? 1 / total_heads : 1.0;
       const stat_amt = base_yuan * share_ratio;
       const ins_amt = payouts["配偶"] || 0;
-      rows.append({ role: "配偶", ratio: `${(share_ratio*100).toFixed(1)}%`, stat: stat_amt, forced: stat_amt * 0.5, ins: ins_amt, total: stat_amt + ins_amt });
+      rows.push({ role: "配偶", ratio: `${(share_ratio*100).toFixed(1)}%`, stat: stat_amt, forced: stat_amt * 0.5, ins: ins_amt, total: stat_amt + ins_amt });
     }
     
     for (let i = 0; i < kids_cnt; i++) {
       const share_ratio = total_heads > 0 ? 1 / total_heads : 0;
       const stat_amt = base_yuan * share_ratio;
       const ins_amt = payouts["指定特定子女"] ? (payouts["指定特定子女"] / kids_cnt) : 0;
-      rows.append({ role: `子女 ${i+1}`, ratio: `${(share_ratio*100).toFixed(1)}%`, stat: stat_amt, forced: stat_amt * 0.5, ins: ins_amt, total: stat_amt + ins_amt });
+      rows.push({ role: `子女 ${i+1}`, ratio: `${(share_ratio*100).toFixed(1)}%`, stat: stat_amt, forced: stat_amt * 0.5, ins: ins_amt, total: stat_amt + ins_amt });
     }
 
     return (
@@ -170,7 +194,7 @@ export default function Home() {
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
           
           {/* 左側：模組化控制台 */}
-          <div className="xl:col-span-4 bg-slate-900 border border-slate-800 p-6 rounded-xl space-y-4 max-h-[85vh] overflow-y-auto pb-32">
+          <div className="xl:col-span-4 bg-slate-900 border border-slate-800 p-6 rounded-xl space-y-4 max-h-[85vh] overflow-y-auto pb-32 custom-scrollbar">
             
             {/* 1. 時間軸假設 */}
             <div className="border border-slate-800 rounded-lg bg-slate-950/40 p-3 space-y-3">
@@ -227,7 +251,7 @@ export default function Home() {
                 {/* 1. 數據趨勢與 Data Grid 明細 */}
                 <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl space-y-4">
                   <h3 className="text-sm font-bold text-blue-400">📋 終身資產、現金流與稅務財富軌跡數據表 (Data Grid)</h3>
-                  <div className="overflow-x-auto max-h-[350px] border border-slate-800 rounded-lg">
+                  <div className="overflow-x-auto max-h-[350px] border border-slate-800 rounded-lg custom-scrollbar">
                     <table className="w-full text-left border-collapse text-xs whitespace-nowrap">
                       <thead className="bg-slate-950 sticky top-0 z-10 shadow">
                         <tr className="text-slate-400 border-b border-slate-800">
