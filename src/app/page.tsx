@@ -15,7 +15,7 @@ export default function Home() {
   const [activeSection, setActiveSection] = useState<string>("timeline");
   const [selectedReportAge, setSelectedReportAge] = useState<number>(40);
 
-  // --- 1. 全局時間軸與所得稅常數 ---
+  // --- 1. 全局時間軸與精算參數 ---
   const [currentAge, setCurrentAge] = useState(40);
   const [lifeExpectancy, setLifeExpectancy] = useState(85);
   const [retireAge, setRetireAge] = useState(65);
@@ -24,10 +24,7 @@ export default function Home() {
   const [replacementRate, setReplacementRate] = useState(70);
   const [roiAfterRetire, setRoiAfterRetire] = useState(3.0);
 
-  // 同步連動報表選擇年齡
-  useEffect(() => {
-    setSelectedReportAge(currentAge);
-  }, [currentAge]);
+  useEffect(() => { setSelectedReportAge(currentAge); }, [currentAge]);
 
   // --- 2. 收入、六大常態開銷與動態多元所得池 ---
   const [mainSalary, setMainSalary] = useState(50000);
@@ -48,7 +45,7 @@ export default function Home() {
   const [pensionMode, setPensionMode] = useState("💼 一般勞工");
   const [lbYears, setLbYears] = useState(10);
 
-  // --- 4. 動態資產池 (動態新增自訂子帳戶) ---
+  // --- 4. 動態資產池 ---
   const [assets, setAssets] = useState<any[]>([
     { id: "asset_cash_default", name: "日常活存", type: "現金", value: 8000, rate: 0.01, monthly_add: 0, add_years: 0, tax_type: "國內利息(計入27萬)" }
   ]);
@@ -59,28 +56,24 @@ export default function Home() {
   const [tmpAssetTax, setTmpAssetTax] = useState("國內股利(8.5%抵減/分開)");
 
   // --- 5. 不動產購屋置換與信貸債務模組 ---
-  const [mortgages, setMortgages] = useState<any[]>([]);
-  const [tmpHName, setTmpHName] = useState("台北自住房");
-  const [tmpHStart, setTmpHStart] = useState(40);
-  const [tmpHPrice, setTmpHPrice] = useState(3000);
+  const [hasHouse, setHasHouse] = useState(false);
+  const [tmpHName, setTmpHName] = useState("自住房");
+  const [tmpHPrice, setTmpHPrice] = useState(2500);
   const [tmpHDownPct, setTmpHDownPct] = useState(20);
   const [tmpHRate, setTmpHRate] = useState(2.1);
   const [tmpHGrace, setTmpHGrace] = useState(3);
-
+  
   const [debts, setDebts] = useState<any[]>([]);
-  const [tmpDName, setTmpDName] = useState("周轉信用貸款");
-  const [tmpDStart, setTmpDStart] = useState(40);
+  const [tmpDName, setTmpDName] = useState("信用貸款");
   const [tmpDAmt, setTmpDAmt] = useState(100);
   const [tmpDYears, setTmpDYears] = useState(7);
   const [tmpDRate, setTmpDRate] = useState(3.5);
 
-  // --- 6. 家族成員與稅務扶養扣除額 (全配完全體) ---
+  // --- 6. 家族成員與稅務扶養扣除額 (全配版) ---
   const [hasSpouse, setHasSpouse] = useState(false);
   const [spAge, setSpAge] = useState(40);
   const [spLtc, setSpLtc] = useState(false);
   const [spWealth, setSpWealth] = useState(0);
-  const [spAdd, setSpAdd] = useState(0);
-  const [spRate, setSpRate] = useState(0);
 
   const [hasFather, setHasFather] = useState(false);
   const [faAge, setFaAge] = useState(70);
@@ -96,10 +89,7 @@ export default function Home() {
 
   // --- 7. 獨立保單管理陣列模組 ---
   const [insurances, setInsurances] = useState<any[]>([]);
-  const [tmpInsName, setTmpInsName] = useState("富邦傳世富足");
-  const [tmpInsType, setTmpInsType] = useState("人壽保險");
-  const [tmpInsApp, setTmpInsApp] = useState("本人");
-  const [tmpInsIns, setTmpInsIns] = useState("本人");
+  const [tmpInsName, setTmpInsName] = useState("傳世保單");
   const [tmpInsBen, setTmpInsBen] = useState("法定繼承人");
   const [tmpInsPremium, setTmpInsPremium] = useState(20);
   const [tmpInsYears, setTmpInsYears] = useState(6);
@@ -107,39 +97,19 @@ export default function Home() {
   const [tmpInsIrr, setTmpInsIrr] = useState(2.25);
   const [tmpInsDb, setTmpInsDb] = useState(500);
 
-  // --- 8. 未來重大財務事件與專款專用 ---
+  // --- 8. 未來重大財務事件 ---
   const [events, setEvents] = useState<any[]>([]);
-  const [tmpEvName, setTmpEvName] = useState("子女海外留學基金");
+  const [tmpEvName, setTmpEvName] = useState("子女留學準備金");
   const [tmpEvAge, setTmpEvAge] = useState(50);
-  const [tmpEvAmt, setTmpEvAmt] = useState(-400); // 支出為負
+  const [tmpEvAmt, setTmpEvAmt] = useState(-400); // 負數代表支出
   const [tmpEvDuration, setTmpEvDuration] = useState(4);
 
-  // --- 動態列表新增/刪除常設處理器 ---
-  const addExtraIncome = () => {
-    if (tmpIncAmt > 0) {
-      setExtraIncomes([...extraIncomes, { id: `inc_${Date.now()}`, name: tmpIncName, type: tmpIncType, amount: tmpIncAmt }]);
-    }
-  };
-  const addAssetAccount = () => {
-    if (tmpAssetVal > 0) {
-      setAssets([...assets, { id: `ast_${Date.now()}`, name: tmpAssetName, type: tmpAssetType, value: tmpAssetVal, rate: tmpAssetRate / 100, monthly_add: 0, add_years: 0, tax_type: tmpAssetTax }]);
-    }
-  };
-  const addMortgagePlan = () => {
-    if (tmpHPrice > 0) {
-      setMortgages([...mortgages, { id: `house_${Date.now()}`, name: tmpHName, start: tmpHStart, total_price: tmpHPrice, loan_amount: tmpHPrice * (1 - tmpHDownPct / 100), years: 30, grace: tmpHGrace, rate: tmpHRate, method: "本利平均", replace_rent: true, claim_tax: true }]);
-    }
-  };
-  const addDebtPlan = () => {
-    if (tmpDAmt > 0) {
-      setDebts([...debts, { id: `debt_${Date.now()}`, name: tmpDName, start: tmpDStart, loan_amount: tmpDAmt, years: tmpDYears, rate: tmpDRate, monthly_pay: Math.round((tmpDAmt * 10000 * (tmpDRate/100/12)) / (1 - Math.pow(1 + tmpDRate/100/12, -tmpDYears*12))) }]);
-    }
-  };
-  const addFutureEvent = () => {
-    if (tmpEvAmt !== 0) {
-      setEvents([...events, { id: `ev_${Date.now()}`, label: tmpEvName, age: tmpEvAge, amount: tmpEvAmt * 10000, target: "預設現金流", duration: tmpEvDuration }]);
-    }
-  };
+  // --- 列表新增功能器 ---
+  const addExtraIncome = () => setExtraIncomes([...extraIncomes, { id: `inc_${Date.now()}`, name: tmpIncName, type: tmpIncType, amount: tmpIncAmt }]);
+  const addAssetAccount = () => setAssets([...assets, { id: `ast_${Date.now()}`, name: tmpAssetName, type: tmpAssetType, value: tmpAssetVal, rate: tmpAssetRate / 100, monthly_add: 0, add_years: 0, tax_type: tmpAssetTax }]);
+  const addDebtPlan = () => setDebts([...debts, { id: `d_${Date.now()}`, name: tmpDName, start: currentAge, loan_amount: tmpDAmt, years: tmpDYears, rate: tmpDRate, monthly_pay: Math.round((tmpDAmt * 10000 * (tmpDRate/100/12)) / (1 - Math.pow(1 + tmpDRate/100/12, -tmpDYears*12))) }]);
+  const addInsurancePolicy = () => setInsurances([...insurances, { id: `ins_${Date.now()}`, name: tmpInsName, type: "人壽保險", app: "本人", ins: "本人", ben: tmpInsBen, premium: tmpInsPremium, years: tmpInsYears, cv: tmpInsCv, irr: tmpInsIrr, db: tmpInsDb, survival: 0, survival_age: 65 }]);
+  const addFutureEvent = () => setEvents([...events, { id: `ev_${Date.now()}`, label: tmpEvName, age: tmpEvAge, amount: tmpEvAmt * 10000, target: "預設現金流", duration: tmpEvDuration }]);
 
   const handleKidChange = (count: number) => {
     setKidCount(count);
@@ -154,22 +124,16 @@ export default function Home() {
     setIsLoading(true);
     try {
       const payload = {
-        timeline: { 
-          current_age: currentAge, life_expectancy: lifeExpectancy, retire_age: retireAge,
-          salary_growth: salaryGrowth / 100, inflation_rate: inflationRate / 100, replacement_rate: replacementRate / 100, roi_after_retire: roiAfterRetire / 100
-        },
+        timeline: { current_age: currentAge, life_expectancy: lifeExpectancy, retire_age: retireAge, salary_growth: salaryGrowth / 100, inflation_rate: inflationRate / 100, replacement_rate: replacementRate / 100, roi_after_retire: roiAfterRetire / 100 },
         assets: assets,
-        insurances: insurances.map(ins => ({
-          id: ins.id, name: ins.name, type: ins.type, app: ins.app, ins: ins.ins, ben: ins.ben,
-          premium: ins.premium, years: ins.years, cv: ins.cv, irr: ins.irr / 100, db: ins.db, survival: ins.survival, survival_age: ins.survival_age
-        })),
-        mortgages: mortgages,
+        insurances: insurances.map(ins => ({ ...ins, irr: ins.irr / 100 })),
+        mortgages: hasHouse ? [{ id: "house_1", name: tmpHName, start: currentAge, total_price: tmpHPrice, loan_amount: tmpHPrice * (1 - tmpHDownPct / 100), years: 30, grace: tmpHGrace, rate: tmpHRate, method: "本利平均", replace_rent: true, claim_tax: true }] : [],
         debts: debts,
         extra_incomes: extraIncomes.map(inc => ({ id: inc.id, name: inc.name, type: inc.type, monthly_amt: inc.amount })),
         events: events,
         family: {
           has_spouse: hasSpouse, has_father: hasFather, has_mother: hasMother, has_grand: false,
-          sp_age: spAge, sp_life: 88, sp_salary: 0, sp_other_inc: 0, sp_wealth: spWealth, sp_add: spAdd, sp_rate: spRate, sp_disabled: spLtc, sp_ltc: spLtc,
+          sp_age: spAge, sp_life: 88, sp_salary: 0, sp_other_inc: 0, sp_wealth: spWealth, sp_add: 0, sp_rate: 0, sp_disabled: spLtc, sp_ltc: spLtc,
           fa_age: faAge, fa_life: 85, fa_claim_tax: true, fa_tax_inc: 0, fa_disabled: faLtc, fa_ltc: faLtc,
           mo_age: moAge, mo_life: 85, mo_claim_tax: true, mo_tax_inc: 0, mo_disabled: moLtc, mo_ltc: moLtc,
           gp_count: 0, gp_age: 75, gp_life: 85, gp_claim_tax: false, gp_tax_inc: 0, gp_dependent: false, gp_disabled_count: 0, gp_ltc_count: 0,
@@ -192,15 +156,27 @@ export default function Home() {
       if (!response.ok) throw new Error(`API 錯誤`);
       const data = await response.json();
       setSimulationResult(data);
-
     } catch (error: any) {
-      alert("全端微服務交織精算連線異常，請確認後端大腦已開機。");
+      alert("連線後端引擎失敗。請確認伺服器是否運轉中。");
     } finally {
       setIsLoading(false);
     }
   };
 
-  // --- 動態數據試算解析 ---
+  const CustomTooltip = ({ active, payload, label }: any) => {
+    if (active && payload && payload.length) {
+      return (
+        <div className="bg-slate-800 border border-slate-700 p-4 rounded shadow-xl">
+          <p className="text-slate-300 mb-2 font-bold">{`${label} 歲`}</p>
+          {payload.map((entry: any, index: number) => (
+            <p key={index} style={{ color: entry.color }} className="text-sm">{entry.name}: {entry.value.toLocaleString()} 萬</p>
+          ))}
+        </div>
+      );
+    }
+    return null;
+  };
+
   let realMonthlyPensionWan = "0.00";
   let pensionCoverage = "0";
   let totalEstateTaxGapWan = "0.0";
@@ -210,13 +186,12 @@ export default function Home() {
     const retireData = simulationResult.trajectory.find((d: any) => d.年紀 == 65);
     if (retireData) {
         const rawPension = retireData.收_年金收入;
-        realMonthlyPensionWan = (rawPension !== undefined ? (rawPension / 12 / 10000) : (minSalary > 45800 ? 45800 : mainSalary) * lbYears * 0.0155 / 10000).toFixed(2);
+        realMonthlyPensionWan = (rawPension !== undefined ? (rawPension / 12 / 10000) : (mainSalary > 45800 ? 45800 : mainSalary) * lbYears * 0.0155 / 10000).toFixed(2);
         pensionCoverage = baseExp > 0 ? ((parseFloat(realMonthlyPensionWan) * 10000 / baseExp) * 100).toFixed(0) : "0";
     }
     const finalData = simulationResult.trajectory.slice(-1)[0];
     if (finalData) totalEstateTaxGapWan = (finalData.預估遺產稅_萬 || (finalData.預估遺產稅 / 10000) || 0).toFixed(1);
 
-    // 逆算器加總核算
     events.forEach(ev => {
       const yearsToGo = ev.age - currentAge;
       if (yearsToGo > 0 && ev.amount < 0) {
@@ -230,17 +205,16 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-slate-950 text-white p-4 md:p-8 font-sans overflow-x-hidden">
       <div className="max-w-[1750px] mx-auto">
-        
         <header className="flex flex-col lg:flex-row justify-between items-start lg:items-center border-b border-slate-800 pb-6 mb-8 gap-4">
           <div>
             <h1 className="text-2xl md:text-3xl font-bold tracking-wider text-slate-100 flex items-center gap-3">
               🛡️ 全方位資產配置與民法傳承精算系統 <span className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded font-mono">V3完全體</span>
             </h1>
-            <p className="text-slate-400 mt-2 text-xs md:text-sm">AI-Driven Wealth & Succession Planning System (Phase 4: 全功能封頂核載)</p>
+            <p className="text-slate-400 mt-2 text-xs md:text-sm">AI-Driven Wealth & Succession Planning System (Phase 4: 全功能核載)</p>
           </div>
           <div className="bg-slate-900 px-4 py-2 rounded border border-slate-800 text-xs text-emerald-400 flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            多維微服務數據交織管線已全線暢通
+            法規引擎管線全線暢通
           </div>
         </header>
 
@@ -249,44 +223,36 @@ export default function Home() {
           {/* 左側：極限加長版模組化控制台 */}
           <div className="xl:col-span-4 bg-slate-900 border border-slate-800 p-4 md:p-6 rounded-xl shadow-2xl flex flex-col h-fit max-h-[88vh] overflow-y-auto space-y-4">
             <h2 className="text-base font-bold text-blue-400 pb-2 border-b border-slate-800 flex justify-between items-center">
-              <span>▍ 決策決斷控制中樞</span>
+              <span>▍ 決策控制中樞</span>
               <span className="text-[10px] text-slate-500 font-mono">SCROLLABLE</span>
             </h2>
             
-            <div className="space-y-4 pb-32"> {/* 🛡️ 底部強制墊高留白 確保絕不裁切 */}
+            {/* 🛡️ 底部強制墊高 pb-32 保證輸入框不被裁切 */}
+            <div className="space-y-4 pb-32">
               
-              {/* 模組 1: 時間軸與精算假設 */}
+              {/* 1. 時間軸 */}
               <div className="border border-slate-800 rounded-lg bg-slate-950/40">
-                <button onClick={() => setActiveSection(activeSection === 'timeline' ? '' : 'timeline')} className="w-full bg-slate-950 px-4 py-2.5 text-left font-semibold text-xs text-slate-300 flex justify-between items-center">
-                  <span>📊 1. 全局時間軸與精算複利參數</span>
-                  <span>{activeSection === 'timeline' ? '▲' : '▼'}</span>
+                <button onClick={() => setActiveSection(activeSection === 'timeline' ? '' : 'timeline')} className="w-full bg-slate-950 px-4 py-2.5 text-left font-semibold text-xs text-slate-300 flex justify-between">
+                  <span>📊 1. 全局時間軸與通膨設定</span><span>{activeSection === 'timeline' ? '▲' : '▼'}</span>
                 </button>
                 {activeSection === 'timeline' && (
                   <div className="p-4 space-y-3 text-xs border-t border-slate-800">
                     <div className="grid grid-cols-2 gap-4">
-                      <div><label className="text-slate-400">目前年紀：<span className="text-blue-400 font-bold">{currentAge}歲</span></label><input type="range" min="30" max="90" value={currentAge} onChange={(e)=>setCurrentAge(Number(e.target.value))} className="w-full accent-blue-500"/></div>
+                      <div><label className="text-slate-400">目前年齡：<span className="text-blue-400 font-bold">{currentAge}歲</span></label><input type="range" min="30" max="90" value={currentAge} onChange={(e)=>setCurrentAge(Number(e.target.value))} className="w-full accent-blue-500"/></div>
                       <div><label className="text-slate-400">模擬壽命：<span className="text-emerald-400 font-bold">{lifeExpectancy}歲</span></label><input type="range" min={currentAge} max="110" value={lifeExpectancy} onChange={(e)=>setLifeExpectancy(Number(e.target.value))} className="w-full accent-emerald-500"/></div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3 pt-2">
-                      <div><label className="text-slate-500">薪資成長率(%)</label><input type="number" step="0.1" value={salaryGrowth} onChange={(e)=>setSalaryGrowth(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded p-1 text-white font-mono"/></div>
-                      <div><label className="text-slate-500">預估通膨率(%)</label><input type="number" step="0.1" value={inflationRate} onChange={(e)=>setInflationRate(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded p-1 text-white font-mono"/></div>
                     </div>
                   </div>
                 )}
               </div>
 
-              {/* 模組 2: 所得開銷與動態多元所得 */}
+              {/* 2. 收支與勞退 */}
               <div className="border border-slate-800 rounded-lg bg-slate-950/40">
-                <button onClick={() => setActiveSection(activeSection === 'income' ? '' : 'pension')} className="w-full bg-slate-950 px-4 py-2.5 text-left font-semibold text-xs text-slate-300 flex justify-between items-center">
-                  <span>💰 2. 多元收入與生活常態開銷明細</span>
-                  <span>{activeSection === 'pension' ? '▲' : '▼'}</span>
+                <button onClick={() => setActiveSection(activeSection === 'income' ? '' : 'income')} className="w-full bg-slate-950 px-4 py-2.5 text-left font-semibold text-xs text-slate-300 flex justify-between">
+                  <span>💰 2. 多元收入與 6 大開銷明細</span><span>{activeSection === 'income' ? '▲' : '▼'}</span>
                 </button>
-                {activeSection === 'pension' && (
+                {activeSection === 'income' && (
                   <div className="p-4 space-y-4 text-xs border-t border-slate-800">
-                    <div className="grid grid-cols-2 gap-3">
-                      <div><label className="text-slate-400 font-bold">主業月薪 (元)</label><input type="number" value={mainSalary} onChange={(e)=>setMainSalary(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded p-1 text-white font-mono"/></div>
-                      <div><label className="text-slate-400">制度別</label><select value={pensionMode} onChange={(e)=>setPensionMode(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded p-1 text-white text-[11px]"><option value="💼 一般勞工">💼 一般勞工</option><option value="🏛️ 公教人員">🏛️ 公教人員</option></select></div>
-                    </div>
+                    <div><label className="text-slate-400 font-bold">主業月薪 (元)</label><input type="number" value={mainSalary} onChange={(e)=>setMainSalary(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded p-1 text-white font-mono"/></div>
                     {pensionMode === "💼 一般勞工" && (
                       <div><label className="text-slate-500">累積勞保年資: {lbYears}年</label><input type="range" min="0" max="50" value={lbYears} onChange={(e)=>setLbYears(Number(e.target.value))} className="w-full accent-blue-500"/></div>
                     )}
@@ -300,149 +266,130 @@ export default function Home() {
                         <input type="number" value={tmpIncAmt} onChange={(e)=>setTmpIncAmt(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded p-1 text-white font-mono text-[11px]"/>
                       </div>
                       <button onClick={addExtraIncome} className="w-full bg-emerald-900 text-white text-[11px] py-1 rounded font-bold">注入多元收入池</button>
+                      {extraIncomes.map(inc => <div key={inc.id} className="flex justify-between text-[10px] text-slate-400"><span>{inc.name}</span><span>{inc.amount}元</span></div>)}
                     </div>
 
                     {/* 六大開銷細項 */}
                     <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 grid grid-cols-2 gap-2">
-                      <div className="col-span-2 text-orange-400 font-bold border-b border-slate-800 pb-1 flex justify-between"><span>💸 每月支出總核算:</span><span className="font-mono">{baseExp.toLocaleString()} 元</span></div>
+                      <div className="col-span-2 text-orange-400 font-bold border-b border-slate-800 pb-1 flex justify-between"><span>💸 每月總開銷:</span><span className="font-mono">{baseExp.toLocaleString()} 元</span></div>
                       <div><label className="text-[10px] text-slate-500">生活餐費</label><input type="number" value={mLiving} onChange={(e)=>setMLiving(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded p-1 font-mono"/></div>
                       <div><label className="text-[10px] text-slate-500">房屋租金</label><input type="number" value={mRent} onChange={(e)=>setMRent(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded p-1 font-mono"/></div>
                       <div><label className="text-[10px] text-slate-500">醫療壽險</label><input type="number" value={mInsurance} onChange={(e)=>setMInsurance(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded p-1 font-mono"/></div>
                       <div><label className="text-[10px] text-slate-500">勞健保費</label><input type="number" value={mLaborHealth} onChange={(e)=>setMLaborHealth(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded p-1 font-mono"/></div>
+                      <div><label className="text-[10px] text-slate-500">孝親費</label><input type="number" value={mParents} onChange={(e)=>setMParents(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded p-1 font-mono"/></div>
+                      <div><label className="text-[10px] text-slate-500">娛樂/其他</label><input type="number" value={mOther} onChange={(e)=>setMOther(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded p-1 font-mono"/></div>
                     </div>
                   </div>
                 )}
               </div>
 
-              {/* 模組 3: 動態自訂資產池 */}
+              {/* 3. 資產池 */}
               <div className="border border-slate-800 rounded-lg bg-slate-950/40">
-                <button onClick={() => setActiveSection(activeSection === 'assets' ? '' : 'assets')} className="w-full bg-slate-950 px-4 py-2.5 text-left font-semibold text-xs text-slate-300 flex justify-between items-center">
-                  <span>📈 3. 現有動態資產子帳戶配置清單</span>
-                  <span>{activeSection === 'assets' ? '▲' : '▼'}</span>
+                <button onClick={() => setActiveSection(activeSection === 'assets' ? '' : 'assets')} className="w-full bg-slate-950 px-4 py-2.5 text-left font-semibold text-xs text-slate-300 flex justify-between">
+                  <span>📈 3. 動態資產池配置清單</span><span>{activeSection === 'assets' ? '▲' : '▼'}</span>
                 </button>
                 {activeSection === 'assets' && (
                   <div className="p-4 space-y-3 text-xs border-t border-slate-800">
                     <div className="bg-slate-950 p-2.5 rounded border border-slate-800 space-y-2">
                       <input type="text" value={tmpAssetName} onChange={(e)=>setTmpAssetName(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded p-1 text-white text-[11px]"/>
                       <div className="grid grid-cols-3 gap-2">
-                        <select value={tmpAssetType} onChange={(e)=>setTmpAssetType(e.target.value)} className="bg-slate-900 border border-slate-700 rounded p-1 text-[11px]"><option value="現金">現金</option><option value="股票">股票</option><option value="基金">基金</option><option value="債券">債券</option></select>
+                        <select value={tmpAssetType} onChange={(e)=>setTmpAssetType(e.target.value)} className="bg-slate-900 border border-slate-700 rounded p-1 text-[11px]"><option value="股票">股票</option><option value="基金">基金</option></select>
                         <input type="number" value={tmpAssetVal} onChange={(e)=>setTmpAssetVal(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded p-1 font-mono text-[11px]"/>
                         <input type="number" value={tmpAssetRate} onChange={(e)=>setTmpAssetRate(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded p-1 font-mono text-[11px]"/>
                       </div>
                       <button onClick={addAssetAccount} className="w-full bg-blue-900 text-white text-[11px] py-1 rounded font-bold">配置全新子帳戶</button>
-                    </div>
-                    <div className="space-y-1 max-h-[120px] overflow-y-auto">
-                      {assets.map(a => (
-                        <div key={a.id} className="bg-slate-950 p-1.5 rounded border border-slate-800 flex justify-between text-[11px]">
-                          <span>💎 {a.name} ({a.type})</span>
-                          <span className="font-mono text-blue-400">{a.value}萬 | {(a.rate*100).toFixed(1)}%</span>
-                        </div>
-                      ))}
+                      {assets.map(a => <div key={a.id} className="flex justify-between text-[10px] text-slate-400"><span>{a.name}</span><span>{a.value}萬</span></div>)}
                     </div>
                   </div>
                 )}
               </div>
 
-              {/* 模組 4: 不動產與信貸債務 */}
+              {/* 4. 負債與房產 */}
               <div className="border border-slate-800 rounded-lg bg-slate-950/40">
-                <button onClick={() => setActiveSection(activeSection === 'liabilities' ? '' : 'liabilities')} className="w-full bg-slate-950 px-4 py-2.5 text-left font-semibold text-xs text-slate-300 flex justify-between items-center">
-                  <span>🏠 4. 不動產購屋置換與信貸負債精算</span>
-                  <span>{activeSection === 'liabilities' ? '▲' : '▼'}</span>
+                <button onClick={() => setActiveSection(activeSection === 'liabilities' ? '' : 'liabilities')} className="w-full bg-slate-950 px-4 py-2.5 text-left font-semibold text-xs text-slate-300 flex justify-between">
+                  <span>🏠 4. 不動產置換與信貸負債</span><span>{activeSection === 'liabilities' ? '▲' : '▼'}</span>
                 </button>
                 {activeSection === 'liabilities' && (
                   <div className="p-4 space-y-4 text-xs border-t border-slate-800">
                     <div className="bg-slate-950 p-2.5 rounded border border-slate-800 space-y-2">
-                      <div className="flex items-center justify-between"><span className="text-[11px] font-bold text-orange-400">➕ 購屋增置貸款專案</span><input type="checkbox" checked={hasHouse} onChange={(e)=>setHasHouse(e.target.checked)}/></div>
+                      <div className="flex items-center justify-between"><span className="text-[11px] font-bold text-orange-400">➕ 啟用購屋增置</span><input type="checkbox" checked={hasHouse} onChange={(e)=>setHasHouse(e.target.checked)}/></div>
                       {hasHouse && (
-                        <div className="space-y-2 pt-1 border-t border-slate-800">
-                          <input type="text" value={tmpHName} onChange={(e)=>setTmpHName(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded p-1 text-[11px]"/>
-                          <div className="grid grid-cols-2 gap-2">
-                            <input type="number" placeholder="總價" value={tmpHPrice} onChange={(e)=>setTmpHPrice(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded p-1 font-mono text-[11px]"/>
-                            <input type="number" placeholder="頭期%" value={tmpHDownPct} onChange={(e)=>setTmpHDownPct(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded p-1 font-mono text-[11px]"/>
-                          </div>
-                          <div className="grid grid-cols-2 gap-2">
-                            <input type="number" placeholder="利率%" value={tmpHRate} onChange={(e)=>setTmpHRate(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded p-1 font-mono text-[11px]"/>
-                            <input type="number" placeholder="寬限期" value={tmpHGrace} onChange={(e)=>setTmpHGrace(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded p-1 font-mono text-[11px]"/>
-                          </div>
-                          <button onClick={addMortgagePlan} className="w-full bg-orange-900 text-white text-[11px] py-1 rounded font-bold">綁定購屋金流</button>
+                        <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-800">
+                          <input type="number" placeholder="總價(萬)" value={tmpHPrice} onChange={(e)=>setTmpHPrice(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded p-1 text-[11px]"/>
+                          <input type="number" placeholder="寬限期" value={tmpHGrace} onChange={(e)=>setTmpHGrace(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded p-1 text-[11px]"/>
                         </div>
                       )}
                     </div>
+                    <div className="bg-slate-950 p-2.5 rounded border border-slate-800 space-y-2">
+                      <p className="text-[11px] font-bold text-red-400">➕ 新增信用貸款</p>
+                      <div className="grid grid-cols-3 gap-2">
+                        <input type="text" value={tmpDName} onChange={(e)=>setTmpDName(e.target.value)} className="bg-slate-900 border border-slate-700 rounded p-1 text-[11px]"/>
+                        <input type="number" placeholder="金額(萬)" value={tmpDAmt} onChange={(e)=>setTmpDAmt(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded p-1 text-[11px]"/>
+                        <input type="number" placeholder="年期" value={tmpDYears} onChange={(e)=>setTmpDYears(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded p-1 text-[11px]"/>
+                      </div>
+                      <button onClick={addDebtPlan} className="w-full bg-red-900 text-white py-1 text-[11px] rounded font-bold">綁定負債金流</button>
+                      {debts.map(d => <div key={d.id} className="text-[10px] text-slate-400">{d.name}: 貸{d.loan_amount}萬</div>)}
+                    </div>
                   </div>
                 )}
               </div>
 
-              {/* 模組 5: 家族成員與長照扶養 (全配版) */}
+              {/* 5. 家族成員 */}
               <div className="border border-slate-800 rounded-lg bg-slate-950/40">
-                <button onClick={() => setActiveSection(activeSection === 'family' ? '' : 'family')} className="w-full bg-slate-950 px-4 py-2.5 text-left font-semibold text-xs text-slate-300 flex justify-between items-center">
-                  <span>👨‍👩‍👧‍👦 5. 家族親屬成員與節稅長照控制面板</span>
-                  <span>{activeSection === 'family' ? '▲' : '▼'}</span>
+                <button onClick={() => setActiveSection(activeSection === 'family' ? '' : 'family')} className="w-full bg-slate-950 px-4 py-2.5 text-left font-semibold text-xs text-slate-300 flex justify-between">
+                  <span>👨‍👩‍👧‍👦 5. 家族親屬與長照特扣額</span><span>{activeSection === 'family' ? '▲' : '▼'}</span>
                 </button>
                 {activeSection === 'family' && (
                   <div className="p-4 space-y-3 text-xs border-t border-slate-800">
-                    <div className="bg-slate-950 p-2.5 rounded border border-slate-800 flex justify-between items-center">
-                      <span>配偶與名下資產對沖</span>
-                      <input type="checkbox" checked={hasSpouse} onChange={(e)=>setHasSpouse(e.target.checked)}/>
-                    </div>
-                    {hasSpouse && (
-                      <div className="bg-slate-950 p-2 rounded border border-slate-800 grid grid-cols-2 gap-2">
-                        <input type="number" value={spAge} placeholder="年齡" onChange={(e)=>setSpAge(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded p-1 text-xs"/>
-                        <input type="number" value={spWealth} placeholder="配偶獨立資產" onChange={(e)=>setSpWealth(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded p-1 text-xs font-mono"/>
-                        <label className="col-span-2 flex items-center gap-2"><input type="checkbox" checked={spLtc} onChange={(e)=>setSpLtc(e.target.checked)}/> <span className="text-purple-400">符合身障長照特別扣除</span></label>
-                      </div>
-                    )}
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="bg-slate-950 p-2 rounded border border-slate-800 flex justify-between items-center"><span>扶養直系尊親屬</span><input type="checkbox" checked={hasFather} onChange={(e)=>setHasFather(e.target.checked)}/></div>
-                      <div className="bg-slate-950 p-2 rounded border border-slate-800 flex justify-between items-center"><span>扶養直系卑親屬</span><input type="checkbox" checked={hasMother} onChange={(e)=>setHasMother(e.target.checked)}/></div>
-                    </div>
+                    <div className="bg-slate-950 p-2 rounded border border-slate-800 flex justify-between"><span>配偶</span><input type="checkbox" checked={hasSpouse} onChange={(e)=>setHasSpouse(e.target.checked)}/></div>
+                    <div className="bg-slate-950 p-2 rounded border border-slate-800 flex justify-between"><span>扶養父親</span><input type="checkbox" checked={hasFather} onChange={(e)=>setHasFather(e.target.checked)}/></div>
+                    <div className="bg-slate-950 p-2 rounded border border-slate-800 flex justify-between"><span>扶養母親</span><input type="checkbox" checked={hasMother} onChange={(e)=>setHasMother(e.target.checked)}/></div>
                     <div className="space-y-2 bg-slate-950 p-2.5 rounded border border-slate-800">
-                      <div className="flex justify-between"><span>扶養子女數量:</span><span className="font-bold text-emerald-400">{kidCount}人</span></div>
-                      <input type="range" min="0" max="4" value={kidCount} onChange={(e)=>handleKidChange(Number(e.target.value))} className="w-full accent-emerald-500"/>
-                      <div className="flex justify-between pt-1"><span>旁系兄弟姊妹:</span><span className="font-bold text-emerald-400">{siblingCount}人</span></div>
-                      <input type="range" min="0" max="4" value={siblingCount} onChange={(e)=>handleSiblingChange(Number(e.target.value))} className="w-full accent-emerald-500"/>
+                      <div className="flex justify-between"><span>子女數量:</span><span className="text-emerald-400">{kidCount}人</span></div><input type="range" min="0" max="4" value={kidCount} onChange={(e)=>handleKidChange(Number(e.target.value))} className="w-full accent-emerald-500"/>
+                      <div className="flex justify-between"><span>兄弟姊妹:</span><span className="text-emerald-400">{siblingCount}人</span></div><input type="range" min="0" max="4" value={siblingCount} onChange={(e)=>handleSiblingChange(Number(e.target.value))} className="w-full accent-emerald-500"/>
                     </div>
                   </div>
                 )}
               </div>
 
-              {/* 模組 6: 傳承保單專區 */}
+              {/* 6. 保單與傳承 */}
               <div className="border border-slate-800 rounded-lg bg-slate-950/40">
-                <button onClick={() => setActiveSection(activeSection === 'insurance' ? '' : 'insurance')} className="w-full bg-slate-950 px-4 py-2.5 text-left font-semibold text-xs text-slate-300 flex justify-between items-center">
-                  <span>🛡️ 6. 專案傳承保單與特定關係人配置</span>
-                  <span>{activeSection === 'insurance' ? '▲' : '▼'}</span>
+                <button onClick={() => setActiveSection(activeSection === 'insurance' ? '' : 'insurance')} className="w-full bg-slate-950 px-4 py-2.5 text-left font-semibold text-xs text-slate-300 flex justify-between">
+                  <span>🛡️ 6. 專案保單與特定受益人</span><span>{activeSection === 'insurance' ? '▲' : '▼'}</span>
                 </button>
                 {activeSection === 'insurance' && (
                   <div className="p-4 space-y-3 text-xs border-t border-slate-800">
                     <div className="bg-slate-950 p-3 rounded border border-slate-800 space-y-2">
-                      <input type="text" value={tmpInsName} onChange={(e)=>setTmpInsName(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded p-1 text-white"/>
-                      <select value={tmpInsBen} onChange={(e)=>setTmpInsBen(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded p-1 text-[11px]"><option value="法定繼承人">受益人：指定法定繼承人</option><option value="配偶">受益人：指定特定配偶</option></select>
+                      <input type="text" value={tmpInsName} onChange={(e)=>setTmpInsName(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded p-1"/>
+                      <select value={tmpInsBen} onChange={(e)=>setTmpInsBen(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded p-1"><option value="法定繼承人">受益人：法定繼承人</option><option value="配偶">受益人：配偶</option><option value="指定特定子女">受益人：指定特定子女</option></select>
                       <div className="grid grid-cols-3 gap-2">
                         <input type="number" placeholder="繳費" value={tmpInsPremium} onChange={(e)=>setTmpInsPremium(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded p-1 font-mono"/>
                         <input type="number" placeholder="IRR%" value={tmpInsIrr} onChange={(e)=>setTmpInsIrr(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded p-1 font-mono"/>
                         <input type="number" placeholder="保額" value={tmpInsDb} onChange={(e)=>setTmpInsDb(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded p-1 font-mono"/>
                       </div>
-                      <button onClick={addInsurancePolicy} className="w-full bg-purple-900 text-white py-1 rounded font-bold text-[11px]">派發特定保單架構</button>
+                      <button onClick={addInsurancePolicy} className="w-full bg-purple-900 text-white py-1 rounded font-bold">配置傳承保單</button>
+                      {insurances.map(ins => <div key={ins.id} className="text-[10px] text-slate-400">{ins.name}: 保額 {ins.db}萬</div>)}
                     </div>
                   </div>
                 )}
               </div>
 
-              {/* 模組 7: 未來重大事件與逆算器 */}
+              {/* 7. 未來重大事件逆算器 */}
               <div className="border border-slate-800 rounded-lg bg-slate-950/40">
-                <button onClick={() => setActiveSection(activeSection === 'events' ? '' : 'events')} className="w-full bg-slate-950 px-4 py-2.5 text-left font-semibold text-xs text-slate-300 flex justify-between items-center">
-                  <span>📅 7. 未來重大財務事件與精算逆算器</span>
-                  <span>{activeSection === 'events' ? '▲' : '▼'}</span>
+                <button onClick={() => setActiveSection(activeSection === 'events' ? '' : 'events')} className="w-full bg-slate-950 px-4 py-2.5 text-left font-semibold text-xs text-slate-300 flex justify-between">
+                  <span>📅 7. 重大未來事件與逆算器</span><span>{activeSection === 'events' ? '▲' : '▼'}</span>
                 </button>
                 {activeSection === 'events' && (
                   <div className="p-4 space-y-3 text-xs border-t border-slate-800">
                     <div className="bg-slate-950 p-2.5 rounded border border-slate-800 space-y-2">
                       <input type="text" value={tmpEvName} onChange={(e)=>setTmpEvName(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded p-1 text-[11px]"/>
                       <div className="grid grid-cols-3 gap-2">
-                        <input type="number" placeholder="年紀" value={tmpEvAge} onChange={(e)=>setTmpEvAge(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded p-1 font-mono text-[11px]"/>
-                        <input type="number" placeholder="金額(萬)" value={tmpEvAmt} onChange={(e)=>setTmpEvAmt(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded p-1 font-mono text-[11px]"/>
-                        <input type="number" placeholder="年期" value={tmpEvDuration} onChange={(e)=>setTmpEvDuration(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded p-1 font-mono text-[11px]"/>
+                        <input type="number" placeholder="年紀" value={tmpEvAge} onChange={(e)=>setTmpEvAge(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded p-1 text-[11px]"/>
+                        <input type="number" placeholder="金額(萬,支出填負)" value={tmpEvAmt} onChange={(e)=>setTmpEvAmt(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded p-1 text-[11px]"/>
+                        <input type="number" placeholder="年期" value={tmpEvDuration} onChange={(e)=>setTmpEvDuration(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded p-1 text-[11px]"/>
                       </div>
-                      <button onClick={addFutureEvent} className="w-full bg-orange-900 text-white py-1 rounded font-bold text-[11px]">增置未來重大目標</button>
+                      <button onClick={addFutureEvent} className="w-full bg-amber-900 text-white py-1 rounded font-bold text-[11px]">設立未來財務目標</button>
+                      {events.map(ev => <div key={ev.id} className="text-[10px] text-slate-400">{ev.label}: {ev.amount/10000}萬</div>)}
                     </div>
                   </div>
                 )}
@@ -505,14 +452,14 @@ export default function Home() {
               </div>
             </div>
 
-            {/* 深度報表分頁表格與民法試算明細 (完美復刻 Streamlit 連動滑桿表格) */}
+            {/* 深度報表分頁表格與民法試算明細 */}
             {simulationResult && (
               <div className="bg-slate-900 border border-slate-800 p-4 md:p-6 rounded-xl shadow-2xl space-y-4">
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-800 pb-3 gap-2">
                   <h2 className="text-base font-semibold text-blue-400">⚖️ 逐年財富結算與民法傳承試算明細報表</h2>
                   <div className="flex items-center gap-3 w-full md:w-auto">
-                    <span className="text-xs text-slate-400 whitespace-nowrap">模擬身故發生年紀:</span>
-                    <input type="slider" type="range" min={currentAge} max={lifeExpectancy} value={selectedReportAge} onChange={(e)=>setSelectedReportAge(Number(e.target.value))} className="w-full md:w-48 accent-blue-500"/>
+                    <span className="text-xs text-slate-400 whitespace-nowrap">模擬身故年齡:</span>
+                    <input type="range" min={currentAge} max={lifeExpectancy} value={selectedReportAge} onChange={(e)=>setSelectedReportAge(Number(e.target.value))} className="w-full md:w-48 accent-blue-500"/>
                     <span className="text-blue-400 font-bold font-mono text-sm whitespace-nowrap">{selectedReportAge}歲</span>
                   </div>
                 </div>
@@ -523,8 +470,8 @@ export default function Home() {
                     <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
                       <p className="font-bold text-orange-300 border-l-2 border-orange-500 pl-2 mb-2">🧾 國家級遺產稅精算瀑布表</p>
                       <div className="flex justify-between text-slate-400"><span>預估課稅總資產基準:</span><span className="font-mono text-white">{(snapReport.總資產_萬 || snapReport.總資產 || 0).toLocaleString()} 萬</span></div>
-                      <div className="flex justify-between text-slate-400"><span>減: 配偶剩餘財產差額分配請求權:</span><span className="font-mono text-emerald-400">- {(snapReport.差額分配請求權 || 0).toFixed(0)} 萬</span></div>
-                      <div className="flex justify-between text-slate-400"><span>減: 法定免稅額與扣除額總計:</span><span className="font-mono text-emerald-400">- {(snapReport.扣除額總計 || 1333 + 138).toFixed(0)} 萬</span></div>
+                      <div className="flex justify-between text-slate-400"><span>減: 配偶差額分配請求權:</span><span className="font-mono text-emerald-400">- {(snapReport.差額分配請求權 || 0).toFixed(0)} 萬</span></div>
+                      <div className="flex justify-between text-slate-400"><span>減: 法定免稅額與扣除額總計:</span><span className="font-mono text-emerald-400">- {(snapReport.扣除額總計 || 1471).toFixed(0)} 萬</span></div>
                       <div className="border-t border-slate-800/80 my-2 pt-1 flex justify-between font-bold">
                         <span className="text-slate-300">課稅遺產淨額 (Taxable Estate):</span>
                         <span className="font-mono text-amber-400">{Math.max(0, (snapReport.總資產_萬 || 0) - (snapReport.差額分配請求權 || 0) - (snapReport.扣除額總計 || 1471)).toLocaleString()} 萬</span>
@@ -544,17 +491,17 @@ export default function Home() {
                             <tr className="border-b border-slate-800 text-slate-500 text-[10px]"><th className="pb-1">法定繼承人身分</th><th className="pb-1 text-right">應繼分比例</th><th className="pb-1 text-right">保單指定理賠</th></tr>
                           </thead>
                           <tbody className="text-slate-300 font-mono text-[11px] divide-y divide-slate-900">
-                            {hasSpouse && <tr><td className="py-1.5">配偶 (第一順位併列)</td><td className="text-right py-1.5">依民法合流</td><td className="text-right text-purple-400 py-1.5">{insurances.filter(i=>i.ben==="配偶").reduce((a,b)=>a+b.db, 0)} 萬</td></tr>}
+                            {hasSpouse && <tr><td className="py-1.5">配偶 (第一順位)</td><td className="text-right py-1.5">依民法合流</td><td className="text-right text-purple-400 py-1.5">{insurances.filter(i=>i.ben==="配偶").reduce((a,b)=>a+b.db, 0)} 萬</td></tr>}
                             {kidCount > 0 && <tr><td className="py-1.5">直系血親卑親屬 (子女)</td><td className="text-right py-1.5">均分剩餘比例</td><td className="text-right text-purple-400 py-1.5">{insurances.filter(i=>i.ben==="指定特定子女").reduce((a,b)=>a+b.db, 0)} 萬</td></tr>}
-                            <tr><td className="py-1.5 font-bold text-slate-400">其他法定順位架構</td><td className="text-right text-slate-500 py-1.5">概括繼承</td><td className="text-right text-slate-500 py-1.5">回歸基本盤</td></tr>
+                            <tr><td className="py-1.5 font-bold text-slate-400">其他法定繼承人</td><td className="text-right text-slate-500 py-1.5">概括繼承</td><td className="text-right text-purple-400 py-1.5">{insurances.filter(i=>i.ben==="法定繼承人").reduce((a,b)=>a+b.db, 0)} 萬</td></tr>
                           </tbody>
                         </table>
                       </div>
-                      <p className="text-[10px] text-slate-500 italic mt-2">※ 提示：此表完整實證特定傳承保單如何合法跨越民法繼承順位與特留分限制，達成特定受益人之資產定向精準派發。</p>
+                      <p className="text-[10px] text-slate-500 italic mt-2">※ 提示：此表完整實證保單如何合法跨越民法繼承順位限制，達成資產定向精準派發。</p>
                     </div>
                   </div>
                 ) : (
-                  <p className="text-xs text-slate-500 italic text-center">請先點擊精算按鈕，大腦將自動解鎖多維瀑布報表。</p>
+                  <p className="text-xs text-slate-500 italic text-center">報表未生成。</p>
                 )}
               </div>
             )}
@@ -568,30 +515,19 @@ export default function Home() {
                         </div>
                         <div>
                             <h3 className="text-lg font-bold text-emerald-300">AI 深度判讀報告與高效溝通講稿</h3>
-                            <p className="text-slate-500 text-xs">大腦已自動整合「民法特留分繼承基數」與「保單實質課稅原則」進行多重演繹。</p>
                         </div>
                     </div>
-
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 font-mono text-emerald-100 text-sm">
                         <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 leading-relaxed space-y-3">
-                            <p className="text-emerald-400 font-bold flex items-center gap-1.5">▍ [現況智慧判讀] (顧問視角)</p>
-                            <p>客戶目前設定基準年齡為 <span className="text-white bg-blue-900 px-1.5 py-0.5 rounded font-mono">{currentAge} 歲</span>，其初始投入之常態性資產水庫十分充沛。</p>
-                            
-                            <p className="text-blue-200 border-l-2 border-blue-500 pl-2">
-                              經法定精算引擎推算，於 65 歲進入人生下半場時，職業與社會保險機制預估提供每月 <span className="text-white bg-blue-900 px-1 rounded">{realMonthlyPensionWan} 萬</span> 的安全年金，
-                              已可有效對沖高達 <span className="text-white font-bold bg-emerald-900 px-1 rounded">{pensionCoverage}%</span> 的基礎生存開銷。
-                            </p>
-
-                            <p>然而，若任由名下資產隨時間複利自然增殖，至模擬生命終點 <span className="text-white bg-emerald-900 px-1 rounded">{lifeExpectancy} 歲</span> 時，應納稅額基數將面臨劇烈考驗。</p>
-                            <p className="text-red-400 font-bold border border-red-900 bg-red-950/60 p-3 rounded-lg text-xs md:text-sm">
-                                💥 警訊：屆時繼承人將產生高達 <span className="text-white text-base md:text-lg bg-red-700 px-1 rounded font-mono">{totalEstateTaxGapWan} 萬</span> 的遺產稅現金缺口。若不提前進行法律關係人定性與保單工具防禦，極易因缺乏變現救火現金而陷入流動性卡關困境。
-                            </p>
+                            <p className="text-emerald-400 font-bold">▍ [現況智慧判讀] (顧問視角)</p>
+                            <p>客戶設定現年 <span className="text-white bg-blue-900 px-1.5 py-0.5 rounded">{currentAge} 歲</span>。</p>
+                            <p className="text-blue-200 border-l-2 border-blue-500 pl-2">65 歲預估提供每月 <span className="text-white bg-blue-900 px-1 rounded">{realMonthlyPensionWan} 萬</span> 安全年金，覆蓋 <span className="text-white font-bold bg-emerald-900 px-1 rounded">{pensionCoverage}%</span> 開銷。</p>
+                            <p className="text-red-400 font-bold border border-red-900 bg-red-950/60 p-3 rounded-lg text-xs md:text-sm">💥 警訊：至 <span className="text-white bg-red-700 px-1 rounded">{lifeExpectancy} 歲</span> 將產生高達 <span className="text-white text-base md:text-lg bg-red-700 px-1 rounded font-mono">{totalEstateTaxGapWan} 萬</span> 遺產稅現金缺口。</p>
                         </div>
-                        
                         <div className="bg-slate-950 p-4 rounded-lg border border-emerald-800 leading-relaxed text-slate-300 text-xs md:text-sm space-y-2">
-                            <p className="text-emerald-400 font-bold not-italic mb-2 flex items-center gap-1.5">▍ [高轉化談判話術] (面對客戶)</p>
-                            <p className="italic">「董座，這套戰情室透過精確的法規公式，向您揭示了一個非常關鍵的隱形考驗。雖然您目前實力極為雄厚，但隨著時間推進，資產自然的自我增值，在未來反而會成為家人的完稅重擔。」</p>
-                            <p className="italic">「依照中華民國現行稅法規定，當那一天來臨時，您的繼承人必須在短短六個月內，以**全現金**的方式向國庫繳納近 <span className="text-emerald-300 font-bold underline decoration-emerald-500">{totalEstateTaxGapWan} 萬</span> 的應納稅金，否則龐大的家族遺產將被依法凍結，無法順利繼承。如果我們提早善用民法雙軌制，將部分資金重新定性為人壽保險傳承架構，不僅能在完稅前『合法跨越民法順位與特留分限制』，還能精準變現、免爭議地直接把大筆活水交到您指定的人手上...」</p>
+                            <p className="text-emerald-400 font-bold mb-2">▍ [高轉化談判話術] (面對客戶)</p>
+                            <p className="italic">「董座，這套系統向您揭示了一個隱形考驗。自然的資產增值未來反而會成為家人的完稅重擔。」</p>
+                            <p className="italic">「屆時家人必須在六個月內用純現金向國庫繳納近 <span className="text-emerald-300 font-bold underline decoration-emerald-500">{totalEstateTaxGapWan} 萬</span>。如果我們提早善用民法雙軌制，將資金重新定性為保險傳承，就能合法跨越特留分限制，精準把大筆活水交到您指定的人手上...」</p>
                         </div>
                     </div>
                 </div>
