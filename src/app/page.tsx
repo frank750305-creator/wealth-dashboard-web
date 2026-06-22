@@ -18,13 +18,47 @@ export default function Home() {
   const [lifeExpectancy, setLifeExpectancy] = useState(85);
   const [initialCash, setInitialCash] = useState(8000); 
 
-  // 新增：勞退與收支參數
+  // 勞退與收支參數
   const [mainSalary, setMainSalary] = useState(50000);
   const [baseExp, setBaseExp] = useState(30000);
   const [pensionMode, setPensionMode] = useState("💼 一般勞工");
   const [lbYears, setLbYears] = useState(10);
+
+  // 👨‍👩‍👧‍👦 家庭與長照狀態變數 (全配版)
   const [hasSpouse, setHasSpouse] = useState(false);
+  const [spAge, setSpAge] = useState(40);
+  const [spLtc, setSpLtc] = useState(false);
+  
+  const [hasFather, setHasFather] = useState(false);
+  const [faAge, setFaAge] = useState(70);
+  const [faLtc, setFaLtc] = useState(false);
+
+  const [hasMother, setHasMother] = useState(false);
+  const [moAge, setMoAge] = useState(68);
+  const [moLtc, setMoLtc] = useState(false);
+
+  // 子女動態陣列設定
   const [kidCount, setKidCount] = useState(0);
+  const [kids, setKids] = useState<{id: string, age: number, ltc: boolean}[]>([]);
+
+  const handleKidCountChange = (count: number) => {
+    setKidCount(count);
+    setKids(prev => {
+      const newKids = [...prev];
+      if (count > prev.length) {
+        for (let i = prev.length; i < count; i++) newKids.push({ id: `kid_${i}`, age: 10, ltc: false });
+      } else {
+        newKids.splice(count);
+      }
+      return newKids;
+    });
+  };
+
+  const updateKid = (index: number, field: string, value: any) => {
+    const newKids = [...kids];
+    newKids[index] = { ...newKids[index], [field]: value };
+    setKids(newKids);
+  };
 
   const handleSimulate = async () => {
     setIsLoading(true);
@@ -50,14 +84,12 @@ export default function Home() {
         debts: [],
         extra_incomes: [],
         family: {
-          has_spouse: hasSpouse, // 👈 1. 改成變數
-          has_father: false, has_mother: false, has_grand: false,
-          sp_age: 30, sp_life: 88, sp_salary: 0, sp_other_inc: 0, sp_wealth: 0, sp_add: 0, sp_rate: 0, sp_disabled: false, sp_ltc: false,
-          fa_age: 65, fa_life: 85, fa_claim_tax: false, fa_tax_inc: 0, fa_disabled: false, fa_ltc: false,
-          mo_age: 65, mo_life: 85, mo_claim_tax: false, mo_tax_inc: 0, mo_disabled: false, mo_ltc: false,
+          has_spouse: hasSpouse, has_father: hasFather, has_mother: hasMother, has_grand: false,
+          sp_age: spAge, sp_life: 88, sp_salary: 0, sp_other_inc: 0, sp_wealth: 0, sp_add: 0, sp_rate: 0, sp_disabled: spLtc, sp_ltc: spLtc,
+          fa_age: faAge, fa_life: 85, fa_claim_tax: false, fa_tax_inc: 0, fa_disabled: faLtc, fa_ltc: faLtc,
+          mo_age: moAge, mo_life: 85, mo_claim_tax: false, mo_tax_inc: 0, mo_disabled: moLtc, mo_ltc: moLtc,
           gp_count: 0, gp_age: 75, gp_life: 85, gp_claim_tax: false, gp_tax_inc: 0, gp_dependent: false, gp_disabled_count: 0, gp_ltc_count: 0,
-          // 👇 2. 改成動態生成子女陣列（預設年齡 10 歲，撫養到 22 歲）
-          kids: Array.from({ length: kidCount }, (_, i) => ({ id: `kid_${i}`, age: 10, dep_age: 22, life: 85 })), 
+          kids: kids.map(k => ({ id: k.id, age: k.age, dep_age: 22, life: 85, ltc: k.ltc, disabled: k.ltc })), 
           siblings: [], daily_tool_val: 0, job_tool_val: 0
         },
         pension: {
@@ -104,11 +136,11 @@ export default function Home() {
     }
     return null;
   };
+
   let realMonthlyPensionWan = "0.00";
   let pensionCoverage = "0";
   
   if (simulationResult && simulationResult.trajectory) {
-    // 使用 == 確保數字與字串型態都能精準比對
     const retireData = simulationResult.trajectory.find((d: any) => d.年紀 == 65);
     
     if (retireData) {
@@ -116,11 +148,8 @@ export default function Home() {
         let monthlyPensionYuan = 0;
         
         if (rawPension !== undefined) {
-            // 如果後端有乖乖傳真實數據過來
             monthlyPensionYuan = rawPension / 12;
         } else {
-            // 🚨 防呆機制：如果後端失憶，前端直接啟動政府 B 式備用公式！
-            // 勞保 B 式：平均月投保薪資(上限45800) × 勞保年資 × 1.55%
             const calcSalary = mainSalary > 45800 ? 45800 : mainSalary;
             monthlyPensionYuan = calcSalary * lbYears * 0.0155;
         }
@@ -175,7 +204,7 @@ export default function Home() {
                 <input type="number" value={initialCash} onChange={(e) => setInitialCash(Number(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white text-lg font-mono focus:border-blue-500"/>
               </div>
 
-              {/* 🎯 新增區塊：收支與勞退面板 */}
+              {/* 收支與勞退面板 */}
               <div className="pt-6 mt-6 border-t border-slate-800 space-y-6">
                 <h3 className="text-md font-semibold text-blue-300">💰 收支與勞退設定</h3>
                 
@@ -210,21 +239,102 @@ export default function Home() {
                   </div>
                 )}
               </div>
-              <div className="pt-6 mt-6 border-t border-slate-800 space-y-6">
-                <h3 className="text-md font-semibold text-emerald-300">👨‍👩‍👧‍👦 家庭成員 (關係到遺產稅扣除額)</h3>
+
+              {/* 🔥 全配版家族成員模組 */}
+              <div className="pt-6 mt-6 border-t border-slate-800 space-y-5">
+                <h3 className="text-md font-semibold text-emerald-300">👨‍👩‍👧‍👦 家族成員與稅務扣除額</h3>
                 
-                <div className="flex items-center justify-between bg-slate-950 p-3 rounded border border-slate-800">
-                  <span className="text-sm text-slate-300">是否擁有配偶</span>
-                  <input type="checkbox" checked={hasSpouse} onChange={(e) => setHasSpouse(e.target.checked)} className="w-4 h-4 accent-emerald-500 rounded cursor-pointer"/>
+                {/* 配偶區塊 */}
+                <div className="bg-slate-950 p-3 rounded border border-slate-800 space-y-3 transition-all">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-slate-300 font-bold">配偶設定</span>
+                    <input type="checkbox" checked={hasSpouse} onChange={(e) => setHasSpouse(e.target.checked)} className="w-4 h-4 accent-emerald-500 rounded cursor-pointer"/>
+                  </div>
+                  {hasSpouse && (
+                    <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-800">
+                      <div>
+                        <label className="block text-xs text-slate-500 mb-1">年齡</label>
+                        <input type="number" value={spAge} onChange={(e) => setSpAge(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white text-sm focus:border-emerald-500"/>
+                      </div>
+                      <div className="flex flex-col justify-end">
+                        <label className="flex items-center gap-2 cursor-pointer pb-1">
+                          <input type="checkbox" checked={spLtc} onChange={(e) => setSpLtc(e.target.checked)} className="w-3 h-3 accent-purple-500 rounded"/>
+                          <span className="text-xs text-purple-400">長照資格</span>
+                        </label>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                <div>
+                {/* 父母親區塊 */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-slate-950 p-3 rounded border border-slate-800 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-slate-300">父親</span>
+                      <input type="checkbox" checked={hasFather} onChange={(e) => setHasFather(e.target.checked)} className="w-4 h-4 accent-emerald-500 rounded cursor-pointer"/>
+                    </div>
+                    {hasFather && (
+                      <div className="space-y-3 pt-2 border-t border-slate-800">
+                        <div>
+                           <label className="block text-[10px] text-slate-500 mb-1">年齡</label>
+                           <input type="number" value={faAge} onChange={(e) => setFaAge(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white text-sm focus:border-emerald-500"/>
+                        </div>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input type="checkbox" checked={faLtc} onChange={(e) => setFaLtc(e.target.checked)} className="w-3 h-3 accent-purple-500 rounded"/>
+                          <span className="text-xs text-purple-400">長照資格</span>
+                        </label>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="bg-slate-950 p-3 rounded border border-slate-800 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-slate-300">母親</span>
+                      <input type="checkbox" checked={hasMother} onChange={(e) => setHasMother(e.target.checked)} className="w-4 h-4 accent-emerald-500 rounded cursor-pointer"/>
+                    </div>
+                    {hasMother && (
+                      <div className="space-y-3 pt-2 border-t border-slate-800">
+                         <div>
+                           <label className="block text-[10px] text-slate-500 mb-1">年齡</label>
+                           <input type="number" value={moAge} onChange={(e) => setMoAge(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white text-sm focus:border-emerald-500"/>
+                        </div>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input type="checkbox" checked={moLtc} onChange={(e) => setMoLtc(e.target.checked)} className="w-3 h-3 accent-purple-500 rounded"/>
+                          <span className="text-xs text-purple-400">長照資格</span>
+                        </label>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* 動態子女區塊 */}
+                <div className="bg-slate-950 p-3 rounded border border-slate-800 space-y-3">
                   <label className="flex justify-between text-xs text-slate-400 mb-2">
                     <span>扶養子女數量</span>
                     <span className="text-emerald-400 font-bold">{kidCount} 人</span>
                   </label>
-                  <input type="range" min="0" max="6" value={kidCount} onChange={(e) => setKidCount(Number(e.target.value))} className="w-full accent-emerald-500"/>
+                  <input type="range" min="0" max="6" value={kidCount} onChange={(e) => handleKidCountChange(Number(e.target.value))} className="w-full accent-emerald-500"/>
+                  
+                  {kids.length > 0 && (
+                    <div className="space-y-2 pt-3 border-t border-slate-800">
+                      {kids.map((kid, idx) => (
+                        <div key={kid.id} className="grid grid-cols-2 gap-4 items-center bg-slate-900 p-2 rounded border border-slate-700">
+                          <div>
+                            <label className="block text-[10px] text-slate-500 mb-1">第 {idx + 1} 位年齡</label>
+                            <input type="number" value={kid.age} onChange={(e) => updateKid(idx, 'age', Number(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-white text-sm focus:border-emerald-500"/>
+                          </div>
+                          <div className="flex justify-end">
+                            <label className="flex items-center gap-2 cursor-pointer mt-4">
+                              <input type="checkbox" checked={kid.ltc} onChange={(e) => updateKid(idx, 'ltc', e.target.checked)} className="w-3 h-3 accent-purple-500 rounded"/>
+                              <span className="text-xs text-purple-400">長照資格</span>
+                            </label>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
+
               </div>
 
             </div>
@@ -239,7 +349,6 @@ export default function Home() {
             {simulationResult && (
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
                 {[
-                  // 👇 這裡改用真實變數 realMonthlyPensionWan
                   { label: "預估年金月領", value: `約 ${realMonthlyPensionWan} 萬`, color: "text-blue-400" },
                   { label: "退休準備達成率", value: "85%", color: "text-emerald-400" },
                   { label: "遺產稅風險缺口", value: `${(simulationResult.trajectory.slice(-1)[0].預估遺產稅_萬 / 10).toFixed(1)} 萬`, color: "text-red-400" },
@@ -295,7 +404,6 @@ export default function Home() {
                             <p className="text-emerald-400 font-bold">▍ [現況判讀] (理專視角)</p>
                             <p>客戶目前 <span className="text-white bg-blue-900 px-1 rounded">{currentAge} 歲</span>，初始資產 <span className="text-white bg-blue-900 px-1 rounded">{initialCash} 萬</span>。</p>
                             
-                            {/* 新增的勞退精算段落 */}
                             <p className="text-blue-200">
                               經勞退引擎推算，於 65 歲退休時預估每月可領取勞保年金 <span className="text-white bg-blue-900 px-1 rounded">約 {realMonthlyPensionWan} 萬</span>，
                               可覆蓋退休後約 <span className="text-white font-bold">{pensionCoverage}%</span> 的基本開銷。
