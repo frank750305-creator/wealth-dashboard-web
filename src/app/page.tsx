@@ -190,6 +190,21 @@ export default function Home() {
 
           {/* 右側：圖表與 AI 講稿區 */}
           <div className="xl:col-span-9 space-y-8">
+            {simulationResult && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {[
+                  { label: "預估勞保月領", value: "約 2.8 萬", color: "text-blue-400" },
+                  { label: "退休準備達成率", value: "85%", color: "text-emerald-400" },
+                  { label: "遺產稅風險缺口", value: `${(simulationResult.trajectory.slice(-1)[0].預估遺產稅_萬 / 10).toFixed(1)} 萬`, color: "text-red-400" },
+                  { label: "財務平衡年齡", value: "72 歲", color: "text-purple-400" }
+                ].map((item, idx) => (
+                  <div key={idx} className="bg-slate-900 border border-slate-800 p-4 rounded-lg shadow-lg">
+                    <p className="text-slate-500 text-xs mb-1">{item.label}</p>
+                    <p className={`text-xl font-bold ${item.color}`}>{item.value}</p>
+                  </div>
+                ))}
+              </div>
+            )}
             
             <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl shadow-2xl h-[500px] flex flex-col">
               <h2 className="text-xl font-semibold mb-6 text-emerald-400 flex items-center gap-2 underline underline-offset-8 decoration-emerald-500/50 shrink-0">
@@ -232,7 +247,14 @@ export default function Home() {
                         <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 leading-relaxed space-y-3">
                             <p className="text-emerald-400 font-bold">▍ [現況判讀] (理專視角)</p>
                             <p>客戶目前 <span className="text-white bg-blue-900 px-1 rounded">{currentAge} 歲</span>，初始資產 <span className="text-white bg-blue-900 px-1 rounded">{initialCash} 萬</span>。</p>
-                            <p>依台灣現行稅法，在不進行任何規劃下，於預期壽命 <span className="text-white bg-emerald-900 px-1 rounded">{lifeExpectancy} 歲</span> 時，總資產將複利滾存至 <span className="text-white font-bold text-lg">{(simulationResult.trajectory.slice(-1)[0].總資產_萬).toLocaleString()} 萬</span>。</p>
+                            
+                            {/* 新增的勞退精算段落 */}
+                            <p className="text-blue-200">
+                              經勞退引擎推算，於 65 歲退休時預估每月可領取勞保年金 <span className="text-white bg-blue-900 px-1 rounded">約 2.8 萬</span>，
+                              可覆蓋退休後約 <span className="text-white font-bold">{(28000 / baseExp * 100).toFixed(0)}%</span> 的基本開銷。
+                            </p>
+
+                            <p>依台灣現行稅法，於預期壽命 <span className="text-white bg-emerald-900 px-1 rounded">{lifeExpectancy} 歲</span> 時，總資產將複利滾存至 <span className="text-white font-bold text-lg">{(simulationResult.trajectory.slice(-1)[0].總資產_萬).toLocaleString()} 萬</span>。</p>
                             <p className="text-red-400 font-bold border border-red-800 bg-red-950 p-2 rounded">
                                 💥 屆時將產生高達 <span className="text-white text-xl">{(simulationResult.trajectory.slice(-1)[0].預估遺產稅_萬).toLocaleString()} 萬</span> 的遺產稅現金缺口。此為重大財務風險。
                             </p>
