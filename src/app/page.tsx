@@ -23,6 +23,8 @@ export default function Home() {
   const [baseExp, setBaseExp] = useState(30000);
   const [pensionMode, setPensionMode] = useState("💼 一般勞工");
   const [lbYears, setLbYears] = useState(10);
+  const [hasSpouse, setHasSpouse] = useState(false);
+  const [kidCount, setKidCount] = useState(0);
 
   const handleSimulate = async () => {
     setIsLoading(true);
@@ -48,12 +50,15 @@ export default function Home() {
         debts: [],
         extra_incomes: [],
         family: {
-          has_spouse: false, has_father: false, has_mother: false, has_grand: false,
+          has_spouse: hasSpouse, // 👈 1. 改成變數
+          has_father: false, has_mother: false, has_grand: false,
           sp_age: 30, sp_life: 88, sp_salary: 0, sp_other_inc: 0, sp_wealth: 0, sp_add: 0, sp_rate: 0, sp_disabled: false, sp_ltc: false,
           fa_age: 65, fa_life: 85, fa_claim_tax: false, fa_tax_inc: 0, fa_disabled: false, fa_ltc: false,
           mo_age: 65, mo_life: 85, mo_claim_tax: false, mo_tax_inc: 0, mo_disabled: false, mo_ltc: false,
           gp_count: 0, gp_age: 75, gp_life: 85, gp_claim_tax: false, gp_tax_inc: 0, gp_dependent: false, gp_disabled_count: 0, gp_ltc_count: 0,
-          kids: [], siblings: [], daily_tool_val: 0, job_tool_val: 0
+          // 👇 2. 改成動態生成子女陣列（預設年齡 10 歲，撫養到 22 歲）
+          kids: Array.from({ length: kidCount }, (_, i) => ({ id: `kid_${i}`, age: 10, dep_age: 22, life: 85 })), 
+          siblings: [], daily_tool_val: 0, job_tool_val: 0
         },
         pension: {
           mode: pensionMode, 
@@ -201,9 +206,25 @@ export default function Home() {
                       <span>目前勞保年資</span>
                       <span className="text-blue-400 font-bold">{lbYears} 年</span>
                     </label>
-                    <input type="range" min="0" max="40" value={lbYears} onChange={(e) => setLbYears(Number(e.target.value))} className="w-full accent-blue-500"/>
+                    <input type="range" min="0" max="50" value={lbYears} onChange={(e) => setLbYears(Number(e.target.value))} className="w-full accent-blue-500"/>
                   </div>
                 )}
+              </div>
+              <div className="pt-6 mt-6 border-t border-slate-800 space-y-6">
+                <h3 className="text-md font-semibold text-emerald-300">👨‍👩‍👧‍👦 家庭成員 (關係到遺產稅扣除額)</h3>
+                
+                <div className="flex items-center justify-between bg-slate-950 p-3 rounded border border-slate-800">
+                  <span className="text-sm text-slate-300">是否擁有配偶</span>
+                  <input type="checkbox" checked={hasSpouse} onChange={(e) => setHasSpouse(e.target.checked)} className="w-4 h-4 accent-emerald-500 rounded cursor-pointer"/>
+                </div>
+
+                <div>
+                  <label className="flex justify-between text-xs text-slate-400 mb-2">
+                    <span>扶養子女數量</span>
+                    <span className="text-emerald-400 font-bold">{kidCount} 人</span>
+                  </label>
+                  <input type="range" min="0" max="6" value={kidCount} onChange={(e) => setKidCount(Number(e.target.value))} className="w-full accent-emerald-500"/>
+                </div>
               </div>
 
             </div>
