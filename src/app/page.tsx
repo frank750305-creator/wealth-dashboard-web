@@ -69,7 +69,7 @@ export default function Home() {
   const [tmpDYears, setTmpDYears] = useState(7);
   const [tmpDRate, setTmpDRate] = useState(3.5);
 
-  // --- 6. 家族成員與稅務扶養扣除額 (全配版) ---
+  // --- 6. 家族成員與稅務扶養扣除額 ---
   const [hasSpouse, setHasSpouse] = useState(false);
   const [spAge, setSpAge] = useState(40);
   const [spLtc, setSpLtc] = useState(false);
@@ -101,7 +101,7 @@ export default function Home() {
   const [events, setEvents] = useState<any[]>([]);
   const [tmpEvName, setTmpEvName] = useState("子女留學準備金");
   const [tmpEvAge, setTmpEvAge] = useState(50);
-  const [tmpEvAmt, setTmpEvAmt] = useState(-400); // 負數代表支出
+  const [tmpEvAmt, setTmpEvAmt] = useState(-400); 
   const [tmpEvDuration, setTmpEvDuration] = useState(4);
 
   // --- 列表新增功能器 ---
@@ -210,7 +210,7 @@ export default function Home() {
             <h1 className="text-2xl md:text-3xl font-bold tracking-wider text-slate-100 flex items-center gap-3">
               🛡️ 全方位資產配置與民法傳承精算系統 <span className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded font-mono">V3完全體</span>
             </h1>
-            <p className="text-slate-400 mt-2 text-xs md:text-sm">AI-Driven Wealth & Succession Planning System (Phase 4: 全功能核載)</p>
+            <p className="text-slate-400 mt-2 text-xs md:text-sm">AI-Driven Wealth & Succession Planning System (Phase 5: 全面報表對齊)</p>
           </div>
           <div className="bg-slate-900 px-4 py-2 rounded border border-slate-800 text-xs text-emerald-400 flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
@@ -451,6 +451,42 @@ export default function Home() {
                 )}
               </div>
             </div>
+
+            {/* 🔥 新增：逐年財富軌跡數據表 (Data Grid) */}
+            {simulationResult && (
+              <div className="bg-slate-900 border border-slate-800 p-4 md:p-6 rounded-xl shadow-2xl space-y-4 animate-fade-in">
+                <h2 className="text-base font-semibold text-blue-400 flex items-center gap-2 border-b border-slate-800 pb-3">
+                  <span>📋 逐年現金流與稅務財富軌跡明細 (Data Grid)</span>
+                </h2>
+                <div className="overflow-x-auto max-h-[400px] border border-slate-800 rounded-lg custom-scrollbar">
+                  <table className="w-full text-left border-collapse text-xs md:text-sm whitespace-nowrap">
+                    <thead className="bg-slate-950 sticky top-0 z-10 shadow-md">
+                      <tr className="border-b border-slate-800 text-slate-400">
+                        <th className="py-3 px-4 font-semibold">年齡</th>
+                        <th className="py-3 px-4 text-right font-semibold text-blue-400">預估總資產 (萬)</th>
+                        <th className="py-3 px-4 text-right font-semibold text-red-400">遺產稅缺口 (萬)</th>
+                        <th className="py-3 px-4 text-right font-semibold text-emerald-400">配偶請求權 (萬)</th>
+                        <th className="py-3 px-4 text-right font-semibold">年金收入 (元)</th>
+                        <th className="py-3 px-4 text-right font-semibold text-orange-400">應納所得稅金 (元)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800 text-slate-300 font-mono">
+                      {simulationResult.trajectory.map((row: any, idx: number) => (
+                        <tr key={idx} className="hover:bg-slate-800/50 transition-colors">
+                          <td className="py-2.5 px-4 text-center bg-slate-950/50 text-white font-bold">{row.年紀} 歲</td>
+                          <td className="py-2.5 px-4 text-right text-blue-300">{row.總資產_萬?.toLocaleString()}</td>
+                          <td className="py-2.5 px-4 text-right text-red-400 font-bold">{row.預估遺產稅_萬?.toLocaleString()}</td>
+                          <td className="py-2.5 px-4 text-right text-emerald-400">{row.差額分配請求權?.toLocaleString()}</td>
+                          <td className="py-2.5 px-4 text-right">{Math.round(row.收_年金收入 || 0).toLocaleString()}</td>
+                          <td className="py-2.5 px-4 text-right text-orange-300">{Math.round(row.支_所得稅金 || 0).toLocaleString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-[10px] text-slate-500 italic mt-2">※ 提示：此表格展示終身推演的精確數值，理專可藉此與客戶進行逐年對帳與現金流壓力測試，上下滑動可查看完整生命週期。</p>
+              </div>
+            )}
 
             {/* 深度報表分頁表格與民法試算明細 */}
             {simulationResult && (
