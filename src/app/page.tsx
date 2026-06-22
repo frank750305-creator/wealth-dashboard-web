@@ -29,7 +29,6 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const [simulationResult, setSimulationResult] = useState<any>(null);
 
-  // --- 側邊欄摺疊狀態控制 ---
   const [activeSection, setActiveSection] = useState<string>("timeline");
 
   // --- 1. 基礎時間軸與一般資產 ---
@@ -39,11 +38,21 @@ export default function Home() {
   const [stockAsset, setStockAsset] = useState(2000); 
   const [stockRate, setStockRate] = useState(6.0); 
 
-  // --- 2. 收支與勞退設定 ---
+  // --- 2. 收支與勞退設定 (展開消費細節版) ---
   const [mainSalary, setMainSalary] = useState(50000);
-  const [baseExp, setBaseExp] = useState(30000);
   const [pensionMode, setPensionMode] = useState("💼 一般勞工");
   const [lbYears, setLbYears] = useState(10);
+  
+  // 消費 6 大細項
+  const [mLiving, setMLiving] = useState(15000);
+  const [mRent, setMRent] = useState(0);
+  const [mInsurance, setMInsurance] = useState(2000);
+  const [mLaborHealth, setMLaborHealth] = useState(2000);
+  const [mParents, setMParents] = useState(5000);
+  const [mOther, setMOther] = useState(6000);
+  
+  // 動態加總總開銷
+  const baseExp = mLiving + mRent + mInsurance + mLaborHealth + mParents + mOther;
 
   // --- 3. 房產購屋與房貸寬限期模組 ---
   const [hasHouse, setHasHouse] = useState(false);
@@ -52,25 +61,21 @@ export default function Home() {
   const [mortgageRate, setMortgageRate] = useState(2.1); 
   const [graceYears, setGraceYears] = useState(3);       
 
-  // --- 4. 家族成員與稅務扣除額 (全配版) ---
+  // --- 4. 家族成員與稅務扣除額 ---
   const [hasSpouse, setHasSpouse] = useState(false);
   const [spAge, setSpAge] = useState(40);
   const [spLtc, setSpLtc] = useState(false);
-  
   const [hasFather, setHasFather] = useState(false);
   const [faAge, setFaAge] = useState(70);
   const [faLtc, setFaLtc] = useState(false);
-
   const [hasMother, setHasMother] = useState(false);
   const [moAge, setMoAge] = useState(68);
   const [moLtc, setMoLtc] = useState(false);
-
   const [kidCount, setKidCount] = useState(0);
   const [kids, setKids] = useState<{id: string, age: number, ltc: boolean}[]>([]);
 
   // --- 5. 獨立保單管理陣列模組 ---
   const [insurances, setInsurances] = useState<InsurancePolicy[]>([]);
-  // 新增保單暫存表單狀態
   const [tmpInsName, setTmpInsName] = useState("富邦傳世富足");
   const [tmpInsType, setTmpInsType] = useState("人壽保險");
   const [tmpInsApp, setTmpInsApp] = useState("本人");
@@ -103,19 +108,8 @@ export default function Home() {
 
   const addInsurancePolicy = () => {
     const newPolicy: InsurancePolicy = {
-      id: `ins_${Date.now()}`,
-      name: tmpInsName,
-      type: tmpInsType,
-      app: tmpInsApp,
-      ins: tmpInsIns,
-      ben: tmpInsBen,
-      premium: tmpInsPremium,
-      years: tmpInsYears,
-      cv: tmpInsCv,
-      irr: tmpInsIrr,
-      db: tmpInsDb,
-      survival: 0,
-      survival_age: 65
+      id: `ins_${Date.now()}`, name: tmpInsName, type: tmpInsType, app: tmpInsApp, ins: tmpInsIns, ben: tmpInsBen,
+      premium: tmpInsPremium, years: tmpInsYears, cv: tmpInsCv, irr: tmpInsIrr, db: tmpInsDb, survival: 0, survival_age: 65
     };
     setInsurances([...insurances, newPolicy]);
   };
@@ -129,23 +123,12 @@ export default function Home() {
     try {
       const payload = {
         timeline: { 
-          current_age: currentAge, 
-          life_expectancy: lifeExpectancy, 
-          retire_age: 65,
-          salary_growth: 0.012,
-          inflation_rate: 0.02,
-          replacement_rate: 0.7,
-          roi_after_retire: 0.03
+          current_age: currentAge, life_expectancy: lifeExpectancy, retire_age: 65,
+          salary_growth: 0.012, inflation_rate: 0.02, replacement_rate: 0.7, roi_after_retire: 0.03
         },
         assets: [
-          {
-            id: "asset_1", name: "日常活存", type: "現金",
-            value: initialCash, rate: 0.01, monthly_add: 0, add_years: 0, tax_type: "國內利息(計入27萬)"
-          },
-          ...(stockAsset > 0 ? [{
-            id: "asset_stock", name: "股票與基金", type: "股票",
-            value: stockAsset, rate: stockRate / 100, monthly_add: 0, add_years: 0, tax_type: "國內股利(8.5%抵減/分開)"
-          }] : [])
+          { id: "asset_1", name: "日常活存", type: "現金", value: initialCash, rate: 0.01, monthly_add: 0, add_years: 0, tax_type: "國內利息(計入27萬)" },
+          ...(stockAsset > 0 ? [{ id: "asset_stock", name: "股票與基金", type: "股票", value: stockAsset, rate: stockRate / 100, monthly_add: 0, add_years: 0, tax_type: "國內股利(8.5%抵減/分開)" }] : [])
         ],
         insurances: insurances.map(ins => ({
           id: ins.id, name: ins.name, type: ins.type, app: ins.app, ins: ins.ins, ben: ins.ben,
@@ -168,21 +151,17 @@ export default function Home() {
           siblings: [], daily_tool_val: 0, job_tool_val: 0
         },
         pension: {
-          mode: pensionMode, 
-          lb_salary: 45800, 
-          lb_current_years: lbYears, 
+          mode: pensionMode, lb_salary: 45800, lb_current_years: lbYears, 
           national_years: 0, lb_age: 65, has_old_sys: false,
           lt_bal: 0, lt_vol: 0, lt_roi: 0, pb_salary: 0, pb_years: 0, pb_type: "", tf_sys: "", tf_salary: 0, tf_years: 0, tf_bal: 0, tf_sal: 0, tf_vol: 0,
           mil_rank: "", mil_salary: 0, mil_years: 0, mil_type: "", is_rich: false, fm_wage: 0, fm_vol: 0
         },
         main_salary: mainSalary, 
-        base_m_exp: baseExp      
+        base_m_exp: baseExp // 這裡將加總後的總開銷送給後端
       };
 
       const response = await fetch("https://wealth-dashboard-api.onrender.com/api/v1/wealth/simulate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
       });
 
       if (!response.ok) throw new Error(`API 錯誤`);
@@ -212,7 +191,6 @@ export default function Home() {
     return null;
   };
 
-  // --- 動態數據監聽解析器 ---
   let realMonthlyPensionWan = "0.00";
   let pensionCoverage = "0";
   let totalEstateTaxGapWan = "0.0";
@@ -273,7 +251,8 @@ export default function Home() {
                 <span className="text-xs text-blue-400">{activeSection === 'timeline' ? '▲' : '▼'}</span>
               </button>
               {activeSection === 'timeline' && (
-                <div className="p-4 bg-slate-900/50 space-y-4 border-t border-slate-800 text-sm">
+                // ⚠️ 這裡將 p-4 改成了 p-5 pb-6，加大底部留白防止截斷
+                <div className="p-5 pb-8 bg-slate-900/50 space-y-5 border-t border-slate-800 text-sm">
                   <div>
                     <label className="flex justify-between text-xs text-slate-400 mb-2">
                       <span>客戶目前年齡</span>
@@ -306,42 +285,76 @@ export default function Home() {
               )}
             </div>
 
-            {/* 模組 2: 收支與勞退設定 */}
+            {/* 模組 2: 收支與勞退設定 (細項展開版) */}
             <div className="border border-slate-800 rounded-lg overflow-hidden">
               <button onClick={() => toggleSection('pension')} className="w-full bg-slate-950 px-4 py-3 text-left font-semibold text-slate-200 flex justify-between items-center hover:bg-slate-900 transition-colors">
-                <span>💰 收支與勞退社會保險</span>
+                <span>💰 收入、開銷明細與社會保險</span>
                 <span className="text-xs text-blue-400">{activeSection === 'pension' ? '▲' : '▼'}</span>
               </button>
               {activeSection === 'pension' && (
-                <div className="p-4 bg-slate-900/50 space-y-4 border-t border-slate-800 text-sm">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs text-slate-400 mb-1">主業月薪 (元)</label>
-                      <input type="number" step="1000" value={mainSalary} onChange={(e) => setMainSalary(Number(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-1.5 text-white font-mono focus:border-blue-500"/>
-                    </div>
-                    <div>
-                      <label className="block text-xs text-slate-400 mb-1">每月常態開銷 (元)</label>
-                      <input type="number" step="1000" value={baseExp} onChange={(e) => setBaseExp(Number(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-1.5 text-white font-mono focus:border-blue-500"/>
-                    </div>
-                  </div>
+                <div className="p-5 pb-8 bg-slate-900/50 space-y-6 border-t border-slate-800 text-sm">
+                  
+                  {/* 薪資輸入 */}
                   <div>
-                    <label className="block text-xs text-slate-400 mb-1">職業退休金制度別</label>
-                    <select value={pensionMode} onChange={(e) => setPensionMode(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-1.5 text-white focus:border-blue-500">
-                      <option value="💼 一般勞工">💼 一般勞工 (勞保+勞退自動擇優)</option>
-                      <option value="🏛️ 公教人員">🏛️ 公教人員 (退撫舊制/新改個人專戶)</option>
-                      <option value="🎖️ 軍職人員">🎖️ 軍職人員 (服役滿20年終身俸)</option>
-                      <option value="🚫 暫不設定">🚫 暫不設定</option>
-                    </select>
+                    <label className="block text-xs text-slate-400 mb-1">主業月薪 (元)</label>
+                    <input type="number" step="1000" value={mainSalary} onChange={(e) => setMainSalary(Number(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-1.5 text-white font-mono focus:border-blue-500"/>
                   </div>
-                  {pensionMode === "💼 一般勞工" && (
-                    <div>
-                      <label className="flex justify-between text-xs text-slate-400 mb-2">
-                        <span>目前已累積勞保年資</span>
-                        <span className="text-blue-400 font-bold">{lbYears} 年</span>
-                      </label>
-                      <input type="range" min="0" max="50" value={lbYears} onChange={(e) => setLbYears(Number(e.target.value))} className="w-full accent-blue-500"/>
+
+                  {/* 6 大消費細項面板 */}
+                  <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 space-y-4">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                      <span className="text-sm font-bold text-slate-300">每月總開銷 (元)</span>
+                      <span className="text-orange-400 font-bold text-lg font-mono">{baseExp.toLocaleString()}</span>
                     </div>
-                  )}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] text-slate-400 mb-1">生活餐費</label>
+                        <input type="number" step="500" value={mLiving} onChange={(e) => setMLiving(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-white font-mono focus:border-orange-500"/>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-slate-400 mb-1">房租/水電</label>
+                        <input type="number" step="500" value={mRent} onChange={(e) => setMRent(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-white font-mono focus:border-orange-500"/>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-slate-400 mb-1">一般醫療/壽險</label>
+                        <input type="number" step="500" value={mInsurance} onChange={(e) => setMInsurance(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-white font-mono focus:border-orange-500"/>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-slate-400 mb-1">勞健保費</label>
+                        <input type="number" step="500" value={mLaborHealth} onChange={(e) => setMLaborHealth(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-white font-mono focus:border-orange-500"/>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-slate-400 mb-1">孝親費</label>
+                        <input type="number" step="500" value={mParents} onChange={(e) => setMParents(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-white font-mono focus:border-orange-500"/>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-slate-400 mb-1">娛樂/其他</label>
+                        <input type="number" step="500" value={mOther} onChange={(e) => setMOther(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-white font-mono focus:border-orange-500"/>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 勞保設定 */}
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-1">職業退休金制度別</label>
+                      <select value={pensionMode} onChange={(e) => setPensionMode(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-1.5 text-white focus:border-blue-500">
+                        <option value="💼 一般勞工">💼 一般勞工 (勞保+勞退自動擇優)</option>
+                        <option value="🏛️ 公教人員">🏛️ 公教人員 (退撫舊制/新改個人專戶)</option>
+                        <option value="🎖️ 軍職人員">🎖️ 軍職人員 (服役滿20年終身俸)</option>
+                        <option value="🚫 暫不設定">🚫 暫不設定</option>
+                      </select>
+                    </div>
+                    {pensionMode === "💼 一般勞工" && (
+                      <div>
+                        <label className="flex justify-between text-xs text-slate-400 mb-2">
+                          <span>目前已累積勞保年資</span>
+                          <span className="text-blue-400 font-bold">{lbYears} 年</span>
+                        </label>
+                        <input type="range" min="0" max="50" value={lbYears} onChange={(e) => setLbYears(Number(e.target.value))} className="w-full accent-blue-500"/>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -353,7 +366,7 @@ export default function Home() {
                 <span className="text-xs text-blue-400">{activeSection === 'house' ? '▲' : '▼'}</span>
               </button>
               {activeSection === 'house' && (
-                <div className="p-4 bg-slate-900/50 space-y-4 border-t border-slate-800 text-sm">
+                <div className="p-5 pb-8 bg-slate-900/50 space-y-4 border-t border-slate-800 text-sm">
                   <div className="flex items-center justify-between bg-slate-950 p-2 rounded border border-slate-800 mb-2">
                     <span className="text-xs text-slate-300">啟用購屋增置計劃</span>
                     <input type="checkbox" checked={hasHouse} onChange={(e) => setHasHouse(e.target.checked)} className="w-4 h-4 accent-orange-500 rounded cursor-pointer"/>
@@ -393,7 +406,7 @@ export default function Home() {
                 <span className="text-xs text-blue-400">{activeSection === 'family' ? '▲' : '▼'}</span>
               </button>
               {activeSection === 'family' && (
-                <div className="p-4 bg-slate-900/50 space-y-4 border-t border-slate-800 text-sm">
+                <div className="p-5 pb-8 bg-slate-900/50 space-y-4 border-t border-slate-800 text-sm">
                   {/* 配偶區塊 */}
                   <div className="bg-slate-950 p-2.5 rounded border border-slate-800 space-y-2">
                     <div className="flex items-center justify-between">
@@ -472,7 +485,7 @@ export default function Home() {
                 <span className="text-xs text-blue-400">{activeSection === 'insurance' ? '▲' : '▼'}</span>
               </button>
               {activeSection === 'insurance' && (
-                <div className="p-4 bg-slate-900/50 space-y-3 border-t border-slate-800 text-xs">
+                <div className="p-5 pb-8 bg-slate-900/50 space-y-3 border-t border-slate-800 text-xs">
                   <div className="bg-slate-950 p-3 rounded border border-slate-800 space-y-2">
                     <input type="text" value={tmpInsName} onChange={(e) => setTmpInsName(e.target.value)} placeholder="保單自訂子名稱" className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white"/>
                     <div className="grid grid-cols-2 gap-2">
