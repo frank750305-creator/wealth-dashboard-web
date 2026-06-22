@@ -103,10 +103,23 @@ export default function Home() {
   let pensionCoverage = "0";
   
   if (simulationResult && simulationResult.trajectory) {
-    const retireData = simulationResult.trajectory.find((d: any) => d.年紀 === 65);
+    // 使用 == 確保數字與字串型態都能精準比對
+    const retireData = simulationResult.trajectory.find((d: any) => d.年紀 == 65);
+    
     if (retireData) {
-        // 後端傳回的「收_年金收入」是年領總額 (元)，除以 12 換算成月領，再除以 10000 轉成萬
-        const monthlyPensionYuan = retireData.收_年金收入 / 12;
+        const rawPension = retireData.收_年金收入;
+        let monthlyPensionYuan = 0;
+        
+        if (rawPension !== undefined) {
+            // 如果後端有乖乖傳真實數據過來
+            monthlyPensionYuan = rawPension / 12;
+        } else {
+            // 🚨 防呆機制：如果後端失憶，前端直接啟動政府 B 式備用公式！
+            // 勞保 B 式：平均月投保薪資(上限45800) × 勞保年資 × 1.55%
+            const calcSalary = mainSalary > 45800 ? 45800 : mainSalary;
+            monthlyPensionYuan = calcSalary * lbYears * 0.0155;
+        }
+        
         realMonthlyPensionWan = (monthlyPensionYuan / 10000).toFixed(2);
         pensionCoverage = baseExp > 0 ? ((monthlyPensionYuan / baseExp) * 100).toFixed(0) : "0";
     }
