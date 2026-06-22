@@ -16,7 +16,6 @@ export default function Home() {
   const [selectedReportAge, setSelectedReportAge] = useState<number>(40);
   const [activeTab, setActiveTab] = useState<string>("main");
 
-  // --- 全局狀態參數 ---
   const [currentAge, setCurrentAge] = useState(40);
   const [lifeExpectancy, setLifeExpectancy] = useState(85);
   const [retireAge, setRetireAge] = useState(65);
@@ -26,7 +25,6 @@ export default function Home() {
   const [roiAfterRetire, setRoiAfterRetire] = useState(3.0);
   const [mainSalary, setMainSalary] = useState(50000);
 
-  // --- 6 大開銷細項 ---
   const [mLiving, setMLiving] = useState(15000);
   const [mRent, setMRent] = useState(0);
   const [mInsurance, setMInsurance] = useState(2000);
@@ -35,7 +33,6 @@ export default function Home() {
   const [mOther, setMOther] = useState(6000);
   const baseExp = mLiving + mRent + mInsurance + mLaborHealth + mParents + mOther;
 
-  // --- 多元所得與資產池 ---
   const [extraIncomes, setExtraIncomes] = useState<any[]>([]);
   const [tmpIncName, setTmpIncName] = useState("兼職外快");
   const [tmpIncType, setTmpIncType] = useState("執行業務-一般(9A, 扣30%成本)");
@@ -48,7 +45,6 @@ export default function Home() {
   const [tmpAssetRate, setTmpAssetRate] = useState(6.0);
   const [tmpAssetTax, setTmpAssetTax] = useState("國內股利(8.5%抵減/分開)");
 
-  // --- 房產信貸與親屬群組 ---
   const [hasHouse, setHasHouse] = useState(false);
   const [tmpHPrice, setTmpHPrice] = useState(2500);
   const [tmpHGrace, setTmpHGrace] = useState(3);
@@ -63,7 +59,6 @@ export default function Home() {
   const [kidCount, setKidCount] = useState(0);
   const [kids, setKids] = useState<any[]>([]);
 
-  // --- ⚙️ 完美復刻 Streamlit 的 16 大法規常數控制台狀態 ---
   const [taxParams, setTaxParams] = useState<Record<string, number>>({
     exemption: 9.7, std_deduction: 13.1, salary_deduction: 21.8, inc_disabled_ded: 21.8,
     savings_limit: 27.0, amt_threshold: 750.0, rent_limit: 18.0, mortgage_limit: 30.0,
@@ -77,12 +72,15 @@ export default function Home() {
 
   const addExtraIncome = () => setExtraIncomes([...extraIncomes, { id: `inc_${Date.now()}`, name: tmpIncName, type: tmpIncType, amount: tmpIncAmt }]);
   const addAssetAccount = () => setAssets([...assets, { id: `ast_${Date.now()}`, name: tmpAssetName, type: tmpAssetType, value: tmpAssetVal, rate: tmpAssetRate, monthly_add: 0, add_years: 0, tax_type: tmpAssetTax }]);
-  const addInsurancePolicy = () => setInsurances([...insurances, { id: `ins_${Date.now()}`, name: "傳世富足", type: "人壽保險", app: "本人", ins: "本人", ben: ["法定繼承人"], premium: 20, years: 6, cv: 100, irr: 2.25, db: 500, survival: 0, survival_age: 65 }]);
+  
+  const handleKidChange = (count: number) => {
+    setKidCount(count);
+    setKids(Array.from({ length: count }, (_, i) => kids[i] || { id: `kid_${i}`, age: 10, ltc: false }));
+  };
 
   const handleSimulate = async () => {
     setIsLoading(true);
     try {
-      // 🛡️ 完美對齊後端 Pydantic Schema 的封裝包裹
       const payload = {
         timeline: { 
           current_age: currentAge, life_expectancy: lifeExpectancy, retire_age: retireAge, 
@@ -112,7 +110,6 @@ export default function Home() {
         body: JSON.stringify(payload),
       });
       
-      // 🛡️ 攔截伺服器詳細報錯訊息，方便未來除錯
       if (!response.ok) {
         const errText = await response.text();
         throw new Error(`伺服器拒絕請求 (代碼: ${response.status})\n詳細原因: ${errText}`);
@@ -129,7 +126,6 @@ export default function Home() {
 
   const snapReport = simulationResult?.trajectory?.find((d: any) => d.年紀 == selectedReportAge);
 
-  // --- 🏛️ 完美復刻 Streamlit 民法繼承應繼分與特留分雙軌試算 ---
   const renderInheritanceTable = () => {
     if (!snapReport) return null;
     const base_yuan = snapReport.民法繼承基數 * 10000;
@@ -185,7 +181,6 @@ export default function Home() {
     <main className="min-h-screen bg-slate-950 text-white p-4 md:p-8 font-sans">
       <div className="max-w-[1750px] mx-auto space-y-6">
         
-        {/* 導覽 Tab 分頁區 */}
         <div className="flex border-b border-slate-800 gap-2">
           <button onClick={()=>setActiveTab("main")} className={`px-4 py-2 text-sm font-semibold transition-all ${activeTab==="main"?"border-b-2 border-blue-500 text-blue-400 bg-slate-900/40":"text-slate-400"}`}>📊 現金流與資產傳承</button>
           <button onClick={()=>setActiveTab("tax")} className={`px-4 py-2 text-sm font-semibold transition-all ${activeTab==="tax"?"border-b-2 border-blue-500 text-blue-400 bg-slate-900/40":"text-slate-400"}`}>🏛️ 所得稅與最低稅負(AMT)精算控制台</button>
@@ -193,10 +188,8 @@ export default function Home() {
 
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
           
-          {/* 左側：模組化控制台 */}
-          <div className="xl:col-span-4 bg-slate-900 border border-slate-800 p-6 rounded-xl space-y-4 max-h-[85vh] overflow-y-auto pb-32 custom-scrollbar">
+          <div className="xl:col-span-4 bg-slate-900 border border-slate-800 p-6 rounded-xl space-y-4 max-h-[85vh] overflow-y-auto pb-32">
             
-            {/* 1. 時間軸假設 */}
             <div className="border border-slate-800 rounded-lg bg-slate-950/40 p-3 space-y-3">
               <p className="text-xs font-bold text-slate-300">▍ 1. 全局時間軸與精算參數</p>
               <div className="grid grid-cols-2 gap-2 text-xs">
@@ -205,7 +198,6 @@ export default function Home() {
               </div>
             </div>
 
-            {/* 2. 多元所得與常態開銷 */}
             <div className="border border-slate-800 rounded-lg bg-slate-950/40 p-3 space-y-3">
               <p className="text-xs font-bold text-slate-300">▍ 2. 多元收入與 6 大支出設定</p>
               <div className="grid grid-cols-2 gap-2 text-xs">
@@ -227,7 +219,6 @@ export default function Home() {
               </div>
             </div>
 
-            {/* 3. 家庭成員 */}
             <div className="border border-slate-800 rounded-lg bg-slate-950/40 p-3 space-y-2 text-xs">
               <p className="text-xs font-bold text-slate-300">▍ 3. 家庭成員與節稅配置</p>
               <label className="flex items-center gap-2"><input type="checkbox" checked={hasSpouse} onChange={(e)=>setHasSpouse(e.target.checked)}/> 納入配偶 (獨立資產: <input type="number" value={spWealth} onChange={(e)=>setSpWealth(Number(e.target.value))} className="w-16 bg-slate-900 text-white px-1"/> 萬)</label>
@@ -242,16 +233,14 @@ export default function Home() {
             </button>
           </div>
 
-          {/* 右側：多維看板與拆解明細表格 */}
           <div className="xl:col-span-8 space-y-6">
             
             {activeTab === "main" && simulationResult && (
               <div className="space-y-6 animate-fade-in">
                 
-                {/* 1. 數據趨勢與 Data Grid 明細 */}
                 <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl space-y-4">
                   <h3 className="text-sm font-bold text-blue-400">📋 終身資產、現金流與稅務財富軌跡數據表 (Data Grid)</h3>
-                  <div className="overflow-x-auto max-h-[350px] border border-slate-800 rounded-lg custom-scrollbar">
+                  <div className="overflow-x-auto max-h-[350px] border border-slate-800 rounded-lg">
                     <table className="w-full text-left border-collapse text-xs whitespace-nowrap">
                       <thead className="bg-slate-950 sticky top-0 z-10 shadow">
                         <tr className="text-slate-400 border-b border-slate-800">
@@ -279,7 +268,6 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* 2. 民法特留分雙軌分配 */}
                 <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl space-y-4">
                   <div className="flex justify-between items-center border-b border-slate-800 pb-2">
                     <h3 className="text-sm font-bold text-purple-400">🏛️ 民法應繼分與特留分保單雙軌變現分配明細表</h3>
@@ -294,7 +282,6 @@ export default function Home() {
               </div>
             )}
 
-            {/* ⚙️ 完美復刻 Streamlit 的 16 大法規常數調整控制台面板頁面 */}
             {activeTab === "tax" && (
               <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl space-y-4 animate-fade-in text-xs">
                 <h2 className="text-sm font-bold text-emerald-400 pb-2 border-b border-slate-800">⚙️ 國家級稅務法規與特別扣除額參數台 (全配完全體)</h2>
