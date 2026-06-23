@@ -63,6 +63,7 @@ export default function Home() {
   const [tmpHDownPct, setTmpHDownPct] = useState(20);
   const [tmpHRate, setTmpHRate] = useState(2.1);
   const [tmpHGrace, setTmpHGrace] = useState(3);
+  const [tmpHMethod, setTmpHMethod] = useState;
   
   const [debts, setDebts] = useState<any[]>([]);
   const [tmpDName, setTmpDName] = useState("信用貸款");
@@ -141,7 +142,8 @@ export default function Home() {
         timeline: { current_age: currentAge, life_expectancy: lifeExpectancy, retire_age: retireAge, salary_growth: salaryGrowth / 100, inflation_rate: inflationRate / 100, replacement_rate: replacementRate / 100, roi_after_retire: roiAfterRetire / 100 },
         assets: assets.map(a => ({...a, rate: a.rate / 100})),
         insurances: insurances.map(ins => ({ ...ins, ben_allocation: "均分比例", custom_ben: "", irr: ins.irr / 100 })),
-        mortgages: hasHouse ? [{ id: "house_1", name: tmpHName, start: currentAge, total_price: tmpHPrice, loan_amount: tmpHPrice * (1 - tmpHDownPct / 100), years: 30, grace: tmpHGrace, rate: tmpHRate, method: "本利平均", replace_rent: true, claim_tax: true }] : [],
+        // 找到 mortgages 這行，把 "本利平均" 改成 tmpHMethod
+mortgages: hasHouse ? [{ id: "house_1", name: tmpHName, start: currentAge, total_price: tmpHPrice, loan_amount: tmpHPrice * (1 - tmpHDownPct / 100), years: 30, grace: tmpHGrace, rate: tmpHRate, method: tmpHMethod, replace_rent: true, claim_tax: true }] : [],
         debts: debts,
         extra_incomes: extraIncomes.map(inc => ({ id: inc.id, name: inc.name, type: inc.type, monthly_amt: inc.amount })),
         events: events,
@@ -352,21 +354,39 @@ export default function Home() {
               </div>
 
               {/* 4. 負債與房產 */}
-              <div className="border border-slate-800 rounded-lg bg-slate-950/40">
-                <button onClick={() => setActiveSection(activeSection === 'liabilities' ? '' : 'liabilities')} className="w-full bg-slate-950 px-4 py-2.5 text-left font-semibold text-xs text-slate-300 flex justify-between">
-                  <span>🏠 4. 不動產置換與信貸負債</span><span>{activeSection === 'liabilities' ? '▲' : '▼'}</span>
-                </button>
-                {activeSection === 'liabilities' && (
-                  <div className="p-4 space-y-4 text-xs border-t border-slate-800">
-                    <div className="bg-slate-950 p-2.5 rounded border border-slate-800 space-y-2">
-                      <div className="flex items-center justify-between"><span className="text-[11px] font-bold text-orange-400">➕ 啟用購屋增置</span><input type="checkbox" checked={hasHouse} onChange={(e)=>setHasHouse(e.target.checked)}/></div>
-                      {hasHouse && (
-                        <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-800">
-                          <input type="number" placeholder="總價(萬)" value={tmpHPrice} onChange={(e)=>setTmpHPrice(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded p-1 text-[11px]"/>
-                          <input type="number" placeholder="寬限期" value={tmpHGrace} onChange={(e)=>setTmpHGrace(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded p-1 text-[11px]"/>
-                        </div>
-                      )}
+            <div className="border border-slate-800 rounded-lg bg-slate-950/40">
+              <button onClick={() => setActiveSection(activeSection === 'liabilities' ? '' : 'liabilities')} className="w-full bg-slate-950 px-4 py-2.5 text-left font-semibold text-xs text-slate-300 flex justify-between">
+                <span>🏠 4. 不動產置換與信貸負債</span><span>{activeSection === 'liabilities' ? '▲' : '▼'}</span>
+              </button>
+              {activeSection === 'liabilities' && (
+                <div className="p-4 space-y-4 text-xs border-t border-slate-800">
+                  <div className="bg-slate-950 p-2.5 rounded border border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between"><span className="text-[11px] font-bold text-orange-400">➕ 啟用購屋增置</span><input type="checkbox" checked={hasHouse} onChange={(e)=>setHasHouse(e.target.checked)}/></div>
+                    {hasHouse && (
+                      <div className="grid grid-cols-3 gap-2 pt-1 border-t border-slate-800">
+                        <input type="number" placeholder="總價(萬)" value={tmpHPrice} onChange={(e)=>setTmpHPrice(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded p-1 text-[11px]"/>
+                        <input type="number" placeholder="寬限期" value={tmpHGrace} onChange={(e)=>setTmpHGrace(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded p-1 text-[11px]"/>
+                        {/* 這裡就是加裝下拉選單的地方，且寬度已經自動適應成 3 欄 (grid-cols-3) */}
+                        <select value={tmpHMethod} onChange={(e)=>setTmpHMethod(e.target.value)} className="bg-slate-900 border border-slate-700 rounded p-1 text-[11px] text-white">
+                          <option value="本利平均">本利平均攤還</option>
+                          <option value="本金平均">本金平均攤還</option>
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                  <div className="bg-slate-950 p-2.5 rounded border border-slate-800 space-y-2">
+                    <p className="text-[11px] font-bold text-red-400">➕ 新增信用貸款</p>
+                    <div className="grid grid-cols-3 gap-2">
+                      <input type="text" value={tmpDName} onChange={(e)=>setTmpDName(e.target.value)} className="bg-slate-900 border border-slate-700 rounded p-1 text-[11px]"/>
+                      <input type="number" placeholder="金額(萬)" value={tmpDAmt} onChange={(e)=>setTmpDAmt(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded p-1 text-[11px]"/>
+                      <input type="number" placeholder="年期" value={tmpDYears} onChange={(e)=>setTmpDYears(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded p-1 text-[11px]"/>
                     </div>
+                    <button onClick={addDebtPlan} className="w-full bg-red-900 text-white py-1 text-[11px] rounded font-bold">綁定負債金流</button>
+                    {debts.map(d => <div key={d.id} className="text-[10px] text-slate-400">{d.name}: 貸{d.loan_amount}萬</div>)}
+                  </div>
+                </div>
+              )}
+            </div>
                     <div className="bg-slate-950 p-2.5 rounded border border-slate-800 space-y-2">
                       <p className="text-[11px] font-bold text-red-400">➕ 新增信用貸款</p>
                       <div className="grid grid-cols-3 gap-2">
