@@ -380,7 +380,7 @@ export default function Home() {
         base_m_exp: baseExp, m_rent: mRent, m_insurance: mInsurance
       };
 
-      const response = await fetch("https://wealth-dashboard-api.onrender.com/api/v1/wealth/simulate", {
+      = await fetch("/api/v1/wealth/simulate", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
       });
 
@@ -1034,8 +1034,8 @@ export default function Home() {
                           {simulationResult.trajectory.map((row: any, idx: number) => (
                             <tr key={idx} className="hover:bg-slate-800/50 transition-colors">
                               <td className="py-2.5 px-4 text-center bg-slate-950/50 text-white font-bold">{row.年紀} 歲</td>
-                              <td className="py-2.5 px-4 text-right text-blue-300">{row.總資產_萬?.toLocaleString()}</td>
-                              <td className="py-2.5 px-4 text-right text-red-400 font-bold">{row.預估遺產稅_萬?.toLocaleString()}</td>
+                              <td className="py-2.5 px-4 text-right text-blue-300">{row.總資產?.toLocaleString()}</td>
+<td className="py-2.5 px-4 text-right text-red-400 font-bold">{row.預估遺產稅?.toLocaleString()}</td>
                               <td className="py-2.5 px-4 text-right text-emerald-400">{row.差額分配請求權?.toLocaleString()}</td>
                               <td className="py-2.5 px-4 text-right">{Math.round(row.收_年金收入 || 0).toLocaleString()}</td>
                               <td className="py-2.5 px-4 text-right text-orange-300">{Math.round(row.支_所得稅金 || 0).toLocaleString()}</td>
