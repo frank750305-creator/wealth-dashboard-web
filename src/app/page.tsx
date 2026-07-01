@@ -1006,8 +1006,8 @@ export default function Home() {
                           <YAxis stroke="#64748b" tick={{ fill: '#64748b' }} tickFormatter={(v) => `${v}萬`}/>
                           <Tooltip content={<CustomTooltip />} />
                           <Legend wrapperStyle={{ paddingTop: '10px' }} />
-                          <Bar dataKey="總資產_萬" name="預估總資產" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={22}/>
-                          <Line type="monotone" dataKey="預估遺產稅_萬" name="預估遺產稅現金缺口" stroke="#ef4444" strokeWidth={3} dot={{ r: 2, fill: '#ef4444' }}/>
+                          <Bar dataKey="總資產" name="預估總資產" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={22}/>
+<Line type="monotone" dataKey="預估遺產稅" name="預估遺產稅現金缺口" stroke="#ef4444" strokeWidth={3} dot={{ r: 2, fill: '#ef4444' }}/>
                         </ComposedChart>
                       </ResponsiveContainer>
                     )}
