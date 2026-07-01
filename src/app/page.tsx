@@ -985,11 +985,12 @@ export default function Home() {
             {activeTab === "main" && (
               <div className="space-y-6 animate-fade-in">
                 {/* 圖表呈現 */}
-                <div className="bg-slate-900 border border-slate-800 p-4 md:p-6 rounded-xl shadow-2xl h-[450px] flex flex-col">
-                  <h2 className="text-base font-semibold mb-6 text-emerald-400 flex items-center gap-2 underline underline-offset-8 decoration-emerald-500/50">
-                    ▍ 終身可支配淨資產與遺產稅現金風險軌跡趨勢
-                  </h2>
-                  <div className="flex-1 w-full h-full text-xs">
+                <div className="bg-slate-900 border border-slate-800 p-4 md:p-6 rounded-xl shadow-2xl flex flex-col">
+  <h2 className="text-base font-semibold mb-6 text-emerald-400 flex items-center gap-2 underline underline-offset-8 decoration-emerald-500/50">
+    ▍ 終身可支配淨資產與遺產稅現金風險軌跡趨勢
+  </h2>
+  {/* 🚀 修復關鍵：直接給定明確的高度 h-[350px]，拿掉 flex-1 與 h-full */}
+  <div className="w-full h-[350px] text-xs">
                     {!simulationResult ? (
                       <div className="h-full flex flex-col items-center justify-center border-2 border-dashed border-slate-800 rounded-lg text-slate-600">
                         <p className="tracking-widest mb-1 text-base">等待決策控制中樞參數裝填...</p>
