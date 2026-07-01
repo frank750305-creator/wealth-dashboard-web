@@ -380,9 +380,11 @@ export default function Home() {
         base_m_exp: baseExp, m_rent: mRent, m_insurance: mInsurance
       };
 
-      = await fetch("/api/v1/wealth/simulate", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
-      });
+      const response = await fetch("/api/v1/wealth/simulate", {
+  method: "POST", 
+  headers: { "Content-Type": "application/json" }, 
+  body: JSON.stringify(payload)
+});
 
       if (!response.ok) {
         const errText = await response.text();
