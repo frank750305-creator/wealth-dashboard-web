@@ -537,6 +537,33 @@ export default function Home() {
                       <div><label className="text-slate-400">所得替代率(%)</label><input type="number" step="1" value={replacementRate} onChange={(e)=>setReplacementRate(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded p-1"/></div>
                       <div><label className="text-slate-400">退休後ROI(%)</label><input type="number" step="0.1" value={roiAfterRetire} onChange={(e)=>setRoiAfterRetire(Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded p-1"/></div>
                     </div>
+                    <div className="mt-4 space-y-3 pt-3 border-t border-slate-800">
+                      <div className="bg-slate-800/80 p-3 rounded-lg shadow-inner border-l-4 border-l-blue-500">
+                        <p className="text-blue-400 font-bold text-sm mb-1">
+                          📊 {retireAge}歲預估：月費需求：{((mainSalary * Math.pow(1+salaryGrowth/100, Math.max(0, retireAge-currentAge)) * replacementRate/100)/10000).toFixed(1)} 萬
+                        </p>
+                        <p className="text-blue-300 font-bold text-sm">
+                          總應備金：{(() => {
+                            let total = 0;
+                            const annReq = mainSalary * 12 * Math.pow(1+salaryGrowth/100, Math.max(0, retireAge-currentAge)) * replacementRate/100;
+                            const yrs = Math.max(0, lifeExpectancy - retireAge + 1);
+                            for(let y=0; y<yrs; y++) {
+                               total += (annReq * Math.pow(1+inflationRate/100, y)) / Math.pow(1+roiAfterRetire/100, y);
+                            }
+                            return (total/10000).toFixed(0);
+                          })()} 萬
+                        </p>
+                      </div>
+
+                      <div className="bg-emerald-900/40 p-3 rounded-lg shadow-inner border-l-4 border-l-emerald-500">
+                        <p className="text-emerald-400 font-bold text-sm mb-1">
+                          🎯 【真實缺口】自備月費：{Math.max(0, ((mainSalary * Math.pow(1+salaryGrowth/100, Math.max(0, retireAge-currentAge)) * replacementRate/100) - calculatePension().annuity_m_amt_wan*10000)/10000).toFixed(1)} 萬
+                        </p>
+                        <p className="text-emerald-300 font-bold text-sm">
+                          真實應備：{(realRetireFundPv/10000).toFixed(0)} 萬
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
