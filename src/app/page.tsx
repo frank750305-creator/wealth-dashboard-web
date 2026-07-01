@@ -1026,7 +1026,8 @@ export default function Home() {
                           <tr className="border-b border-slate-800 text-slate-400">
                             <th className="py-3 px-4 font-semibold">年齡</th>
                             <th className="py-3 px-4 text-right font-semibold text-blue-400">預估總資產 (萬)</th>
-                            <th className="py-3 px-4 text-right font-semibold text-red-400">遺產稅缺口 (萬)</th>
+<th className="py-3 px-4 text-right font-semibold text-purple-400">退休金專戶 (萬)</th>
+<th className="py-3 px-4 text-right font-semibold text-red-400">遺產稅缺口 (萬)</th>
                             <th className="py-3 px-4 text-right font-semibold text-emerald-400">配偶請求權 (萬)</th>
                             <th className="py-3 px-4 text-right font-semibold">年金收入 (元)</th>
                             <th className="py-3 px-4 text-right font-semibold text-orange-400">應納所得稅金 (元)</th>
@@ -1037,6 +1038,7 @@ export default function Home() {
                             <tr key={idx} className="hover:bg-slate-800/50 transition-colors">
                               <td className="py-2.5 px-4 text-center bg-slate-950/50 text-white font-bold">{row.年紀} 歲</td>
                               <td className="py-2.5 px-4 text-right text-blue-300">{row.總資產?.toLocaleString()}</td>
+<td className="py-2.5 px-4 text-right text-purple-300">{(row.退休金專戶 / 10000)?.toLocaleString(undefined, {maximumFractionDigits: 1})}</td>
 <td className="py-2.5 px-4 text-right text-red-400 font-bold">{row.預估遺產稅?.toLocaleString()}</td>
                               <td className="py-2.5 px-4 text-right text-emerald-400">{row.差額分配請求權?.toLocaleString()}</td>
                               <td className="py-2.5 px-4 text-right">{Math.round(row.收_年金收入 || 0).toLocaleString()}</td>
