@@ -1,36 +1,89 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Wealth Dashboard Web
 
-## Getting Started
+Next.js + FastAPI wealth planning dashboard for retirement, tax, insurance, debt, and inheritance simulation.
 
-First, run the development server:
+Production URL:
+
+https://wealth-dashboard-web.vercel.app
+
+## Stack
+
+- Next.js 16
+- React 19
+- Recharts
+- Tailwind CSS 4
+- FastAPI serverless function on Vercel
+
+## Local Development
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```text
+http://localhost:3000
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Verification
 
-## Learn More
+```bash
+npm run lint
+npm run typecheck
+npm run build
+```
 
-To learn more about Next.js, take a look at the following resources:
+Current lint status:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- `npm run lint` passes cleanly.
+- `npm run typecheck` passes cleanly.
+- `npm run build` passes.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## API
 
-## Deploy on Vercel
+Health check:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```text
+GET /api/health
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Main simulation:
+
+```text
+POST /api/v1/wealth/simulate
+```
+
+Vercel rewrites `/api/*` traffic to `api/index.py`.
+
+## Frontend Architecture
+
+The main app page is intentionally kept as a composition layer. Domain state, UI panels, and calculation helpers are split by responsibility:
+
+- `src/app/page.tsx`: page orchestration, high-level data flow, and layout composition.
+- `src/components/`: reusable dashboard panels, charts, tables, and report views.
+- `src/hooks/`: state containers for timeline, income, assets, pension, future events, liabilities, family, insurance, tax parameters, and simulation execution.
+- `src/lib/`: typed business logic for pension calculations, loan math, payload building, tax parameter conversion, retirement planning, and API access.
+- `src/types/`: shared wealth-planning, API payload, and simulation result types.
+
+## Deployment
+
+This repo is deployed on Vercel. The current `vercel.json` routes API requests to the Python FastAPI handler:
+
+```json
+{
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/index.py"
+    }
+  ]
+}
+```
+
+## Notes
+
+- Do not commit `.env*`, secrets, service-account keys, `.next`, `node_modules`, or Python cache files.
+- Google Cloud or BigQuery credentials should live in Vercel environment variables, GitHub Actions secrets, or GCP Secret Manager.
+- Keep API payload/result contracts typed in `src/types/wealth.ts` and update `src/lib/buildSimulationPayload.ts` when adding new simulation inputs.
