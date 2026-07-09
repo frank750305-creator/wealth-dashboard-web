@@ -6,3 +6,5 @@ aiosqlite
 asyncpg
 pydantic
 numpy
+google-cloud-bigquery
+google-auth

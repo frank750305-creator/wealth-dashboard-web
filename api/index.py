@@ -7,12 +7,22 @@ import math
 import os
 
 try:
+    from .market_data_service import (
+        MarketDataError,
+        bigquery_market_status,
+        load_portfolio_return_input,
+    )
     from .portfolio_engine import (
         PortfolioEngineError,
         analyze_portfolio_returns,
         optimize_portfolio_weights,
     )
 except ImportError:
+    from market_data_service import (
+        MarketDataError,
+        bigquery_market_status,
+        load_portfolio_return_input,
+    )
     from portfolio_engine import (
         PortfolioEngineError,
         analyze_portfolio_returns,
@@ -312,12 +322,50 @@ class PortfolioOptimizePayload(BaseModel):
     sample_count: int = 5000
     random_seed: int = 7
 
+class PortfolioAnalyzeBigQueryPayload(BaseModel):
+    weights_by_symbol: Dict[str, float]
+    benchmark_symbol: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    price_basis: str = "adjusted"
+    pricing_currency: str = "original"
+    currency_by_symbol: Optional[Dict[str, str]] = None
+    mode: str = "overlap"
+    confidence_level: float = 0.95
+    risk_free_rate: float = 0.02
+
+class PortfolioOptimizeBigQueryPayload(BaseModel):
+    symbols: List[str]
+    benchmark_symbol: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    price_basis: str = "adjusted"
+    pricing_currency: str = "original"
+    currency_by_symbol: Optional[Dict[str, str]] = None
+    mode: str = "overlap"
+    optimization_mode: str = "max_sharpe"
+    target_volatility: Optional[float] = None
+    confidence_level: float = 0.95
+    risk_free_rate: float = 0.02
+    sample_count: int = 5000
+    random_seed: int = 7
+
 def calc_tw_tax(net_inc: float) -> float:
     if net_inc <= 56: return net_inc * 0.05
     elif net_inc <= 126: return net_inc * 0.12 - 3.92
     elif net_inc <= 252: return net_inc * 0.20 - 14.0
     elif net_inc <= 498: return net_inc * 0.30 - 39.2
     else: return net_inc * 0.40 - 89.0
+
+@app.get("/api/v1/market/bigquery/status")
+async def market_bigquery_status():
+    try:
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            **bigquery_market_status(),
+        }
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
 
 @app.post("/api/v1/portfolio/analyze")
 async def analyze_portfolio(payload: PortfolioAnalyzePayload):
@@ -339,6 +387,39 @@ async def analyze_portfolio(payload: PortfolioAnalyzePayload):
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Portfolio analysis failed: {str(exc)}")
+
+@app.post("/api/v1/portfolio/analyze-bigquery")
+async def analyze_portfolio_from_bigquery(payload: PortfolioAnalyzeBigQueryPayload):
+    try:
+        market_input = load_portfolio_return_input(
+            symbols=payload.weights_by_symbol.keys(),
+            benchmark_symbol=payload.benchmark_symbol,
+            start_date=payload.start_date,
+            end_date=payload.end_date,
+            price_basis=payload.price_basis,
+            pricing_currency=payload.pricing_currency,
+            currency_by_symbol=payload.currency_by_symbol,
+        )
+        result = analyze_portfolio_returns(
+            weights_by_symbol=payload.weights_by_symbol,
+            returns_by_symbol=market_input["returns_by_symbol"],
+            benchmark_returns=market_input["benchmark_returns"],
+            dates=market_input["dates"],
+            mode=payload.mode,
+            confidence_level=payload.confidence_level,
+            risk_free_rate=payload.risk_free_rate,
+        )
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            "marketData": market_input["metadata"],
+            **result,
+        }
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+    except PortfolioEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"BigQuery portfolio analysis failed: {str(exc)}")
 
 @app.post("/api/v1/portfolio/optimize")
 async def optimize_portfolio(payload: PortfolioOptimizePayload):
@@ -364,6 +445,43 @@ async def optimize_portfolio(payload: PortfolioOptimizePayload):
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Portfolio optimization failed: {str(exc)}")
+
+@app.post("/api/v1/portfolio/optimize-bigquery")
+async def optimize_portfolio_from_bigquery(payload: PortfolioOptimizeBigQueryPayload):
+    try:
+        market_input = load_portfolio_return_input(
+            symbols=payload.symbols,
+            benchmark_symbol=payload.benchmark_symbol,
+            start_date=payload.start_date,
+            end_date=payload.end_date,
+            price_basis=payload.price_basis,
+            pricing_currency=payload.pricing_currency,
+            currency_by_symbol=payload.currency_by_symbol,
+        )
+        result = optimize_portfolio_weights(
+            returns_by_symbol=market_input["returns_by_symbol"],
+            symbols=payload.symbols,
+            benchmark_returns=market_input["benchmark_returns"],
+            dates=market_input["dates"],
+            mode=payload.mode,
+            optimization_mode=payload.optimization_mode,
+            target_volatility=payload.target_volatility,
+            confidence_level=payload.confidence_level,
+            risk_free_rate=payload.risk_free_rate,
+            sample_count=payload.sample_count,
+            random_seed=payload.random_seed,
+        )
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            "marketData": market_input["metadata"],
+            **result,
+        }
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+    except PortfolioEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"BigQuery portfolio optimization failed: {str(exc)}")
 
 @app.post("/api/v1/wealth/simulate")
 async def simulate_wealth_trajectory(payload: SimulationPayload):
