@@ -128,6 +128,8 @@ def optimize_portfolio_weights(
         "targetVolatility": _json_number(target_volatility),
         "weights": analysis["weights"],
         "metrics": analysis["metrics"],
+        "assetStatistics": analysis["assetStatistics"],
+        "wealthPath": analysis["wealthPath"],
         "dataWindow": analysis["dataWindow"],
     }
 

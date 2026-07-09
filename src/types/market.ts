@@ -131,6 +131,18 @@ export type PortfolioAnalysisWeight = {
   weight: number;
 };
 
+export type PortfolioAssetStatistic = {
+  symbol: string;
+  annualReturn: number | null;
+  annualVolatility: number | null;
+};
+
+export type PortfolioWealthPoint = {
+  date: string | null;
+  value: number | null;
+  dailyReturn: number | null;
+};
+
 export type PortfolioAnalysisDataWindow = {
   startDate: string | null;
   endDate: string | null;
@@ -143,6 +155,8 @@ export type PortfolioAnalysisResponse = {
   symbols: string[];
   weights: PortfolioAnalysisWeight[];
   metrics: PortfolioMetricSet;
+  assetStatistics: PortfolioAssetStatistic[];
+  wealthPath: PortfolioWealthPoint[];
   dataWindow: PortfolioAnalysisDataWindow;
   marketData?: {
     source: string;
@@ -162,6 +176,8 @@ export type PortfolioOptimizationResponse = {
   targetVolatility: number | null;
   weights: PortfolioAnalysisWeight[];
   metrics: PortfolioMetricSet;
+  assetStatistics: PortfolioAssetStatistic[];
+  wealthPath: PortfolioWealthPoint[];
   dataWindow: PortfolioAnalysisDataWindow;
   marketData?: PortfolioAnalysisResponse["marketData"];
 };

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { analyzePortfolioFromBigQuery, fetchBigQueryAssets, optimizePortfolioFromBigQuery } from "@/lib/marketApi";
 import type { BigQueryAsset, PortfolioAnalysisResponse, PortfolioOptimizationResponse } from "@/types/market";
 
@@ -50,6 +51,16 @@ function formatMetric(value: number | null, kind: "percent" | "number") {
   return value.toFixed(2);
 }
 
+function formatChartNumber(value: unknown) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric.toFixed(1) : "--";
+}
+
+function formatChartDate(value: unknown) {
+  if (typeof value !== "string" || value.length < 7) return "--";
+  return value.slice(2, 7).replace("-", "/");
+}
+
 function inferSymbolCurrency(symbol: string) {
   return symbol.trim().toUpperCase().endsWith(".TW") ? "TWD" : "USD";
 }
@@ -84,6 +95,34 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
   const isBusy = isAnalyzing || isOptimizing;
   const canSubmit = hasBigQueryCredentials && rows.some((row) => row.symbol.trim()) && !isBusy;
   const displayResult = optimizationResult ?? result;
+  const wealthChartData = useMemo(() => {
+    const wealthPath = displayResult?.wealthPath ?? [];
+    const step = Math.max(1, Math.floor(wealthPath.length / 360));
+
+    const sampled = wealthPath
+      .filter((point, index) => index % step === 0 && point.date && point.value !== null && Number.isFinite(point.value))
+      .map((point) => ({
+        date: point.date,
+        value: point.value,
+        dailyReturn: point.dailyReturn,
+      }));
+
+    const lastPoint = wealthPath.at(-1);
+    if (
+      lastPoint?.date &&
+      lastPoint.value !== null &&
+      Number.isFinite(lastPoint.value) &&
+      sampled.at(-1)?.date !== lastPoint.date
+    ) {
+      sampled.push({
+        date: lastPoint.date,
+        value: lastPoint.value,
+        dailyReturn: lastPoint.dailyReturn,
+      });
+    }
+
+    return sampled;
+  }, [displayResult]);
 
   useEffect(() => {
     if (!hasBigQueryCredentials) {
@@ -493,6 +532,69 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
               </div>
             ))}
           </div>
+
+          <div className="grid grid-cols-1 xl:grid-cols-[1.4fr_0.6fr] gap-4">
+            <div className="bg-slate-950 border border-slate-800 rounded-lg p-3">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <p className="text-[11px] text-slate-500">財富指數曲線</p>
+                <p className="text-[11px] text-slate-600 font-mono">Base 100</p>
+              </div>
+              <div className="h-72 w-full">
+                {wealthChartData.length ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={wealthChartData} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                      <XAxis
+                        dataKey="date"
+                        minTickGap={28}
+                        stroke="#64748b"
+                        tick={{ fill: "#64748b", fontSize: 11 }}
+                        tickFormatter={formatChartDate}
+                      />
+                      <YAxis
+                        stroke="#64748b"
+                        tick={{ fill: "#64748b", fontSize: 11 }}
+                        tickFormatter={formatChartNumber}
+                      />
+                      <Tooltip
+                        contentStyle={{ background: "#020617", border: "1px solid #1e293b", borderRadius: 8 }}
+                        labelStyle={{ color: "#cbd5e1" }}
+                        formatter={(value) => [formatChartNumber(value), "財富指數"]}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="value"
+                        stroke="#22d3ee"
+                        strokeWidth={2.5}
+                        dot={false}
+                        activeDot={{ r: 4, fill: "#67e8f9" }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-full flex items-center justify-center border border-dashed border-slate-800 rounded-md text-xs text-slate-600">
+                    尚無曲線資料
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-slate-950 border border-slate-800 rounded-lg p-3">
+              <p className="text-[11px] text-slate-500 mb-3">資產統計</p>
+              <div className="space-y-2">
+                {(displayResult.assetStatistics ?? []).map((asset) => (
+                  <div key={asset.symbol} className="border-b border-slate-900 last:border-0 pb-2 last:pb-0">
+                    <p className="text-xs text-slate-200 truncate">{asset.symbol}</p>
+                    <div className="mt-1 grid grid-cols-2 gap-2 text-[11px] font-mono">
+                      <span className="text-emerald-300">{formatMetric(asset.annualReturn, "percent")}</span>
+                      <span className="text-amber-300">{formatMetric(asset.annualVolatility, "percent")}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
           {optimizationResult && (
             <div className="bg-slate-950 border border-slate-800 rounded-lg p-3">
               <p className="text-[11px] text-slate-500 mb-2">AI 建議權重</p>
