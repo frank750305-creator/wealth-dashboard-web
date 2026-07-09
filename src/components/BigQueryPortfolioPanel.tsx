@@ -153,6 +153,11 @@ function formatChartNumber(value: unknown) {
   return Number.isFinite(numeric) ? numeric.toFixed(1) : "--";
 }
 
+function formatChartPercent(value: unknown) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? `${(numeric * 100).toFixed(1)}%` : "--";
+}
+
 function formatChartDate(value: unknown) {
   if (typeof value !== "string" || value.length < 7) return "--";
   return value.slice(2, 7).replace("-", "/");
@@ -232,6 +237,33 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
         value: lastPoint.value,
         dailyReturn: lastPoint.dailyReturn,
       });
+    }
+
+    return sampled;
+  }, [displayResult]);
+  const drawdownChartData = useMemo(() => {
+    const wealthPath = displayResult?.wealthPath ?? [];
+    const drawdownRows: Array<{ date: string; drawdown: number; value: number }> = [];
+    let runningPeak = -Infinity;
+
+    for (const point of wealthPath) {
+      const value = Number(point.value);
+      if (!point.date || !Number.isFinite(value)) continue;
+
+      runningPeak = Math.max(runningPeak, value);
+      drawdownRows.push({
+        date: point.date,
+        drawdown: runningPeak > 0 ? value / runningPeak - 1 : 0,
+        value,
+      });
+    }
+
+    const step = Math.max(1, Math.floor(drawdownRows.length / 360));
+    const sampled = drawdownRows.filter((_, index) => index % step === 0);
+    const lastPoint = drawdownRows.at(-1);
+
+    if (lastPoint && sampled.at(-1)?.date !== lastPoint.date) {
+      sampled.push(lastPoint);
     }
 
     return sampled;
@@ -984,6 +1016,51 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
                   </div>
                 ))}
               </div>
+            </div>
+          </div>
+
+          <div className="bg-slate-950 border border-slate-800 rounded-lg p-3">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <p className="text-[11px] text-slate-500">回撤曲線</p>
+              <p className="text-[11px] text-slate-600 font-mono">Peak to trough</p>
+            </div>
+            <div className="h-56 w-full">
+              {drawdownChartData.length ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={drawdownChartData} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                    <XAxis
+                      dataKey="date"
+                      minTickGap={28}
+                      stroke="#64748b"
+                      tick={{ fill: "#64748b", fontSize: 11 }}
+                      tickFormatter={formatChartDate}
+                    />
+                    <YAxis
+                      stroke="#64748b"
+                      tick={{ fill: "#64748b", fontSize: 11 }}
+                      tickFormatter={formatChartPercent}
+                    />
+                    <Tooltip
+                      contentStyle={{ background: "#020617", border: "1px solid #1e293b", borderRadius: 8 }}
+                      labelStyle={{ color: "#cbd5e1" }}
+                      formatter={(value) => [formatChartPercent(value), "回撤"]}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="drawdown"
+                      stroke="#fb7185"
+                      strokeWidth={2.5}
+                      dot={false}
+                      activeDot={{ r: 4, fill: "#fda4af" }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-full flex items-center justify-center border border-dashed border-slate-800 rounded-md text-xs text-slate-600">
+                  尚無回撤資料
+                </div>
+              )}
             </div>
           </div>
 
