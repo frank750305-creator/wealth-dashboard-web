@@ -56,6 +56,7 @@ def analyze_portfolio_returns(
         ],
         "metrics": metrics,
         "assetStatistics": asset_statistics,
+        "riskContributions": _risk_contributions(symbols, weights, model["annualCovariance"]),
         "correlationMatrix": _correlation_matrix(symbols, returns_matrix),
         "wealthPath": _wealth_path(model["portfolioDailyReturns"], model["dates"]),
         "dataWindow": {
@@ -137,6 +138,7 @@ def optimize_portfolio_weights(
         "weights": analysis["weights"],
         "metrics": analysis["metrics"],
         "assetStatistics": analysis["assetStatistics"],
+        "riskContributions": analysis["riskContributions"],
         "correlationMatrix": analysis["correlationMatrix"],
         "efficientFrontier": efficient_frontier,
         "wealthPath": analysis["wealthPath"],
@@ -311,6 +313,37 @@ def _asset_statistics(symbols: Sequence[str], annual_returns: Iterable[float], a
             "annualVolatility": _json_number(annual_volatility),
         }
         for symbol, annual_return, annual_volatility in zip(symbols, annual_returns, annual_volatilities)
+    ]
+
+
+def _risk_contributions(symbols: Sequence[str], weights: np.ndarray, annual_covariance: np.ndarray) -> List[Dict]:
+    covariance = np.asarray(annual_covariance, dtype=float)
+    portfolio_variance = float(weights.T @ covariance @ weights)
+    if portfolio_variance <= EPSILON or not math.isfinite(portfolio_variance):
+        return [
+            {
+                "symbol": symbol,
+                "weight": _json_number(weight),
+                "marginalRisk": None,
+                "riskContribution": None,
+                "riskContributionPercent": None,
+            }
+            for symbol, weight in zip(symbols, weights)
+        ]
+
+    portfolio_volatility = math.sqrt(portfolio_variance)
+    marginal_risks = covariance @ weights / portfolio_volatility
+    component_risks = weights * marginal_risks
+
+    return [
+        {
+            "symbol": symbol,
+            "weight": _json_number(weight),
+            "marginalRisk": _json_number(marginal_risk),
+            "riskContribution": _json_number(component_risk),
+            "riskContributionPercent": _json_number(_safe_divide(component_risk, portfolio_volatility)),
+        }
+        for symbol, weight, marginal_risk, component_risk in zip(symbols, weights, marginal_risks, component_risks)
     ]
 
 

@@ -148,6 +148,14 @@ export type PortfolioCorrelationMatrix = {
   values: Array<Array<number | null>>;
 };
 
+export type PortfolioRiskContribution = {
+  symbol: string;
+  weight: number | null;
+  marginalRisk: number | null;
+  riskContribution: number | null;
+  riskContributionPercent: number | null;
+};
+
 export type PortfolioFrontierPoint = {
   annualReturn: number | null;
   annualVolatility: number | null;
@@ -173,6 +181,7 @@ export type PortfolioAnalysisResponse = {
   weights: PortfolioAnalysisWeight[];
   metrics: PortfolioMetricSet;
   assetStatistics: PortfolioAssetStatistic[];
+  riskContributions?: PortfolioRiskContribution[];
   correlationMatrix: PortfolioCorrelationMatrix;
   wealthPath: PortfolioWealthPoint[];
   dataWindow: PortfolioAnalysisDataWindow;
@@ -195,6 +204,7 @@ export type PortfolioOptimizationResponse = {
   weights: PortfolioAnalysisWeight[];
   metrics: PortfolioMetricSet;
   assetStatistics: PortfolioAssetStatistic[];
+  riskContributions?: PortfolioRiskContribution[];
   correlationMatrix: PortfolioCorrelationMatrix;
   efficientFrontier?: PortfolioEfficientFrontier;
   wealthPath: PortfolioWealthPoint[];
