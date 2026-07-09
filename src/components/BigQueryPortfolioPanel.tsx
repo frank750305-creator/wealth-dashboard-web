@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { analyzePortfolioFromBigQuery } from "@/lib/marketApi";
-import type { PortfolioAnalysisResponse } from "@/types/market";
+import { analyzePortfolioFromBigQuery, optimizePortfolioFromBigQuery } from "@/lib/marketApi";
+import type { PortfolioAnalysisResponse, PortfolioOptimizationResponse } from "@/types/market";
 
 type AssetRow = {
   id: string;
@@ -56,16 +56,24 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
   const [priceBasis, setPriceBasis] = useState<"adjusted" | "raw">("adjusted");
   const [pricingCurrency, setPricingCurrency] = useState<"original" | "TWD">("TWD");
   const [mode, setMode] = useState<"overlap" | "long_rebuild">("overlap");
+  const [optimizationMode, setOptimizationMode] = useState<"max_sharpe" | "min_vol" | "max_return" | "target_vol">(
+    "max_sharpe",
+  );
+  const [targetVolatility, setTargetVolatility] = useState(12);
   const [result, setResult] = useState<PortfolioAnalysisResponse | null>(null);
+  const [optimizationResult, setOptimizationResult] = useState<PortfolioOptimizationResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isOptimizing, setIsOptimizing] = useState(false);
 
   const totalWeight = useMemo(
     () => rows.reduce((sum, row) => sum + (Number.isFinite(row.weight) ? row.weight : 0), 0),
     [rows],
   );
 
-  const canSubmit = hasBigQueryCredentials && rows.some((row) => row.symbol.trim()) && !isAnalyzing;
+  const isBusy = isAnalyzing || isOptimizing;
+  const canSubmit = hasBigQueryCredentials && rows.some((row) => row.symbol.trim()) && !isBusy;
+  const displayResult = optimizationResult ?? result;
 
   function updateRow(id: string, patch: Partial<AssetRow>) {
     setRows((currentRows) => currentRows.map((row) => (row.id === id ? { ...row, ...patch } : row)));
@@ -73,6 +81,16 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
 
   function removeRow(id: string) {
     setRows((currentRows) => currentRows.filter((row) => row.id !== id));
+  }
+
+  function activeRows() {
+    return rows.filter((row) => row.symbol.trim());
+  }
+
+  function currencyBySymbolFor(activeAssetRows: AssetRow[]) {
+    return Object.fromEntries(
+      activeAssetRows.map((row) => [row.symbol.trim(), row.currency.trim().toUpperCase() || "USD"]),
+    );
   }
 
   async function handleAnalyze() {
@@ -84,8 +102,8 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
       return;
     }
 
-    const activeRows = rows.filter((row) => row.symbol.trim());
-    if (!activeRows.length) {
+    const activeAssetRows = activeRows();
+    if (!activeAssetRows.length) {
       setError("至少需要一個商品代號。");
       return;
     }
@@ -93,10 +111,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
     setIsAnalyzing(true);
     try {
       const weightsBySymbol = Object.fromEntries(
-        activeRows.map((row) => [row.symbol.trim(), Number(row.weight) / 100]),
-      );
-      const currencyBySymbol = Object.fromEntries(
-        activeRows.map((row) => [row.symbol.trim(), row.currency.trim().toUpperCase() || "USD"]),
+        activeAssetRows.map((row) => [row.symbol.trim(), Number(row.weight) / 100]),
       );
 
       const response = await analyzePortfolioFromBigQuery({
@@ -106,15 +121,65 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
         end_date: endDate || null,
         price_basis: priceBasis,
         pricing_currency: pricingCurrency,
-        currency_by_symbol: currencyBySymbol,
+        currency_by_symbol: currencyBySymbolFor(activeAssetRows),
         mode,
       });
 
       setResult(response);
+      setOptimizationResult(null);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsAnalyzing(false);
+    }
+  }
+
+  async function handleOptimize() {
+    setError(null);
+    setResult(null);
+    setOptimizationResult(null);
+
+    if (!hasBigQueryCredentials) {
+      setError("Vercel 尚未設定 GCP_SERVICE_ACCOUNT_JSON。");
+      return;
+    }
+
+    const activeAssetRows = activeRows();
+    if (activeAssetRows.length < 2) {
+      setError("AI 調倉至少需要兩個商品。");
+      return;
+    }
+
+    setIsOptimizing(true);
+    try {
+      const response = await optimizePortfolioFromBigQuery({
+        symbols: activeAssetRows.map((row) => row.symbol.trim()),
+        benchmark_symbol: benchmarkSymbol.trim() || null,
+        start_date: startDate || null,
+        end_date: endDate || null,
+        price_basis: priceBasis,
+        pricing_currency: pricingCurrency,
+        currency_by_symbol: currencyBySymbolFor(activeAssetRows),
+        mode,
+        optimization_mode: optimizationMode,
+        target_volatility: optimizationMode === "target_vol" ? targetVolatility / 100 : null,
+      });
+
+      const optimizedWeights = Object.fromEntries(
+        response.weights.map((weightRow) => [weightRow.symbol, Number((weightRow.weight * 100).toFixed(1))]),
+      );
+
+      setRows((currentRows) =>
+        currentRows.map((row) => {
+          const symbol = row.symbol.trim();
+          return symbol in optimizedWeights ? { ...row, weight: optimizedWeights[symbol] } : row;
+        }),
+      );
+      setOptimizationResult(response);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsOptimizing(false);
     }
   }
 
@@ -125,13 +190,22 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
           <h3 className="text-sm font-bold text-cyan-300">▍ BigQuery 投組分析工作台</h3>
           <p className="text-[11px] text-slate-500 mt-1">daily_prices / daily_fx</p>
         </div>
-        <button
-          onClick={handleAnalyze}
-          disabled={!canSubmit}
-          className="self-start md:self-auto px-3 py-2 text-xs font-bold rounded-md bg-emerald-600 hover:bg-emerald-500 text-white transition-colors disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
-        >
-          {isAnalyzing ? "分析中" : "執行分析"}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={handleAnalyze}
+            disabled={!canSubmit}
+            className="px-3 py-2 text-xs font-bold rounded-md bg-emerald-600 hover:bg-emerald-500 text-white transition-colors disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
+          >
+            {isAnalyzing ? "分析中" : "執行分析"}
+          </button>
+          <button
+            onClick={handleOptimize}
+            disabled={!canSubmit}
+            className="px-3 py-2 text-xs font-bold rounded-md bg-cyan-600 hover:bg-cyan-500 text-white transition-colors disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
+          >
+            {isOptimizing ? "調倉中" : "AI 調倉"}
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-[1.3fr_0.7fr] gap-4">
@@ -251,6 +325,32 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
               <option value="long_rebuild">長線重建法</option>
             </select>
           </label>
+          <label className="space-y-1 col-span-2">
+            <span className="text-slate-500">AI 策略</span>
+            <select
+              value={optimizationMode}
+              onChange={(event) =>
+                setOptimizationMode(event.target.value as "max_sharpe" | "min_vol" | "max_return" | "target_vol")
+              }
+              className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-2 text-slate-100"
+            >
+              <option value="max_sharpe">最大夏普</option>
+              <option value="min_vol">最小風險</option>
+              <option value="max_return">最大報酬</option>
+              <option value="target_vol">指定波動率</option>
+            </select>
+          </label>
+          {optimizationMode === "target_vol" && (
+            <label className="space-y-1 col-span-2">
+              <span className="text-slate-500">目標波動率 %</span>
+              <input
+                type="number"
+                value={targetVolatility}
+                onChange={(event) => setTargetVolatility(Number(event.target.value))}
+                className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-2 text-slate-100 font-mono"
+              />
+            </label>
+          )}
         </div>
       </div>
 
@@ -266,21 +366,34 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
         </div>
       )}
 
-      {result && (
+      {displayResult && (
         <div className="space-y-4">
           <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
             {metricCards.map((metric) => (
               <div key={metric.key} className="bg-slate-950 border border-slate-800 rounded-lg p-3">
                 <p className="text-[11px] text-slate-500 mb-1">{metric.label}</p>
                 <p className="text-lg font-bold text-slate-100 font-mono">
-                  {formatMetric(result.metrics[metric.key], metric.kind)}
+                  {formatMetric(displayResult.metrics[metric.key], metric.kind)}
                 </p>
               </div>
             ))}
           </div>
+          {optimizationResult && (
+            <div className="bg-slate-950 border border-slate-800 rounded-lg p-3">
+              <p className="text-[11px] text-slate-500 mb-2">AI 建議權重</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
+                {optimizationResult.weights.map((weightRow) => (
+                  <div key={weightRow.symbol} className="flex items-center justify-between gap-3 text-xs">
+                    <span className="text-slate-300 truncate">{weightRow.symbol}</span>
+                    <span className="text-cyan-200 font-mono">{(weightRow.weight * 100).toFixed(1)}%</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="text-xs text-slate-400 font-mono">
-            {result.dataWindow.startDate ?? "--"} ~ {result.dataWindow.endDate ?? "--"} ·{" "}
-            {result.dataWindow.observations} observations
+            {displayResult.dataWindow.startDate ?? "--"} ~ {displayResult.dataWindow.endDate ?? "--"} ·{" "}
+            {displayResult.dataWindow.observations} observations
           </div>
         </div>
       )}

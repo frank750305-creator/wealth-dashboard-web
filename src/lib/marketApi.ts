@@ -3,6 +3,8 @@ import type {
   MarketSourcesResponse,
   PortfolioAnalysisResponse,
   PortfolioAnalyzeBigQueryPayload,
+  PortfolioOptimizationResponse,
+  PortfolioOptimizeBigQueryPayload,
 } from "@/types/market";
 
 export async function fetchMarketSources(): Promise<MarketSourcesResponse> {
@@ -45,6 +47,23 @@ export async function analyzePortfolioFromBigQuery(
   if (!response.ok) {
     const errText = await response.text();
     throw new Error(`BigQuery 投組分析異常 (代碼: ${response.status})\n${errText}`);
+  }
+
+  return response.json();
+}
+
+export async function optimizePortfolioFromBigQuery(
+  payload: PortfolioOptimizeBigQueryPayload,
+): Promise<PortfolioOptimizationResponse> {
+  const response = await fetch("/api/v1/portfolio/optimize-bigquery", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`BigQuery AI 調倉異常 (代碼: ${response.status})\n${errText}`);
   }
 
   return response.json();

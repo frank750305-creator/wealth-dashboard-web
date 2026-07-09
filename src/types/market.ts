@@ -40,6 +40,19 @@ export type PortfolioAnalyzeBigQueryPayload = {
   mode: "overlap" | "long_rebuild";
 };
 
+export type PortfolioOptimizeBigQueryPayload = {
+  symbols: string[];
+  benchmark_symbol?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  price_basis: "adjusted" | "raw";
+  pricing_currency: "original" | "TWD";
+  currency_by_symbol?: Record<string, string>;
+  mode: "overlap" | "long_rebuild";
+  optimization_mode: "max_sharpe" | "min_vol" | "max_return" | "target_vol";
+  target_volatility?: number | null;
+};
+
 export type PortfolioMetricSet = {
   cumulativeReturn: number | null;
   cagr: number | null;
@@ -88,4 +101,14 @@ export type PortfolioAnalysisResponse = {
     endDate: string | null;
     observations: number;
   };
+};
+
+export type PortfolioOptimizationResponse = {
+  generatedAt: string;
+  optimizationMode: "max_sharpe" | "min_vol" | "max_return" | "target_vol";
+  targetVolatility: number | null;
+  weights: PortfolioAnalysisWeight[];
+  metrics: PortfolioMetricSet;
+  dataWindow: PortfolioAnalysisDataWindow;
+  marketData?: PortfolioAnalysisResponse["marketData"];
 };
