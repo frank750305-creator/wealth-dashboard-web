@@ -109,6 +109,13 @@ def optimize_portfolio_weights(
         target_volatility=target_volatility,
         risk_free_rate=risk_free_rate,
     )
+    efficient_frontier = _efficient_frontier(
+        candidates=candidates,
+        selected_weights=chosen_weights,
+        annual_returns=asset_returns,
+        annual_covariance=covariance,
+        risk_free_rate=risk_free_rate,
+    )
 
     weights_by_symbol = {
         symbol: float(weight)
@@ -131,6 +138,7 @@ def optimize_portfolio_weights(
         "metrics": analysis["metrics"],
         "assetStatistics": analysis["assetStatistics"],
         "correlationMatrix": analysis["correlationMatrix"],
+        "efficientFrontier": efficient_frontier,
         "wealthPath": analysis["wealthPath"],
         "dataWindow": analysis["dataWindow"],
     }
@@ -361,6 +369,89 @@ def _weight_candidates(asset_count: int, sample_count: int, random_seed: int) ->
     equal_weight = np.ones((1, asset_count), dtype=float) / asset_count
     single_asset = np.eye(asset_count, dtype=float)
     return np.vstack([equal_weight, single_asset, random_candidates])
+
+
+def _efficient_frontier(
+    *,
+    candidates: np.ndarray,
+    selected_weights: np.ndarray,
+    annual_returns: np.ndarray,
+    annual_covariance: np.ndarray,
+    risk_free_rate: float,
+    max_points: int = 360,
+    max_frontier_points: int = 90,
+) -> Dict:
+    candidate_returns = candidates @ annual_returns
+    candidate_variances = np.einsum("ij,jk,ik->i", candidates, annual_covariance, candidates)
+    candidate_volatilities = np.sqrt(np.maximum(candidate_variances, 0.0))
+    candidate_sharpes = np.array(
+        [
+            _safe_divide(ret - risk_free_rate, vol)
+            for ret, vol in zip(candidate_returns, candidate_volatilities)
+        ],
+        dtype=float,
+    )
+
+    finite_mask = np.isfinite(candidate_returns) & np.isfinite(candidate_volatilities)
+    finite_indices = np.where(finite_mask)[0]
+    if len(finite_indices) == 0:
+        return {
+            "points": [],
+            "frontier": [],
+            "selectedPoint": _portfolio_point(selected_weights, annual_returns, annual_covariance, risk_free_rate),
+        }
+
+    ordered_indices = finite_indices[np.argsort(candidate_volatilities[finite_indices])]
+    point_indices = _sample_indices(ordered_indices, max_points)
+
+    frontier_indices = []
+    best_return = -math.inf
+    for index in ordered_indices:
+        annual_return = float(candidate_returns[index])
+        if annual_return > best_return + 1e-9:
+            frontier_indices.append(int(index))
+            best_return = annual_return
+    frontier_indices = _sample_indices(np.asarray(frontier_indices, dtype=int), max_frontier_points)
+
+    return {
+        "points": [
+            _frontier_point(candidate_returns[index], candidate_volatilities[index], candidate_sharpes[index])
+            for index in point_indices
+        ],
+        "frontier": [
+            _frontier_point(candidate_returns[index], candidate_volatilities[index], candidate_sharpes[index])
+            for index in frontier_indices
+        ],
+        "selectedPoint": _portfolio_point(selected_weights, annual_returns, annual_covariance, risk_free_rate),
+    }
+
+
+def _sample_indices(indices: np.ndarray, max_count: int) -> List[int]:
+    if len(indices) <= max_count:
+        return [int(index) for index in indices]
+    sample_positions = np.linspace(0, len(indices) - 1, max_count, dtype=int)
+    return [int(indices[position]) for position in sample_positions]
+
+
+def _portfolio_point(
+    weights: np.ndarray,
+    annual_returns: np.ndarray,
+    annual_covariance: np.ndarray,
+    risk_free_rate: float,
+) -> Dict:
+    annual_return = float(weights @ annual_returns)
+    variance = float(weights.T @ annual_covariance @ weights)
+    annual_volatility = math.sqrt(max(variance, 0.0))
+    sharpe = _safe_divide(annual_return - risk_free_rate, annual_volatility)
+    return _frontier_point(annual_return, annual_volatility, sharpe)
+
+
+def _frontier_point(annual_return: float, annual_volatility: float, sharpe: Optional[float]) -> Dict:
+    return {
+        "annualReturn": _json_number(annual_return),
+        "annualVolatility": _json_number(annual_volatility),
+        "sharpe": _json_number(sharpe),
+    }
 
 
 def _choose_candidate(

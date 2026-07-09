@@ -148,6 +148,18 @@ export type PortfolioCorrelationMatrix = {
   values: Array<Array<number | null>>;
 };
 
+export type PortfolioFrontierPoint = {
+  annualReturn: number | null;
+  annualVolatility: number | null;
+  sharpe: number | null;
+};
+
+export type PortfolioEfficientFrontier = {
+  points: PortfolioFrontierPoint[];
+  frontier: PortfolioFrontierPoint[];
+  selectedPoint: PortfolioFrontierPoint;
+};
+
 export type PortfolioAnalysisDataWindow = {
   startDate: string | null;
   endDate: string | null;
@@ -184,6 +196,7 @@ export type PortfolioOptimizationResponse = {
   metrics: PortfolioMetricSet;
   assetStatistics: PortfolioAssetStatistic[];
   correlationMatrix: PortfolioCorrelationMatrix;
+  efficientFrontier?: PortfolioEfficientFrontier;
   wealthPath: PortfolioWealthPoint[];
   dataWindow: PortfolioAnalysisDataWindow;
   marketData?: PortfolioAnalysisResponse["marketData"];
