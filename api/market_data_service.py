@@ -267,9 +267,17 @@ def _bigquery_client(bigquery):
         except Exception as exc:
             raise MarketDataConfigError("GCP service account JSON environment variable is invalid.") from exc
 
-        return bigquery.Client(credentials=credentials, project=project_id or credentials.project_id)
+        try:
+            return bigquery.Client(credentials=credentials, project=project_id or credentials.project_id)
+        except Exception as exc:
+            raise MarketDataConfigError("BigQuery service account credentials could not be initialized.") from exc
 
-    return bigquery.Client(project=project_id)
+    try:
+        return bigquery.Client(project=project_id)
+    except Exception as exc:
+        raise MarketDataConfigError(
+            "BigQuery credentials are not configured. Set GCP_SERVICE_ACCOUNT_JSON in Vercel."
+        ) from exc
 
 
 def _bigquery_module():
