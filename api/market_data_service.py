@@ -125,6 +125,75 @@ def load_bigquery_market_diagnostics() -> Dict:
     return diagnostics
 
 
+def search_bigquery_assets(*, query: Optional[str] = None, limit: int = 20) -> Dict:
+    bigquery = _bigquery_module()
+    client = _bigquery_client(bigquery)
+    price_table = _table_path("BIGQUERY_PRICE_TABLE", DEFAULT_PRICE_TABLE)
+    clean_query = (query or "").strip().lower()
+    bounded_limit = max(1, min(int(limit or 20), 50))
+
+    where_clause = ""
+    query_parameters = [
+        bigquery.ScalarQueryParameter("limit", "INT64", bounded_limit),
+    ]
+    if clean_query:
+        where_clause = "WHERE LOWER(symbol) LIKE @query_pattern"
+        query_parameters.extend(
+            [
+                bigquery.ScalarQueryParameter("query_pattern", "STRING", f"%{clean_query}%"),
+                bigquery.ScalarQueryParameter("query_exact", "STRING", clean_query),
+                bigquery.ScalarQueryParameter("query_prefix", "STRING", clean_query),
+            ]
+        )
+        order_clause = """
+        CASE
+            WHEN LOWER(symbol) = @query_exact THEN 0
+            WHEN STARTS_WITH(LOWER(symbol), @query_prefix) THEN 1
+            ELSE 2
+        END,
+        latest_date DESC,
+        row_count DESC,
+        symbol
+        """
+    else:
+        order_clause = "latest_date DESC, row_count DESC, symbol"
+
+    asset_query = f"""
+    SELECT
+        symbol,
+        MIN(DATE(date)) AS first_date,
+        MAX(DATE(date)) AS latest_date,
+        COUNT(1) AS row_count,
+        COUNTIF(SAFE_CAST(adj_price AS FLOAT64) > 0) AS adjusted_price_rows,
+        COUNTIF(SAFE_CAST(raw_price AS FLOAT64) > 0) AS raw_price_rows
+    FROM {price_table}
+    {where_clause}
+    GROUP BY symbol
+    ORDER BY {order_clause}
+    LIMIT @limit
+    """
+
+    try:
+        rows = list(
+            client.query(
+                asset_query,
+                job_config=bigquery.QueryJobConfig(query_parameters=query_parameters),
+            ).result()
+        )
+    except Exception as exc:
+        raise MarketDataQueryError(f"BigQuery asset search query failed: {exc}") from exc
+
+    return {
+        "status": bigquery_market_status(),
+        "query": clean_query,
+        "limit": bounded_limit,
+        "assets": [
+            _summary_row_to_dict(row, date_fields=("first_date", "latest_date"))
+            for row in rows
+        ],
+    }
+
+
 def load_portfolio_return_input(
     *,
     symbols: Iterable[str],

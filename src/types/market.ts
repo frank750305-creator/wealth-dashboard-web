@@ -65,6 +65,23 @@ export type BigQueryMarketDiagnostics = {
   recentSymbols: BigQueryRecentSymbol[];
 };
 
+export type BigQueryAsset = {
+  symbol: string;
+  first_date: string | null;
+  latest_date: string | null;
+  row_count: number;
+  adjusted_price_rows: number;
+  raw_price_rows: number;
+};
+
+export type BigQueryAssetSearchResponse = {
+  generatedAt: string;
+  status: Omit<BigQueryMarketStatus, "generatedAt">;
+  query: string;
+  limit: number;
+  assets: BigQueryAsset[];
+};
+
 export type PortfolioAnalyzeBigQueryPayload = {
   weights_by_symbol: Record<string, number>;
   benchmark_symbol?: string | null;

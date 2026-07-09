@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { analyzePortfolioFromBigQuery, optimizePortfolioFromBigQuery } from "@/lib/marketApi";
-import type { PortfolioAnalysisResponse, PortfolioOptimizationResponse } from "@/types/market";
+import { useEffect, useMemo, useState } from "react";
+import { analyzePortfolioFromBigQuery, fetchBigQueryAssets, optimizePortfolioFromBigQuery } from "@/lib/marketApi";
+import type { BigQueryAsset, PortfolioAnalysisResponse, PortfolioOptimizationResponse } from "@/types/market";
 
 type AssetRow = {
   id: string;
@@ -17,8 +17,10 @@ type BigQueryPortfolioPanelProps = {
 
 const initialRows: AssetRow[] = [
   { id: "asset-0050", symbol: "0050.TW", weight: 50, currency: "TWD" },
-  { id: "asset-spy", symbol: "SPDR S&P500 ETF", weight: 50, currency: "USD" },
+  { id: "asset-spy", symbol: "SPY", weight: 50, currency: "USD" },
 ];
+
+const assetOptionListId = "bigquery-asset-symbol-options";
 
 const metricCards: Array<{
   key: keyof PortfolioAnalysisResponse["metrics"];
@@ -48,6 +50,10 @@ function formatMetric(value: number | null, kind: "percent" | "number") {
   return value.toFixed(2);
 }
 
+function inferSymbolCurrency(symbol: string) {
+  return symbol.trim().toUpperCase().endsWith(".TW") ? "TWD" : "USD";
+}
+
 export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortfolioPanelProps) {
   const [rows, setRows] = useState<AssetRow[]>(initialRows);
   const [benchmarkSymbol, setBenchmarkSymbol] = useState("0050.TW");
@@ -65,6 +71,10 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
   const [error, setError] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isOptimizing, setIsOptimizing] = useState(false);
+  const [assetQuery, setAssetQuery] = useState("");
+  const [assetSuggestions, setAssetSuggestions] = useState<BigQueryAsset[]>([]);
+  const [assetSearchError, setAssetSearchError] = useState<string | null>(null);
+  const [isLoadingAssets, setIsLoadingAssets] = useState(false);
 
   const totalWeight = useMemo(
     () => rows.reduce((sum, row) => sum + (Number.isFinite(row.weight) ? row.weight : 0), 0),
@@ -74,6 +84,39 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
   const isBusy = isAnalyzing || isOptimizing;
   const canSubmit = hasBigQueryCredentials && rows.some((row) => row.symbol.trim()) && !isBusy;
   const displayResult = optimizationResult ?? result;
+
+  useEffect(() => {
+    if (!hasBigQueryCredentials) {
+      return;
+    }
+
+    let isCancelled = false;
+    const timer = window.setTimeout(async () => {
+      setIsLoadingAssets(true);
+      setAssetSearchError(null);
+
+      try {
+        const response = await fetchBigQueryAssets(assetQuery, assetQuery.trim() ? 20 : 12);
+        if (!isCancelled) {
+          setAssetSuggestions(response.assets);
+        }
+      } catch (err: unknown) {
+        if (!isCancelled) {
+          setAssetSuggestions([]);
+          setAssetSearchError(err instanceof Error ? err.message : String(err));
+        }
+      } finally {
+        if (!isCancelled) {
+          setIsLoadingAssets(false);
+        }
+      }
+    }, 350);
+
+    return () => {
+      isCancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [assetQuery, hasBigQueryCredentials]);
 
   function updateRow(id: string, patch: Partial<AssetRow>) {
     setRows((currentRows) => currentRows.map((row) => (row.id === id ? { ...row, ...patch } : row)));
@@ -85,6 +128,27 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
 
   function activeRows() {
     return rows.filter((row) => row.symbol.trim());
+  }
+
+  function applyAssetSuggestion(symbol: string) {
+    const currency = inferSymbolCurrency(symbol);
+    setRows((currentRows) => {
+      const emptyRowIndex = currentRows.findIndex((row) => !row.symbol.trim());
+
+      if (emptyRowIndex >= 0) {
+        return currentRows.map((row, index) => (index === emptyRowIndex ? { ...row, symbol, currency } : row));
+      }
+
+      return [
+        ...currentRows,
+        {
+          ...makeRow(),
+          symbol,
+          currency,
+        },
+      ];
+    });
+    setAssetQuery(symbol);
   }
 
   function currencyBySymbolFor(activeAssetRows: AssetRow[]) {
@@ -217,11 +281,25 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
             <span />
           </div>
 
+          <datalist id={assetOptionListId}>
+            {assetSuggestions.map((asset) => (
+              <option
+                key={asset.symbol}
+                value={asset.symbol}
+                label={`${asset.latest_date ?? "--"} · ${asset.row_count.toLocaleString("zh-TW")} 筆`}
+              />
+            ))}
+          </datalist>
+
           {rows.map((row) => (
             <div key={row.id} className="grid grid-cols-[1fr_72px_82px_36px] gap-2">
               <input
                 value={row.symbol}
-                onChange={(event) => updateRow(row.id, { symbol: event.target.value })}
+                list={hasBigQueryCredentials ? assetOptionListId : undefined}
+                onChange={(event) => {
+                  updateRow(row.id, { symbol: event.target.value });
+                  setAssetQuery(event.target.value);
+                }}
                 className="min-w-0 bg-slate-950 border border-slate-700 rounded-md px-2 py-2 text-xs text-slate-100"
               />
               <input
@@ -263,6 +341,35 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
               {totalWeight.toFixed(1)}%
             </p>
           </div>
+
+          {hasBigQueryCredentials && (
+            <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 space-y-2">
+              <div className="flex items-center justify-between gap-3 text-[11px]">
+                <span className="text-slate-500">BigQuery 商品候選</span>
+                <span className="text-slate-500 font-mono">
+                  {isLoadingAssets ? "搜尋中" : `${assetSuggestions.length} 筆`}
+                </span>
+              </div>
+              {assetSearchError ? (
+                <p className="text-[11px] text-red-300 whitespace-pre-wrap">{assetSearchError}</p>
+              ) : assetSuggestions.length ? (
+                <div className="flex flex-wrap gap-2">
+                  {assetSuggestions.slice(0, 8).map((asset) => (
+                    <button
+                      key={asset.symbol}
+                      onClick={() => applyAssetSuggestion(asset.symbol)}
+                      className="max-w-full min-w-0 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-left text-[11px] text-slate-200 hover:border-cyan-600"
+                    >
+                      <span className="block truncate font-bold text-cyan-200">{asset.symbol}</span>
+                      <span className="block truncate text-slate-500">{asset.latest_date ?? "--"}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-[11px] text-slate-500">查無候選</p>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-3 text-xs">
@@ -270,7 +377,11 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
             <span className="text-slate-500">Benchmark</span>
             <input
               value={benchmarkSymbol}
-              onChange={(event) => setBenchmarkSymbol(event.target.value)}
+              list={hasBigQueryCredentials ? assetOptionListId : undefined}
+              onChange={(event) => {
+                setBenchmarkSymbol(event.target.value);
+                setAssetQuery(event.target.value);
+              }}
               className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-2 text-slate-100"
             />
           </label>

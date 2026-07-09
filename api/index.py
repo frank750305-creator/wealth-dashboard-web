@@ -12,6 +12,7 @@ try:
         bigquery_market_status,
         load_bigquery_market_diagnostics,
         load_portfolio_return_input,
+        search_bigquery_assets,
     )
     from .portfolio_engine import (
         PortfolioEngineError,
@@ -24,6 +25,7 @@ except ImportError:
         bigquery_market_status,
         load_bigquery_market_diagnostics,
         load_portfolio_return_input,
+        search_bigquery_assets,
     )
     from portfolio_engine import (
         PortfolioEngineError,
@@ -375,6 +377,16 @@ async def market_bigquery_diagnostics():
         return {
             "generatedAt": datetime.now(timezone.utc).isoformat(),
             **load_bigquery_market_diagnostics(),
+        }
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+@app.get("/api/v1/market/bigquery/assets")
+async def market_bigquery_assets(q: Optional[str] = None, limit: int = 20):
+    try:
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            **search_bigquery_assets(query=q, limit=limit),
         }
     except MarketDataError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc))
