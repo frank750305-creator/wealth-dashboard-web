@@ -17,7 +17,7 @@ type BigQueryPortfolioPanelProps = {
 
 const initialRows: AssetRow[] = [
   { id: "asset-0050", symbol: "0050.TW", weight: 50, currency: "TWD" },
-  { id: "asset-spy", symbol: "SPY", weight: 50, currency: "USD" },
+  { id: "asset-spy", symbol: "SPDR S&P500 ETF", weight: 50, currency: "USD" },
 ];
 
 const assetOptionListId = "bigquery-asset-symbol-options";
@@ -286,7 +286,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
               <option
                 key={asset.symbol}
                 value={asset.symbol}
-                label={`${asset.latest_date ?? "--"} · ${asset.row_count.toLocaleString("zh-TW")} 筆`}
+                label={`${asset.latest_date ?? "--"} · Adj ${asset.adjusted_price_rows.toLocaleString("zh-TW")} · Raw ${asset.raw_price_rows.toLocaleString("zh-TW")}`}
               />
             ))}
           </datalist>
@@ -362,6 +362,10 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
                     >
                       <span className="block truncate font-bold text-cyan-200">{asset.symbol}</span>
                       <span className="block truncate text-slate-500">{asset.latest_date ?? "--"}</span>
+                      <span className="block truncate text-slate-500">
+                        Adj {asset.adjusted_price_rows.toLocaleString("zh-TW")} · Raw{" "}
+                        {asset.raw_price_rows.toLocaleString("zh-TW")}
+                      </span>
                     </button>
                   ))}
                 </div>
