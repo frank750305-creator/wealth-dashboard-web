@@ -6,6 +6,19 @@ from datetime import datetime, timezone
 import math
 import os
 
+try:
+    from .portfolio_engine import (
+        PortfolioEngineError,
+        analyze_portfolio_returns,
+        optimize_portfolio_weights,
+    )
+except ImportError:
+    from portfolio_engine import (
+        PortfolioEngineError,
+        analyze_portfolio_returns,
+        optimize_portfolio_weights,
+    )
+
 app = FastAPI(title="高資產傳承與所得稅擇優核算大腦", version="4.0_Ultimate")
 
 ALLOWED_ORIGINS = [
@@ -277,12 +290,80 @@ class SimulationPayload(BaseModel):
     m_rent: float
     m_insurance: float
 
+class PortfolioAnalyzePayload(BaseModel):
+    weights_by_symbol: Dict[str, float]
+    returns_by_symbol: Dict[str, List[Optional[float]]]
+    benchmark_returns: Optional[List[Optional[float]]] = None
+    dates: Optional[List[str]] = None
+    mode: str = "overlap"
+    confidence_level: float = 0.95
+    risk_free_rate: float = 0.02
+
+class PortfolioOptimizePayload(BaseModel):
+    returns_by_symbol: Dict[str, List[Optional[float]]]
+    symbols: Optional[List[str]] = None
+    benchmark_returns: Optional[List[Optional[float]]] = None
+    dates: Optional[List[str]] = None
+    mode: str = "overlap"
+    optimization_mode: str = "max_sharpe"
+    target_volatility: Optional[float] = None
+    confidence_level: float = 0.95
+    risk_free_rate: float = 0.02
+    sample_count: int = 5000
+    random_seed: int = 7
+
 def calc_tw_tax(net_inc: float) -> float:
     if net_inc <= 56: return net_inc * 0.05
     elif net_inc <= 126: return net_inc * 0.12 - 3.92
     elif net_inc <= 252: return net_inc * 0.20 - 14.0
     elif net_inc <= 498: return net_inc * 0.30 - 39.2
     else: return net_inc * 0.40 - 89.0
+
+@app.post("/api/v1/portfolio/analyze")
+async def analyze_portfolio(payload: PortfolioAnalyzePayload):
+    try:
+        result = analyze_portfolio_returns(
+            weights_by_symbol=payload.weights_by_symbol,
+            returns_by_symbol=payload.returns_by_symbol,
+            benchmark_returns=payload.benchmark_returns,
+            dates=payload.dates,
+            mode=payload.mode,
+            confidence_level=payload.confidence_level,
+            risk_free_rate=payload.risk_free_rate,
+        )
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            **result,
+        }
+    except PortfolioEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Portfolio analysis failed: {str(exc)}")
+
+@app.post("/api/v1/portfolio/optimize")
+async def optimize_portfolio(payload: PortfolioOptimizePayload):
+    try:
+        result = optimize_portfolio_weights(
+            returns_by_symbol=payload.returns_by_symbol,
+            symbols=payload.symbols,
+            benchmark_returns=payload.benchmark_returns,
+            dates=payload.dates,
+            mode=payload.mode,
+            optimization_mode=payload.optimization_mode,
+            target_volatility=payload.target_volatility,
+            confidence_level=payload.confidence_level,
+            risk_free_rate=payload.risk_free_rate,
+            sample_count=payload.sample_count,
+            random_seed=payload.random_seed,
+        )
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            **result,
+        }
+    except PortfolioEngineError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Portfolio optimization failed: {str(exc)}")
 
 @app.post("/api/v1/wealth/simulate")
 async def simulate_wealth_trajectory(payload: SimulationPayload):
