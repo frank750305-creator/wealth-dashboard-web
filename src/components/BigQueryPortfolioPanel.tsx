@@ -33,6 +33,14 @@ type SavedPortfolioPreset = {
 
 type PortfolioResult = PortfolioAnalysisResponse | PortfolioOptimizationResponse;
 
+type RebalanceRecommendation = {
+  symbol: string;
+  currentWeight: number;
+  targetWeight: number;
+  deltaWeight: number;
+  action: "increase" | "decrease" | "hold";
+};
+
 type ExportedPortfolioPayload = {
   presetName?: string;
   configuration?: {
@@ -51,6 +59,7 @@ type ExportedPortfolioPayload = {
     targetVolatility?: number;
   };
   result?: PortfolioResult;
+  rebalancing?: RebalanceRecommendation[];
 };
 
 const initialRows: AssetRow[] = [
@@ -162,10 +171,44 @@ function assetStatisticsCsv(result: PortfolioResult) {
   return [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
+function rebalancingCsv(rows: RebalanceRecommendation[]) {
+  const header = ["symbol", "current_weight", "target_weight", "delta_weight", "action"];
+  const csvRows = rows.map((row) => [row.symbol, row.currentWeight, row.targetWeight, row.deltaWeight, row.action]);
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
 function formatMetric(value: number | null, kind: "percent" | "number") {
   if (value === null || !Number.isFinite(value)) return "--";
   if (kind === "percent") return `${(value * 100).toFixed(2)}%`;
   return value.toFixed(2);
+}
+
+function formatSignedWeightDelta(value: number) {
+  if (!Number.isFinite(value)) return "--";
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${(value * 100).toFixed(1)}pp`;
+}
+
+function rebalanceAction(deltaWeight: number): RebalanceRecommendation["action"] {
+  if (Math.abs(deltaWeight) < 0.0005) return "hold";
+  return deltaWeight > 0 ? "increase" : "decrease";
+}
+
+function rebalanceActionLabel(action: RebalanceRecommendation["action"]) {
+  if (action === "increase") return "加碼";
+  if (action === "decrease") return "減碼";
+  return "維持";
+}
+
+function rebalanceActionClass(action: RebalanceRecommendation["action"]) {
+  if (action === "increase") return "text-emerald-300 bg-emerald-500/10 border-emerald-500/30";
+  if (action === "decrease") return "text-rose-300 bg-rose-500/10 border-rose-500/30";
+  return "text-slate-300 bg-slate-800 border-slate-700";
+}
+
+function rebalanceBarWidth(value: number) {
+  if (!Number.isFinite(value)) return "0%";
+  return `${Math.min(Math.abs(value) * 100, 100).toFixed(1)}%`;
 }
 
 function riskContributionBarWidth(value: number | null | undefined) {
@@ -219,6 +262,36 @@ function importedWeightToPercent(weight: unknown) {
   return Math.abs(numeric) <= 1 ? Number((numeric * 100).toFixed(2)) : numeric;
 }
 
+function buildRebalanceRows(
+  currentRows: Array<Pick<AssetRow, "symbol" | "weight">>,
+  targetRows: PortfolioOptimizationResponse["weights"],
+) {
+  const totalWeight = currentRows.reduce((sum, row) => sum + (Number(row.weight) || 0), 0);
+  const currentBySymbol = new Map(
+    currentRows.map((row) => [
+      row.symbol.trim(),
+      totalWeight > 0 ? (Number(row.weight) || 0) / totalWeight : 0,
+    ]),
+  );
+
+  return targetRows.map((targetRow) => {
+    const targetWeight = Number(targetRow.weight) || 0;
+    const currentWeight = currentBySymbol.get(targetRow.symbol) ?? 0;
+    const deltaWeight = targetWeight - currentWeight;
+    return {
+      symbol: targetRow.symbol,
+      currentWeight,
+      targetWeight,
+      deltaWeight,
+      action: rebalanceAction(deltaWeight),
+    };
+  });
+}
+
+function isRebalanceRows(value: unknown): value is RebalanceRecommendation[] {
+  return Array.isArray(value) && value.every((row) => row && typeof row === "object" && "symbol" in row);
+}
+
 export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortfolioPanelProps) {
   const [rows, setRows] = useState<AssetRow[]>(initialRows);
   const [benchmarkSymbol, setBenchmarkSymbol] = useState("0050.TW");
@@ -233,6 +306,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
   const [targetVolatility, setTargetVolatility] = useState(12);
   const [result, setResult] = useState<PortfolioAnalysisResponse | null>(null);
   const [optimizationResult, setOptimizationResult] = useState<PortfolioOptimizationResponse | null>(null);
+  const [rebalanceRows, setRebalanceRows] = useState<RebalanceRecommendation[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isOptimizing, setIsOptimizing] = useState(false);
@@ -454,6 +528,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
     setPresetName(preset.name);
     setResult(null);
     setOptimizationResult(null);
+    setRebalanceRows([]);
     setError(null);
   }
 
@@ -505,6 +580,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
       setTargetVolatility(Number.isFinite(config.targetVolatility) ? Number(config.targetVolatility) : 12);
       setPresetName(payload.presetName?.trim() || file.name.replace(/\.json$/i, ""));
       setSelectedPresetId("");
+      setRebalanceRows(isRebalanceRows(payload.rebalancing) ? payload.rebalancing : []);
       setError(null);
 
       if (isPortfolioResult(payload.result)) {
@@ -546,6 +622,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
         targetVolatility,
       },
       result: displayResult,
+      rebalancing: rebalanceRows,
     };
   }
 
@@ -580,9 +657,20 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
     );
   }
 
+  function handleExportRebalancingCsv() {
+    if (!rebalanceRows.length) return;
+
+    downloadTextFile(
+      `bigquery-rebalancing-${resultStamp()}.csv`,
+      rebalancingCsv(rebalanceRows),
+      "text/csv;charset=utf-8",
+    );
+  }
+
   async function handleAnalyze() {
     setError(null);
     setResult(null);
+    setRebalanceRows([]);
 
     if (!hasBigQueryCredentials) {
       setError("Vercel 尚未設定 GCP_SERVICE_ACCOUNT_JSON。");
@@ -625,6 +713,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
     setError(null);
     setResult(null);
     setOptimizationResult(null);
+    setRebalanceRows([]);
 
     if (!hasBigQueryCredentials) {
       setError("Vercel 尚未設定 GCP_SERVICE_ACCOUNT_JSON。");
@@ -655,6 +744,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
       const optimizedWeights = Object.fromEntries(
         response.weights.map((weightRow) => [weightRow.symbol, Number((weightRow.weight * 100).toFixed(1))]),
       );
+      const nextRebalanceRows = buildRebalanceRows(activeAssetRows, response.weights);
 
       setRows((currentRows) =>
         currentRows.map((row) => {
@@ -663,6 +753,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
         }),
       );
       setOptimizationResult(response);
+      setRebalanceRows(nextRebalanceRows);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -991,6 +1082,14 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
               >
                 資產 CSV
               </button>
+              {rebalanceRows.length ? (
+                <button
+                  onClick={handleExportRebalancingCsv}
+                  className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
+                >
+                  調倉 CSV
+                </button>
+              ) : null}
             </div>
           </div>
 
@@ -1004,6 +1103,67 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
               </div>
             ))}
           </div>
+
+          {rebalanceRows.length ? (
+            <div className="bg-slate-950 border border-slate-800 rounded-lg p-3">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <p className="text-[11px] text-slate-500">再平衡建議</p>
+                <p className="text-[11px] text-slate-600 font-mono">Current → Target</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[680px] text-xs">
+                  <thead>
+                    <tr className="text-left text-[11px] text-slate-600">
+                      <th className="py-2 pr-3 font-medium">Asset</th>
+                      <th className="py-2 px-3 font-medium text-right">Current</th>
+                      <th className="py-2 px-3 font-medium text-right">Target</th>
+                      <th className="py-2 px-3 font-medium">Delta</th>
+                      <th className="py-2 pl-3 font-medium text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rebalanceRows.map((row) => (
+                      <tr key={row.symbol} className="border-t border-slate-900">
+                        <td className="py-2 pr-3 text-slate-200">
+                          <span title={row.symbol} className="block max-w-48 truncate">
+                            {row.symbol}
+                          </span>
+                        </td>
+                        <td className="py-2 px-3 text-right font-mono text-slate-400">
+                          {formatMetric(row.currentWeight, "percent")}
+                        </td>
+                        <td className="py-2 px-3 text-right font-mono text-cyan-200">
+                          {formatMetric(row.targetWeight, "percent")}
+                        </td>
+                        <td className="py-2 px-3">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`w-16 font-mono ${
+                                row.deltaWeight > 0 ? "text-emerald-300" : row.deltaWeight < 0 ? "text-rose-300" : "text-slate-400"
+                              }`}
+                            >
+                              {formatSignedWeightDelta(row.deltaWeight)}
+                            </span>
+                            <div className="h-2 min-w-24 flex-1 rounded-full bg-slate-900 overflow-hidden">
+                              <div
+                                className={`h-full rounded-full ${row.deltaWeight >= 0 ? "bg-emerald-400" : "bg-rose-400"}`}
+                                style={{ width: rebalanceBarWidth(row.deltaWeight) }}
+                              />
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-2 pl-3 text-right">
+                          <span className={`inline-flex min-w-12 justify-center rounded-md border px-2 py-1 text-[11px] font-bold ${rebalanceActionClass(row.action)}`}>
+                            {rebalanceActionLabel(row.action)}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
 
           {riskContributionRows.length ? (
             <div className="bg-slate-950 border border-slate-800 rounded-lg p-3">
