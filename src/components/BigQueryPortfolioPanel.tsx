@@ -1,7 +1,7 @@
 "use client";
 
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
-import { CartesianGrid, ComposedChart, Line, LineChart, ResponsiveContainer, Scatter, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, ComposedChart, Line, LineChart, ResponsiveContainer, Scatter, Tooltip, XAxis, YAxis } from "recharts";
 import { analyzePortfolioFromBigQuery, fetchBigQueryAssets, optimizePortfolioFromBigQuery } from "@/lib/marketApi";
 import type { BigQueryAsset, PortfolioAnalysisResponse, PortfolioOptimizationResponse } from "@/types/market";
 
@@ -320,6 +320,11 @@ function formatChartDate(value: unknown) {
   return value.slice(2, 7).replace("-", "/");
 }
 
+function formatShortSymbol(value: unknown) {
+  const text = String(value ?? "");
+  return text.length > 12 ? `${text.slice(0, 10)}…` : text;
+}
+
 function inferSymbolCurrency(symbol: string) {
   return symbol.trim().toUpperCase().endsWith(".TW") ? "TWD" : "USD";
 }
@@ -457,6 +462,17 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
   const rebalanceSummary = useMemo(
     () => summarizeRebalance(rebalanceRows, portfolioValue),
     [rebalanceRows, portfolioValue],
+  );
+  const rebalanceChartData = useMemo(
+    () =>
+      [...rebalanceRows]
+        .sort((left, right) => Math.abs(right.deltaWeight) - Math.abs(left.deltaWeight))
+        .map((row) => ({
+          symbol: row.symbol,
+          currentWeight: row.currentWeight,
+          targetWeight: row.targetWeight,
+        })),
+    [rebalanceRows],
   );
   const wealthChartData = useMemo(() => {
     const wealthPath = displayResult?.wealthPath ?? [];
@@ -1322,6 +1338,35 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
                     {formatMoney(rebalanceSummary.totalEstimatedCost)}
                   </p>
                 </div>
+              </div>
+              <div className="mb-3 h-56 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={rebalanceChartData} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                    <XAxis
+                      dataKey="symbol"
+                      minTickGap={18}
+                      stroke="#64748b"
+                      tick={{ fill: "#64748b", fontSize: 11 }}
+                      tickFormatter={formatShortSymbol}
+                    />
+                    <YAxis
+                      stroke="#64748b"
+                      tick={{ fill: "#64748b", fontSize: 11 }}
+                      tickFormatter={formatChartPercent}
+                    />
+                    <Tooltip
+                      contentStyle={{ background: "#020617", border: "1px solid #1e293b", borderRadius: 8 }}
+                      labelStyle={{ color: "#cbd5e1" }}
+                      formatter={(value, name) => [
+                        formatChartPercent(value),
+                        String(name) === "currentWeight" ? "Current" : "Target",
+                      ]}
+                    />
+                    <Bar dataKey="currentWeight" name="Current" fill="#64748b" radius={[3, 3, 0, 0]} />
+                    <Bar dataKey="targetWeight" name="Target" fill="#22d3ee" radius={[3, 3, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[920px] text-xs">
