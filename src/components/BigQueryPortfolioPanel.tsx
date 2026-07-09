@@ -45,6 +45,14 @@ type RebalanceRecommendation = {
   action: "increase" | "decrease" | "hold";
 };
 
+type RebalanceSummary = {
+  totalBuy: number;
+  totalSell: number;
+  netCashFlow: number;
+  turnover: number | null;
+  totalEstimatedCost: number;
+};
+
 type ExportedPortfolioPayload = {
   presetName?: string;
   configuration?: {
@@ -260,6 +268,23 @@ function rebalanceBarWidth(value: number) {
   return `${Math.min(Math.abs(value) * 100, 100).toFixed(1)}%`;
 }
 
+function summarizeRebalance(rows: RebalanceRecommendation[], portfolioValue: number): RebalanceSummary {
+  const totalBuy = rows.reduce((sum, row) => sum + Math.max(row.tradeAmount, 0), 0);
+  const totalSell = rows.reduce((sum, row) => sum + Math.max(-row.tradeAmount, 0), 0);
+  const totalEstimatedCost = rows.reduce(
+    (sum, row) => sum + (Number.isFinite(row.estimatedCost) ? row.estimatedCost : 0),
+    0,
+  );
+
+  return {
+    totalBuy,
+    totalSell,
+    netCashFlow: totalBuy - totalSell,
+    turnover: portfolioValue > 0 ? (totalBuy + totalSell) / (2 * portfolioValue) : null,
+    totalEstimatedCost,
+  };
+}
+
 function riskContributionBarWidth(value: number | null | undefined) {
   if (value === null || value === undefined || !Number.isFinite(value)) return "0%";
   return `${Math.min(Math.abs(value) * 100, 100).toFixed(1)}%`;
@@ -429,9 +454,9 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
         Math.abs(right.riskContributionPercent ?? 0) - Math.abs(left.riskContributionPercent ?? 0),
     );
   }, [displayResult]);
-  const totalEstimatedCost = useMemo(
-    () => rebalanceRows.reduce((sum, row) => sum + (Number.isFinite(row.estimatedCost) ? row.estimatedCost : 0), 0),
-    [rebalanceRows],
+  const rebalanceSummary = useMemo(
+    () => summarizeRebalance(rebalanceRows, portfolioValue),
+    [rebalanceRows, portfolioValue],
   );
   const wealthChartData = useMemo(() => {
     const wealthPath = displayResult?.wealthPath ?? [];
@@ -1257,7 +1282,45 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
                 <p className="text-[11px] text-slate-500">再平衡建議</p>
                 <div className="text-right">
                   <p className="text-[11px] text-slate-600 font-mono">{formatMoney(portfolioValue)}</p>
-                  <p className="text-[11px] text-slate-500 font-mono">Cost {formatMoney(totalEstimatedCost)}</p>
+                  <p className="text-[11px] text-slate-500 font-mono">
+                    Cost {formatMoney(rebalanceSummary.totalEstimatedCost)}
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-3">
+                <div className="rounded-md border border-slate-800 bg-slate-900/60 p-2">
+                  <p className="text-[11px] text-slate-600">Buy</p>
+                  <p className="mt-1 font-mono text-xs text-emerald-300">{formatMoney(rebalanceSummary.totalBuy)}</p>
+                </div>
+                <div className="rounded-md border border-slate-800 bg-slate-900/60 p-2">
+                  <p className="text-[11px] text-slate-600">Sell</p>
+                  <p className="mt-1 font-mono text-xs text-rose-300">{formatMoney(rebalanceSummary.totalSell)}</p>
+                </div>
+                <div className="rounded-md border border-slate-800 bg-slate-900/60 p-2">
+                  <p className="text-[11px] text-slate-600">Net Cash</p>
+                  <p
+                    className={`mt-1 font-mono text-xs ${
+                      rebalanceSummary.netCashFlow > 0
+                        ? "text-emerald-300"
+                        : rebalanceSummary.netCashFlow < 0
+                          ? "text-rose-300"
+                          : "text-slate-300"
+                    }`}
+                  >
+                    {formatMoney(rebalanceSummary.netCashFlow, true)}
+                  </p>
+                </div>
+                <div className="rounded-md border border-slate-800 bg-slate-900/60 p-2">
+                  <p className="text-[11px] text-slate-600">Turnover</p>
+                  <p className="mt-1 font-mono text-xs text-cyan-200">
+                    {formatMetric(rebalanceSummary.turnover, "percent")}
+                  </p>
+                </div>
+                <div className="rounded-md border border-slate-800 bg-slate-900/60 p-2">
+                  <p className="text-[11px] text-slate-600">Cost</p>
+                  <p className="mt-1 font-mono text-xs text-amber-200">
+                    {formatMoney(rebalanceSummary.totalEstimatedCost)}
+                  </p>
                 </div>
               </div>
               <div className="overflow-x-auto">
