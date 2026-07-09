@@ -22,6 +22,7 @@ type SavedPortfolioPreset = {
   rows: Array<Pick<AssetRow, "symbol" | "weight" | "currency">>;
   portfolioValue?: number;
   transactionCostBps?: number;
+  minTradeAmount?: number;
   benchmarkSymbol: string;
   startDate: string;
   endDate: string;
@@ -42,7 +43,7 @@ type RebalanceRecommendation = {
   deltaWeight: number;
   tradeAmount: number;
   estimatedCost: number;
-  action: "increase" | "decrease" | "hold";
+  action: "increase" | "decrease" | "hold" | "skip";
 };
 
 type RebalanceSummary = {
@@ -63,6 +64,7 @@ type ExportedPortfolioPayload = {
     }>;
     portfolioValue?: number;
     transactionCostBps?: number;
+    minTradeAmount?: number;
     benchmarkSymbol?: string | null;
     startDate?: string | null;
     endDate?: string | null;
@@ -85,6 +87,7 @@ const assetOptionListId = "bigquery-asset-symbol-options";
 const presetStorageKey = "wealth-dashboard.bigqueryPortfolioPresets";
 const defaultPortfolioValue = 1_000_000;
 const defaultTransactionCostBps = 10;
+const defaultMinTradeAmount = 1_000;
 
 const moneyFormatter = new Intl.NumberFormat("zh-TW", {
   maximumFractionDigits: 0,
@@ -241,25 +244,33 @@ function normalizeTransactionCostBps(value: unknown, fallback = defaultTransacti
   return Number.isFinite(numeric) && numeric >= 0 ? numeric : fallback;
 }
 
+function normalizeMinTradeAmount(value: unknown, fallback = defaultMinTradeAmount) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric >= 0 ? numeric : fallback;
+}
+
 function estimateTradeCost(tradeAmount: number, transactionCostBps: number) {
   if (!Number.isFinite(tradeAmount) || !Number.isFinite(transactionCostBps)) return 0;
   return Math.abs(tradeAmount) * (transactionCostBps / 10000);
 }
 
-function rebalanceAction(deltaWeight: number): RebalanceRecommendation["action"] {
+function rebalanceAction(deltaWeight: number, tradeAmount: number, minTradeAmount: number): RebalanceRecommendation["action"] {
   if (Math.abs(deltaWeight) < 0.0005) return "hold";
+  if (Math.abs(tradeAmount) < minTradeAmount) return "skip";
   return deltaWeight > 0 ? "increase" : "decrease";
 }
 
 function rebalanceActionLabel(action: RebalanceRecommendation["action"]) {
   if (action === "increase") return "加碼";
   if (action === "decrease") return "減碼";
+  if (action === "skip") return "略過";
   return "維持";
 }
 
 function rebalanceActionClass(action: RebalanceRecommendation["action"]) {
   if (action === "increase") return "text-emerald-300 bg-emerald-500/10 border-emerald-500/30";
   if (action === "decrease") return "text-rose-300 bg-rose-500/10 border-rose-500/30";
+  if (action === "skip") return "text-slate-400 bg-slate-900 border-slate-700";
   return "text-slate-300 bg-slate-800 border-slate-700";
 }
 
@@ -269,9 +280,10 @@ function rebalanceBarWidth(value: number) {
 }
 
 function summarizeRebalance(rows: RebalanceRecommendation[], portfolioValue: number): RebalanceSummary {
-  const totalBuy = rows.reduce((sum, row) => sum + Math.max(row.tradeAmount, 0), 0);
-  const totalSell = rows.reduce((sum, row) => sum + Math.max(-row.tradeAmount, 0), 0);
-  const totalEstimatedCost = rows.reduce(
+  const executableRows = rows.filter((row) => row.action === "increase" || row.action === "decrease");
+  const totalBuy = executableRows.reduce((sum, row) => sum + Math.max(row.tradeAmount, 0), 0);
+  const totalSell = executableRows.reduce((sum, row) => sum + Math.max(-row.tradeAmount, 0), 0);
+  const totalEstimatedCost = executableRows.reduce(
     (sum, row) => sum + (Number.isFinite(row.estimatedCost) ? row.estimatedCost : 0),
     0,
   );
@@ -345,12 +357,27 @@ function applyTradeAssumptions(
   rows: RebalanceRecommendation[],
   portfolioValue: number,
   transactionCostBps: number,
+  minTradeAmount: number,
 ) {
   return rows.map((row) => ({
     ...row,
-    tradeAmount: row.deltaWeight * portfolioValue,
-    estimatedCost: estimateTradeCost(row.deltaWeight * portfolioValue, transactionCostBps),
+    ...tradeFieldsFor(row.deltaWeight, portfolioValue, transactionCostBps, minTradeAmount),
   }));
+}
+
+function tradeFieldsFor(
+  deltaWeight: number,
+  portfolioValue: number,
+  transactionCostBps: number,
+  minTradeAmount: number,
+) {
+  const tradeAmount = deltaWeight * portfolioValue;
+  const action = rebalanceAction(deltaWeight, tradeAmount, minTradeAmount);
+  return {
+    tradeAmount,
+    estimatedCost: action === "increase" || action === "decrease" ? estimateTradeCost(tradeAmount, transactionCostBps) : 0,
+    action,
+  };
 }
 
 function buildRebalanceRows(
@@ -358,6 +385,7 @@ function buildRebalanceRows(
   targetRows: PortfolioOptimizationResponse["weights"],
   portfolioValue: number,
   transactionCostBps: number,
+  minTradeAmount: number,
 ) {
   const totalWeight = currentRows.reduce((sum, row) => sum + (Number(row.weight) || 0), 0);
   const currentBySymbol = new Map(
@@ -371,20 +399,22 @@ function buildRebalanceRows(
     const targetWeight = Number(targetRow.weight) || 0;
     const currentWeight = currentBySymbol.get(targetRow.symbol) ?? 0;
     const deltaWeight = targetWeight - currentWeight;
-    const tradeAmount = deltaWeight * portfolioValue;
     return {
       symbol: targetRow.symbol,
       currentWeight,
       targetWeight,
       deltaWeight,
-      tradeAmount,
-      estimatedCost: estimateTradeCost(tradeAmount, transactionCostBps),
-      action: rebalanceAction(deltaWeight),
+      ...tradeFieldsFor(deltaWeight, portfolioValue, transactionCostBps, minTradeAmount),
     };
   });
 }
 
-function normalizeRebalanceRows(value: unknown, portfolioValue: number, transactionCostBps: number) {
+function normalizeRebalanceRows(
+  value: unknown,
+  portfolioValue: number,
+  transactionCostBps: number,
+  minTradeAmount: number,
+) {
   if (!Array.isArray(value)) return [];
 
   return value.flatMap((row) => {
@@ -396,7 +426,6 @@ function normalizeRebalanceRows(value: unknown, portfolioValue: number, transact
     const targetWeight = Number(item.targetWeight);
     const deltaWeight = Number.isFinite(Number(item.deltaWeight)) ? Number(item.deltaWeight) : targetWeight - currentWeight;
     if (!Number.isFinite(currentWeight) || !Number.isFinite(targetWeight) || !Number.isFinite(deltaWeight)) return [];
-    const tradeAmount = deltaWeight * portfolioValue;
 
     return [
       {
@@ -404,11 +433,7 @@ function normalizeRebalanceRows(value: unknown, portfolioValue: number, transact
         currentWeight,
         targetWeight,
         deltaWeight,
-        tradeAmount,
-        estimatedCost: estimateTradeCost(tradeAmount, transactionCostBps),
-        action: item.action === "increase" || item.action === "decrease" || item.action === "hold"
-          ? item.action
-          : rebalanceAction(deltaWeight),
+        ...tradeFieldsFor(deltaWeight, portfolioValue, transactionCostBps, minTradeAmount),
       },
     ];
   });
@@ -428,6 +453,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
   const [targetVolatility, setTargetVolatility] = useState(12);
   const [portfolioValue, setPortfolioValue] = useState(defaultPortfolioValue);
   const [transactionCostBps, setTransactionCostBps] = useState(defaultTransactionCostBps);
+  const [minTradeAmount, setMinTradeAmount] = useState(defaultMinTradeAmount);
   const [result, setResult] = useState<PortfolioAnalysisResponse | null>(null);
   const [optimizationResult, setOptimizationResult] = useState<PortfolioOptimizationResponse | null>(null);
   const [rebalanceRows, setRebalanceRows] = useState<RebalanceRecommendation[]>([]);
@@ -590,13 +616,21 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
   function handlePortfolioValueChange(value: number) {
     const nextValue = normalizePortfolioValue(value, 0);
     setPortfolioValue(nextValue);
-    setRebalanceRows((currentRows) => applyTradeAssumptions(currentRows, nextValue, transactionCostBps));
+    setRebalanceRows((currentRows) => applyTradeAssumptions(currentRows, nextValue, transactionCostBps, minTradeAmount));
   }
 
   function handleTransactionCostBpsChange(value: number) {
     const nextCostBps = normalizeTransactionCostBps(value, 0);
     setTransactionCostBps(nextCostBps);
-    setRebalanceRows((currentRows) => applyTradeAssumptions(currentRows, portfolioValue, nextCostBps));
+    setRebalanceRows((currentRows) => applyTradeAssumptions(currentRows, portfolioValue, nextCostBps, minTradeAmount));
+  }
+
+  function handleMinTradeAmountChange(value: number) {
+    const nextMinTradeAmount = normalizeMinTradeAmount(value, 0);
+    setMinTradeAmount(nextMinTradeAmount);
+    setRebalanceRows((currentRows) =>
+      applyTradeAssumptions(currentRows, portfolioValue, transactionCostBps, nextMinTradeAmount),
+    );
   }
 
   function applyAssetSuggestion(symbol: string) {
@@ -646,6 +680,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
           })),
       portfolioValue,
       transactionCostBps,
+      minTradeAmount,
       benchmarkSymbol,
       startDate,
       endDate,
@@ -680,6 +715,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
     setTargetVolatility(preset.targetVolatility);
     setPortfolioValue(normalizePortfolioValue(preset.portfolioValue));
     setTransactionCostBps(normalizeTransactionCostBps(preset.transactionCostBps));
+    setMinTradeAmount(normalizeMinTradeAmount(preset.minTradeAmount));
     setPresetName(preset.name);
     setResult(null);
     setOptimizationResult(null);
@@ -735,11 +771,15 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
       setTargetVolatility(Number.isFinite(config.targetVolatility) ? Number(config.targetVolatility) : 12);
       const nextPortfolioValue = normalizePortfolioValue(config.portfolioValue);
       const nextTransactionCostBps = normalizeTransactionCostBps(config.transactionCostBps);
+      const nextMinTradeAmount = normalizeMinTradeAmount(config.minTradeAmount);
       setPortfolioValue(nextPortfolioValue);
       setTransactionCostBps(nextTransactionCostBps);
+      setMinTradeAmount(nextMinTradeAmount);
       setPresetName(payload.presetName?.trim() || file.name.replace(/\.json$/i, ""));
       setSelectedPresetId("");
-      setRebalanceRows(normalizeRebalanceRows(payload.rebalancing, nextPortfolioValue, nextTransactionCostBps));
+      setRebalanceRows(
+        normalizeRebalanceRows(payload.rebalancing, nextPortfolioValue, nextTransactionCostBps, nextMinTradeAmount),
+      );
       setError(null);
 
       if (isPortfolioResult(payload.result)) {
@@ -773,6 +813,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
         })),
         portfolioValue,
         transactionCostBps,
+        minTradeAmount,
         benchmarkSymbol,
         startDate,
         endDate,
@@ -910,6 +951,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
         response.weights,
         portfolioValue,
         transactionCostBps,
+        minTradeAmount,
       );
 
       setRows((currentRows) =>
@@ -1147,6 +1189,17 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
               step={1}
               value={transactionCostBps}
               onChange={(event) => handleTransactionCostBpsChange(Number(event.target.value))}
+              className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-2 text-slate-100 font-mono"
+            />
+          </label>
+          <label className="space-y-1 col-span-2">
+            <span className="text-slate-500">最小交易金額 TWD</span>
+            <input
+              type="number"
+              min={0}
+              step={1000}
+              value={minTradeAmount}
+              onChange={(event) => handleMinTradeAmountChange(Number(event.target.value))}
               className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-2 text-slate-100 font-mono"
             />
           </label>
