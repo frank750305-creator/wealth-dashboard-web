@@ -10,6 +10,7 @@ try:
     from .market_data_service import (
         MarketDataError,
         bigquery_market_status,
+        load_bigquery_market_diagnostics,
         load_portfolio_return_input,
     )
     from .portfolio_engine import (
@@ -21,6 +22,7 @@ except ImportError:
     from market_data_service import (
         MarketDataError,
         bigquery_market_status,
+        load_bigquery_market_diagnostics,
         load_portfolio_return_input,
     )
     from portfolio_engine import (
@@ -363,6 +365,16 @@ async def market_bigquery_status():
         return {
             "generatedAt": datetime.now(timezone.utc).isoformat(),
             **bigquery_market_status(),
+        }
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+@app.get("/api/v1/market/bigquery/diagnostics")
+async def market_bigquery_diagnostics():
+    try:
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            **load_bigquery_market_diagnostics(),
         }
     except MarketDataError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc))

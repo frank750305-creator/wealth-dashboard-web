@@ -29,6 +29,30 @@ export type BigQueryMarketStatus = {
   requiredEnvVars: string[];
 };
 
+export type BigQueryDiagnosticsSummary = {
+  row_count?: number;
+  symbol_count?: number;
+  currency_count?: number;
+  first_date?: string | null;
+  latest_date?: string | null;
+  adjusted_price_rows?: number;
+  raw_price_rows?: number;
+};
+
+export type BigQueryRecentSymbol = {
+  symbol: string;
+  latest_date: string | null;
+  row_count: number;
+};
+
+export type BigQueryMarketDiagnostics = {
+  generatedAt: string;
+  status: Omit<BigQueryMarketStatus, "generatedAt">;
+  priceSummary: BigQueryDiagnosticsSummary;
+  fxSummary: BigQueryDiagnosticsSummary;
+  recentSymbols: BigQueryRecentSymbol[];
+};
+
 export type PortfolioAnalyzeBigQueryPayload = {
   weights_by_symbol: Record<string, number>;
   benchmark_symbol?: string | null;

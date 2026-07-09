@@ -22,7 +22,16 @@ const statusMeta: Record<MarketSourceStatus, { label: string; className: string 
 };
 
 export function MarketDataPanel() {
-  const { data, bigQueryStatus, error, bigQueryError, isLoading, reload } = useMarketSources();
+  const {
+    data,
+    bigQueryStatus,
+    bigQueryDiagnostics,
+    error,
+    bigQueryError,
+    bigQueryDiagnosticsError,
+    isLoading,
+    reload,
+  } = useMarketSources();
   const sources = data?.sources ?? [];
   const securedCount = sources.filter((source) => source.status !== "needs_secret").length;
   const hasBigQueryCredentials = Boolean(
@@ -125,6 +134,68 @@ export function MarketDataPanel() {
                 </dd>
               </div>
             </dl>
+          )}
+        </section>
+
+        <section className="bg-slate-950 border border-slate-800 rounded-lg p-4 space-y-3">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-bold text-slate-100">BigQuery 資料倉儲診斷</h3>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                價格表與匯率表的覆蓋率、最近更新日與資料筆數
+              </p>
+            </div>
+            <span className="self-start text-[10px] px-2 py-1 rounded border font-bold bg-slate-800 text-slate-300 border-slate-700">
+              {bigQueryDiagnostics ? "已讀取" : "待憑證"}
+            </span>
+          </div>
+
+          {bigQueryDiagnosticsError ? (
+            <div className="border border-red-900/60 bg-red-950/30 rounded-lg p-3 text-xs text-red-300 whitespace-pre-wrap">
+              {bigQueryDiagnosticsError}
+            </div>
+          ) : bigQueryDiagnostics ? (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                <div className="bg-slate-900 border border-slate-800 rounded-lg p-3">
+                  <p className="text-slate-500 mb-1">價格筆數</p>
+                  <p className="text-lg font-bold text-slate-100 font-mono">
+                    {bigQueryDiagnostics.priceSummary.row_count?.toLocaleString("zh-TW") ?? "--"}
+                  </p>
+                </div>
+                <div className="bg-slate-900 border border-slate-800 rounded-lg p-3">
+                  <p className="text-slate-500 mb-1">商品數</p>
+                  <p className="text-lg font-bold text-cyan-200 font-mono">
+                    {bigQueryDiagnostics.priceSummary.symbol_count?.toLocaleString("zh-TW") ?? "--"}
+                  </p>
+                </div>
+                <div className="bg-slate-900 border border-slate-800 rounded-lg p-3">
+                  <p className="text-slate-500 mb-1">價格最新日</p>
+                  <p className="text-sm font-bold text-emerald-200 font-mono">
+                    {bigQueryDiagnostics.priceSummary.latest_date ?? "--"}
+                  </p>
+                </div>
+                <div className="bg-slate-900 border border-slate-800 rounded-lg p-3">
+                  <p className="text-slate-500 mb-1">匯率最新日</p>
+                  <p className="text-sm font-bold text-emerald-200 font-mono">
+                    {bigQueryDiagnostics.fxSummary.latest_date ?? "--"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                {bigQueryDiagnostics.recentSymbols.map((symbol) => (
+                  <div key={symbol.symbol} className="flex items-center justify-between gap-3 bg-slate-900 border border-slate-800 rounded-md p-2">
+                    <span className="text-slate-200 truncate">{symbol.symbol}</span>
+                    <span className="text-slate-500 font-mono">{symbol.latest_date}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="border border-dashed border-slate-800 rounded-lg p-4 text-xs text-slate-500">
+              設定 GCP_SERVICE_ACCOUNT_JSON 後，這裡會顯示 daily_prices / daily_fx 的資料覆蓋率。
+            </div>
           )}
         </section>
 

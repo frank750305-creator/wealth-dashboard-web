@@ -51,6 +51,65 @@ def bigquery_market_status() -> Dict:
     }
 
 
+def load_bigquery_market_diagnostics() -> Dict:
+    bigquery = _bigquery_module()
+    client = _bigquery_client(bigquery)
+    price_table = _table_path("BIGQUERY_PRICE_TABLE", DEFAULT_PRICE_TABLE)
+    fx_table = _table_path("BIGQUERY_FX_TABLE", DEFAULT_FX_TABLE)
+
+    price_summary_query = f"""
+    SELECT
+        COUNT(1) AS row_count,
+        COUNT(DISTINCT symbol) AS symbol_count,
+        MIN(DATE(date)) AS first_date,
+        MAX(DATE(date)) AS latest_date,
+        COUNTIF(SAFE_CAST(adj_price AS FLOAT64) > 0) AS adjusted_price_rows,
+        COUNTIF(SAFE_CAST(raw_price AS FLOAT64) > 0) AS raw_price_rows
+    FROM {price_table}
+    """
+    fx_summary_query = f"""
+    SELECT
+        COUNT(1) AS row_count,
+        COUNT(DISTINCT currency) AS currency_count,
+        MIN(DATE(date)) AS first_date,
+        MAX(DATE(date)) AS latest_date
+    FROM {fx_table}
+    """
+    recent_symbols_query = f"""
+    SELECT
+        symbol,
+        MAX(DATE(date)) AS latest_date,
+        COUNT(1) AS row_count
+    FROM {price_table}
+    GROUP BY symbol
+    ORDER BY latest_date DESC, row_count DESC
+    LIMIT 8
+    """
+
+    try:
+        price_summary = next(iter(client.query(price_summary_query).result()), None)
+        fx_summary = next(iter(client.query(fx_summary_query).result()), None)
+        recent_symbols = list(client.query(recent_symbols_query).result())
+    except Exception as exc:
+        raise MarketDataQueryError(f"BigQuery diagnostics query failed: {exc}") from exc
+
+    return {
+        "status": bigquery_market_status(),
+        "priceSummary": _summary_row_to_dict(
+            price_summary,
+            date_fields=("first_date", "latest_date"),
+        ),
+        "fxSummary": _summary_row_to_dict(
+            fx_summary,
+            date_fields=("first_date", "latest_date"),
+        ),
+        "recentSymbols": [
+            _summary_row_to_dict(row, date_fields=("latest_date",))
+            for row in recent_symbols
+        ],
+    }
+
+
 def load_portfolio_return_input(
     *,
     symbols: Iterable[str],
@@ -250,6 +309,20 @@ def _rows_to_frame(rows, *, date_column: str, value_column: str) -> pd.DataFrame
     frame["date"] = pd.to_datetime(frame["date"])
     frame = frame.drop_duplicates(subset=["date", "symbol"], keep="last")
     return frame.pivot(index="date", columns="symbol", values="value").sort_index()
+
+
+def _summary_row_to_dict(row, *, date_fields: tuple[str, ...]) -> Dict:
+    if row is None:
+        return {}
+
+    result = {}
+    for key in row.keys():
+        value = row[key]
+        if key in date_fields and value is not None:
+            result[key] = value.isoformat()
+        else:
+            result[key] = value
+    return result
 
 
 def _bigquery_client(bigquery):
