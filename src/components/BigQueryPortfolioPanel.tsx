@@ -20,6 +20,7 @@ type SavedPortfolioPreset = {
   id: string;
   name: string;
   rows: Array<Pick<AssetRow, "symbol" | "weight" | "currency">>;
+  portfolioValue?: number;
   benchmarkSymbol: string;
   startDate: string;
   endDate: string;
@@ -38,6 +39,7 @@ type RebalanceRecommendation = {
   currentWeight: number;
   targetWeight: number;
   deltaWeight: number;
+  tradeAmount: number;
   action: "increase" | "decrease" | "hold";
 };
 
@@ -49,6 +51,7 @@ type ExportedPortfolioPayload = {
       weight?: number;
       currency?: string;
     }>;
+    portfolioValue?: number;
     benchmarkSymbol?: string | null;
     startDate?: string | null;
     endDate?: string | null;
@@ -69,6 +72,11 @@ const initialRows: AssetRow[] = [
 
 const assetOptionListId = "bigquery-asset-symbol-options";
 const presetStorageKey = "wealth-dashboard.bigqueryPortfolioPresets";
+const defaultPortfolioValue = 1_000_000;
+
+const moneyFormatter = new Intl.NumberFormat("zh-TW", {
+  maximumFractionDigits: 0,
+});
 
 const metricCards: Array<{
   key: keyof PortfolioAnalysisResponse["metrics"];
@@ -172,8 +180,15 @@ function assetStatisticsCsv(result: PortfolioResult) {
 }
 
 function rebalancingCsv(rows: RebalanceRecommendation[]) {
-  const header = ["symbol", "current_weight", "target_weight", "delta_weight", "action"];
-  const csvRows = rows.map((row) => [row.symbol, row.currentWeight, row.targetWeight, row.deltaWeight, row.action]);
+  const header = ["symbol", "current_weight", "target_weight", "delta_weight", "trade_amount_twd", "action"];
+  const csvRows = rows.map((row) => [
+    row.symbol,
+    row.currentWeight,
+    row.targetWeight,
+    row.deltaWeight,
+    row.tradeAmount,
+    row.action,
+  ]);
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
@@ -187,6 +202,17 @@ function formatSignedWeightDelta(value: number) {
   if (!Number.isFinite(value)) return "--";
   const sign = value > 0 ? "+" : "";
   return `${sign}${(value * 100).toFixed(1)}pp`;
+}
+
+function formatMoney(value: number, signed = false) {
+  if (!Number.isFinite(value)) return "--";
+  const sign = value < 0 ? "-" : signed && value > 0 ? "+" : "";
+  return `${sign}TWD ${moneyFormatter.format(Math.abs(value))}`;
+}
+
+function normalizePortfolioValue(value: unknown, fallback = defaultPortfolioValue) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric >= 0 ? numeric : fallback;
 }
 
 function rebalanceAction(deltaWeight: number): RebalanceRecommendation["action"] {
@@ -262,9 +288,17 @@ function importedWeightToPercent(weight: unknown) {
   return Math.abs(numeric) <= 1 ? Number((numeric * 100).toFixed(2)) : numeric;
 }
 
+function applyTradeAmounts(rows: RebalanceRecommendation[], portfolioValue: number) {
+  return rows.map((row) => ({
+    ...row,
+    tradeAmount: row.deltaWeight * portfolioValue,
+  }));
+}
+
 function buildRebalanceRows(
   currentRows: Array<Pick<AssetRow, "symbol" | "weight">>,
   targetRows: PortfolioOptimizationResponse["weights"],
+  portfolioValue: number,
 ) {
   const totalWeight = currentRows.reduce((sum, row) => sum + (Number(row.weight) || 0), 0);
   const currentBySymbol = new Map(
@@ -283,13 +317,38 @@ function buildRebalanceRows(
       currentWeight,
       targetWeight,
       deltaWeight,
+      tradeAmount: deltaWeight * portfolioValue,
       action: rebalanceAction(deltaWeight),
     };
   });
 }
 
-function isRebalanceRows(value: unknown): value is RebalanceRecommendation[] {
-  return Array.isArray(value) && value.every((row) => row && typeof row === "object" && "symbol" in row);
+function normalizeRebalanceRows(value: unknown, portfolioValue: number) {
+  if (!Array.isArray(value)) return [];
+
+  return value.flatMap((row) => {
+    if (!row || typeof row !== "object") return [];
+    const item = row as Partial<RebalanceRecommendation>;
+    if (typeof item.symbol !== "string" || !item.symbol.trim()) return [];
+
+    const currentWeight = Number(item.currentWeight);
+    const targetWeight = Number(item.targetWeight);
+    const deltaWeight = Number.isFinite(Number(item.deltaWeight)) ? Number(item.deltaWeight) : targetWeight - currentWeight;
+    if (!Number.isFinite(currentWeight) || !Number.isFinite(targetWeight) || !Number.isFinite(deltaWeight)) return [];
+
+    return [
+      {
+        symbol: item.symbol.trim(),
+        currentWeight,
+        targetWeight,
+        deltaWeight,
+        tradeAmount: deltaWeight * portfolioValue,
+        action: item.action === "increase" || item.action === "decrease" || item.action === "hold"
+          ? item.action
+          : rebalanceAction(deltaWeight),
+      },
+    ];
+  });
 }
 
 export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortfolioPanelProps) {
@@ -304,6 +363,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
     "max_sharpe",
   );
   const [targetVolatility, setTargetVolatility] = useState(12);
+  const [portfolioValue, setPortfolioValue] = useState(defaultPortfolioValue);
   const [result, setResult] = useState<PortfolioAnalysisResponse | null>(null);
   const [optimizationResult, setOptimizationResult] = useState<PortfolioOptimizationResponse | null>(null);
   const [rebalanceRows, setRebalanceRows] = useState<RebalanceRecommendation[]>([]);
@@ -448,6 +508,12 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
     return rows.filter((row) => row.symbol.trim());
   }
 
+  function handlePortfolioValueChange(value: number) {
+    const nextValue = normalizePortfolioValue(value, 0);
+    setPortfolioValue(nextValue);
+    setRebalanceRows((currentRows) => applyTradeAmounts(currentRows, nextValue));
+  }
+
   function applyAssetSuggestion(symbol: string) {
     const currency = inferSymbolCurrency(symbol);
     setRows((currentRows) => {
@@ -493,6 +559,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
             weight: Number(row.weight) || 0,
             currency: row.currency.trim().toUpperCase() || "USD",
           })),
+      portfolioValue,
       benchmarkSymbol,
       startDate,
       endDate,
@@ -525,6 +592,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
     setMode(preset.mode);
     setOptimizationMode(preset.optimizationMode);
     setTargetVolatility(preset.targetVolatility);
+    setPortfolioValue(normalizePortfolioValue(preset.portfolioValue));
     setPresetName(preset.name);
     setResult(null);
     setOptimizationResult(null);
@@ -578,9 +646,11 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
       setMode(config.mode === "long_rebuild" ? "long_rebuild" : "overlap");
       setOptimizationMode(config.optimizationMode ?? "max_sharpe");
       setTargetVolatility(Number.isFinite(config.targetVolatility) ? Number(config.targetVolatility) : 12);
+      const nextPortfolioValue = normalizePortfolioValue(config.portfolioValue);
+      setPortfolioValue(nextPortfolioValue);
       setPresetName(payload.presetName?.trim() || file.name.replace(/\.json$/i, ""));
       setSelectedPresetId("");
-      setRebalanceRows(isRebalanceRows(payload.rebalancing) ? payload.rebalancing : []);
+      setRebalanceRows(normalizeRebalanceRows(payload.rebalancing, nextPortfolioValue));
       setError(null);
 
       if (isPortfolioResult(payload.result)) {
@@ -612,6 +682,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
           weight: Number(row.weight) / 100,
           currency: row.currency.trim().toUpperCase() || "USD",
         })),
+        portfolioValue,
         benchmarkSymbol,
         startDate,
         endDate,
@@ -744,7 +815,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
       const optimizedWeights = Object.fromEntries(
         response.weights.map((weightRow) => [weightRow.symbol, Number((weightRow.weight * 100).toFixed(1))]),
       );
-      const nextRebalanceRows = buildRebalanceRows(activeAssetRows, response.weights);
+      const nextRebalanceRows = buildRebalanceRows(activeAssetRows, response.weights, portfolioValue);
 
       setRows((currentRows) =>
         currentRows.map((row) => {
@@ -962,6 +1033,17 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
               className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-2 text-slate-100"
             />
           </label>
+          <label className="space-y-1 col-span-2">
+            <span className="text-slate-500">投組總金額 TWD</span>
+            <input
+              type="number"
+              min={0}
+              step={10000}
+              value={portfolioValue}
+              onChange={(event) => handlePortfolioValueChange(Number(event.target.value))}
+              className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-2 text-slate-100 font-mono"
+            />
+          </label>
           <label className="space-y-1">
             <span className="text-slate-500">起日</span>
             <input
@@ -1108,16 +1190,17 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
             <div className="bg-slate-950 border border-slate-800 rounded-lg p-3">
               <div className="flex items-center justify-between gap-3 mb-3">
                 <p className="text-[11px] text-slate-500">再平衡建議</p>
-                <p className="text-[11px] text-slate-600 font-mono">Current → Target</p>
+                <p className="text-[11px] text-slate-600 font-mono">{formatMoney(portfolioValue)}</p>
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[680px] text-xs">
+                <table className="w-full min-w-[820px] text-xs">
                   <thead>
                     <tr className="text-left text-[11px] text-slate-600">
                       <th className="py-2 pr-3 font-medium">Asset</th>
                       <th className="py-2 px-3 font-medium text-right">Current</th>
                       <th className="py-2 px-3 font-medium text-right">Target</th>
                       <th className="py-2 px-3 font-medium">Delta</th>
+                      <th className="py-2 px-3 font-medium text-right">Trade</th>
                       <th className="py-2 pl-3 font-medium text-right">Action</th>
                     </tr>
                   </thead>
@@ -1151,6 +1234,17 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
                               />
                             </div>
                           </div>
+                        </td>
+                        <td
+                          className={`py-2 px-3 text-right font-mono ${
+                            row.tradeAmount > 0
+                              ? "text-emerald-300"
+                              : row.tradeAmount < 0
+                                ? "text-rose-300"
+                                : "text-slate-400"
+                          }`}
+                        >
+                          {formatMoney(row.tradeAmount, true)}
                         </td>
                         <td className="py-2 pl-3 text-right">
                           <span className={`inline-flex min-w-12 justify-center rounded-md border px-2 py-1 text-[11px] font-bold ${rebalanceActionClass(row.action)}`}>
