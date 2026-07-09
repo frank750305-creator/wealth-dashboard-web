@@ -1,5 +1,6 @@
 import { useMarketSources } from "@/hooks/useMarketSources";
 import type { MarketSourceStatus } from "@/types/market";
+import { BigQueryPortfolioPanel } from "./BigQueryPortfolioPanel";
 
 const statusMeta: Record<MarketSourceStatus, { label: string; className: string }> = {
   ready: {
@@ -194,6 +195,8 @@ export function MarketDataPanel() {
           </ul>
         </section>
       ) : null}
+
+      <BigQueryPortfolioPanel hasBigQueryCredentials={hasBigQueryCredentials} />
     </div>
   );
 }

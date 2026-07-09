@@ -28,3 +28,64 @@ export type BigQueryMarketStatus = {
   hasGoogleApplicationCredentials: boolean;
   requiredEnvVars: string[];
 };
+
+export type PortfolioAnalyzeBigQueryPayload = {
+  weights_by_symbol: Record<string, number>;
+  benchmark_symbol?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  price_basis: "adjusted" | "raw";
+  pricing_currency: "original" | "TWD";
+  currency_by_symbol?: Record<string, string>;
+  mode: "overlap" | "long_rebuild";
+};
+
+export type PortfolioMetricSet = {
+  cumulativeReturn: number | null;
+  cagr: number | null;
+  annualReturn: number | null;
+  annualVolatility: number | null;
+  confidenceLowerBound: number | null;
+  sharpe: number | null;
+  sortino: number | null;
+  maxDrawdown: number | null;
+  downsideDeviation: number | null;
+  beta: number | null;
+  rSquared: number | null;
+  treynor: number | null;
+  informationRatio: number | null;
+  alpha: number | null;
+  appraisalRatio: number | null;
+  skewness: number | null;
+  kurtosis: number | null;
+};
+
+export type PortfolioAnalysisWeight = {
+  symbol: string;
+  weight: number;
+};
+
+export type PortfolioAnalysisDataWindow = {
+  startDate: string | null;
+  endDate: string | null;
+  observations: number;
+};
+
+export type PortfolioAnalysisResponse = {
+  generatedAt: string;
+  mode: "overlap" | "long_rebuild";
+  symbols: string[];
+  weights: PortfolioAnalysisWeight[];
+  metrics: PortfolioMetricSet;
+  dataWindow: PortfolioAnalysisDataWindow;
+  marketData?: {
+    source: string;
+    symbols: string[];
+    benchmarkSymbol: string | null;
+    priceBasis: string;
+    pricingCurrency: string;
+    startDate: string | null;
+    endDate: string | null;
+    observations: number;
+  };
+};
