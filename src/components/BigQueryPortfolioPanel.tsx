@@ -16,12 +16,28 @@ type BigQueryPortfolioPanelProps = {
   hasBigQueryCredentials: boolean;
 };
 
+type SavedPortfolioPreset = {
+  id: string;
+  name: string;
+  rows: Array<Pick<AssetRow, "symbol" | "weight" | "currency">>;
+  benchmarkSymbol: string;
+  startDate: string;
+  endDate: string;
+  priceBasis: "adjusted" | "raw";
+  pricingCurrency: "original" | "TWD";
+  mode: "overlap" | "long_rebuild";
+  optimizationMode: "max_sharpe" | "min_vol" | "max_return" | "target_vol";
+  targetVolatility: number;
+  updatedAt: string;
+};
+
 const initialRows: AssetRow[] = [
   { id: "asset-0050", symbol: "0050.TW", weight: 50, currency: "TWD" },
   { id: "asset-spy", symbol: "SPDR S&P500 ETF", weight: 50, currency: "USD" },
 ];
 
 const assetOptionListId = "bigquery-asset-symbol-options";
+const presetStorageKey = "wealth-dashboard.bigqueryPortfolioPresets";
 
 const metricCards: Array<{
   key: keyof PortfolioAnalysisResponse["metrics"];
@@ -43,6 +59,31 @@ function makeRow(): AssetRow {
     weight: 0,
     currency: "USD",
   };
+}
+
+function makePresetRow(row: Pick<AssetRow, "symbol" | "weight" | "currency">): AssetRow {
+  return {
+    id: `asset-${row.symbol || "preset"}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    symbol: row.symbol,
+    weight: row.weight,
+    currency: row.currency,
+  };
+}
+
+function loadPresetsFromStorage() {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(presetStorageKey) || "[]");
+    return Array.isArray(parsed) ? (parsed as SavedPortfolioPreset[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writePresetsToStorage(presets: SavedPortfolioPreset[]) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(presetStorageKey, JSON.stringify(presets));
 }
 
 function formatMetric(value: number | null, kind: "percent" | "number") {
@@ -86,6 +127,9 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
   const [assetSuggestions, setAssetSuggestions] = useState<BigQueryAsset[]>([]);
   const [assetSearchError, setAssetSearchError] = useState<string | null>(null);
   const [isLoadingAssets, setIsLoadingAssets] = useState(false);
+  const [presetName, setPresetName] = useState("核心配置");
+  const [selectedPresetId, setSelectedPresetId] = useState("");
+  const [savedPresets, setSavedPresets] = useState<SavedPortfolioPreset[]>([]);
 
   const totalWeight = useMemo(
     () => rows.reduce((sum, row) => sum + (Number.isFinite(row.weight) ? row.weight : 0), 0),
@@ -157,6 +201,18 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
     };
   }, [assetQuery, hasBigQueryCredentials]);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const presets = loadPresetsFromStorage();
+      setSavedPresets(presets);
+      setSelectedPresetId((currentId) => currentId || presets[0]?.id || "");
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, []);
+
   function updateRow(id: string, patch: Partial<AssetRow>) {
     setRows((currentRows) => currentRows.map((row) => (row.id === id ? { ...row, ...patch } : row)));
   }
@@ -194,6 +250,73 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
     return Object.fromEntries(
       activeAssetRows.map((row) => [row.symbol.trim(), row.currency.trim().toUpperCase() || "USD"]),
     );
+  }
+
+  function handleSavePreset() {
+    const cleanName = presetName.trim() || "未命名配置";
+    const now = new Date().toISOString();
+    const activeAssetRows = activeRows();
+    const preset: SavedPortfolioPreset = {
+      id: selectedPresetId || `preset-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      name: cleanName,
+      rows: activeAssetRows.length
+        ? activeAssetRows.map((row) => ({
+            symbol: row.symbol.trim(),
+            weight: Number(row.weight) || 0,
+            currency: row.currency.trim().toUpperCase() || "USD",
+          }))
+        : rows.map((row) => ({
+            symbol: row.symbol.trim(),
+            weight: Number(row.weight) || 0,
+            currency: row.currency.trim().toUpperCase() || "USD",
+          })),
+      benchmarkSymbol,
+      startDate,
+      endDate,
+      priceBasis,
+      pricingCurrency,
+      mode,
+      optimizationMode,
+      targetVolatility,
+      updatedAt: now,
+    };
+
+    setSavedPresets((currentPresets) => {
+      const nextPresets = [preset, ...currentPresets.filter((item) => item.id !== preset.id)].slice(0, 12);
+      writePresetsToStorage(nextPresets);
+      return nextPresets;
+    });
+    setSelectedPresetId(preset.id);
+  }
+
+  function handleLoadPreset() {
+    const preset = savedPresets.find((item) => item.id === selectedPresetId);
+    if (!preset) return;
+
+    setRows(preset.rows.length ? preset.rows.map(makePresetRow) : initialRows);
+    setBenchmarkSymbol(preset.benchmarkSymbol);
+    setStartDate(preset.startDate);
+    setEndDate(preset.endDate);
+    setPriceBasis(preset.priceBasis);
+    setPricingCurrency(preset.pricingCurrency);
+    setMode(preset.mode);
+    setOptimizationMode(preset.optimizationMode);
+    setTargetVolatility(preset.targetVolatility);
+    setPresetName(preset.name);
+    setResult(null);
+    setOptimizationResult(null);
+    setError(null);
+  }
+
+  function handleDeletePreset() {
+    if (!selectedPresetId) return;
+
+    setSavedPresets((currentPresets) => {
+      const nextPresets = currentPresets.filter((preset) => preset.id !== selectedPresetId);
+      writePresetsToStorage(nextPresets);
+      setSelectedPresetId(nextPresets[0]?.id || "");
+      return nextPresets;
+    });
   }
 
   async function handleAnalyze() {
@@ -307,6 +430,58 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
             className="px-3 py-2 text-xs font-bold rounded-md bg-cyan-600 hover:bg-cyan-500 text-white transition-colors disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
           >
             {isOptimizing ? "調倉中" : "AI 調倉"}
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-[0.8fr_1.2fr] gap-3 bg-slate-950 border border-slate-800 rounded-lg p-3">
+        <label className="space-y-1 text-xs">
+          <span className="text-slate-500">配置名稱</span>
+          <input
+            value={presetName}
+            onChange={(event) => setPresetName(event.target.value)}
+            className="w-full bg-slate-900 border border-slate-700 rounded-md px-2 py-2 text-slate-100"
+          />
+        </label>
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto_auto] gap-2 text-xs">
+          <label className="space-y-1">
+            <span className="text-slate-500">已存配置</span>
+            <select
+              value={selectedPresetId}
+              onChange={(event) => {
+                const preset = savedPresets.find((item) => item.id === event.target.value);
+                setSelectedPresetId(event.target.value);
+                if (preset) setPresetName(preset.name);
+              }}
+              className="w-full bg-slate-900 border border-slate-700 rounded-md px-2 py-2 text-slate-100"
+            >
+              <option value="">尚未選擇</option>
+              {savedPresets.map((preset) => (
+                <option key={preset.id} value={preset.id}>
+                  {preset.name} · {new Date(preset.updatedAt).toLocaleDateString("zh-TW")}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            onClick={handleSavePreset}
+            className="md:self-end px-3 py-2 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
+          >
+            儲存
+          </button>
+          <button
+            onClick={handleLoadPreset}
+            disabled={!selectedPresetId}
+            className="md:self-end px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:text-slate-500"
+          >
+            載入
+          </button>
+          <button
+            onClick={handleDeletePreset}
+            disabled={!selectedPresetId}
+            className="md:self-end px-3 py-2 rounded-md bg-slate-900 border border-slate-700 hover:border-red-500 text-slate-300 hover:text-red-300 font-bold disabled:cursor-not-allowed disabled:text-slate-600"
+          >
+            刪除
           </button>
         </div>
       </div>
