@@ -45,9 +45,21 @@ export type BigQueryRecentSymbol = {
   row_count: number;
 };
 
+export type BigQuerySchemaCheck = {
+  tableName: string;
+  requiredColumns: string[];
+  presentColumns: string[];
+  missingColumns: string[];
+  isReady: boolean;
+};
+
 export type BigQueryMarketDiagnostics = {
   generatedAt: string;
   status: Omit<BigQueryMarketStatus, "generatedAt">;
+  schemaChecks: {
+    priceTable: BigQuerySchemaCheck;
+    fxTable: BigQuerySchemaCheck;
+  };
   priceSummary: BigQueryDiagnosticsSummary;
   fxSummary: BigQueryDiagnosticsSummary;
   recentSymbols: BigQueryRecentSymbol[];

@@ -158,15 +158,21 @@ export function MarketDataPanel() {
             <div className="space-y-4">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
                 <div className="bg-slate-900 border border-slate-800 rounded-lg p-3">
-                  <p className="text-slate-500 mb-1">價格筆數</p>
-                  <p className="text-lg font-bold text-slate-100 font-mono">
-                    {bigQueryDiagnostics.priceSummary.row_count?.toLocaleString("zh-TW") ?? "--"}
+                  <p className="text-slate-500 mb-1">價格表結構</p>
+                  <p className={`text-lg font-bold ${bigQueryDiagnostics.schemaChecks.priceTable.isReady ? "text-emerald-200" : "text-red-300"}`}>
+                    {bigQueryDiagnostics.schemaChecks.priceTable.isReady ? "Ready" : "Missing"}
                   </p>
                 </div>
                 <div className="bg-slate-900 border border-slate-800 rounded-lg p-3">
-                  <p className="text-slate-500 mb-1">商品數</p>
-                  <p className="text-lg font-bold text-cyan-200 font-mono">
-                    {bigQueryDiagnostics.priceSummary.symbol_count?.toLocaleString("zh-TW") ?? "--"}
+                  <p className="text-slate-500 mb-1">匯率表結構</p>
+                  <p className={`text-lg font-bold ${bigQueryDiagnostics.schemaChecks.fxTable.isReady ? "text-emerald-200" : "text-red-300"}`}>
+                    {bigQueryDiagnostics.schemaChecks.fxTable.isReady ? "Ready" : "Missing"}
+                  </p>
+                </div>
+                <div className="bg-slate-900 border border-slate-800 rounded-lg p-3">
+                  <p className="text-slate-500 mb-1">價格筆數</p>
+                  <p className="text-lg font-bold text-slate-100 font-mono">
+                    {bigQueryDiagnostics.priceSummary.row_count?.toLocaleString("zh-TW") ?? "--"}
                   </p>
                 </div>
                 <div className="bg-slate-900 border border-slate-800 rounded-lg p-3">
@@ -182,6 +188,23 @@ export function MarketDataPanel() {
                   </p>
                 </div>
               </div>
+
+              {(!bigQueryDiagnostics.schemaChecks.priceTable.isReady || !bigQueryDiagnostics.schemaChecks.fxTable.isReady) && (
+                <div className="border border-red-900/60 bg-red-950/30 rounded-lg p-3 text-xs text-red-300 space-y-2">
+                  {!bigQueryDiagnostics.schemaChecks.priceTable.isReady && (
+                    <p>
+                      daily_prices 缺少欄位：
+                      {bigQueryDiagnostics.schemaChecks.priceTable.missingColumns.join(", ")}
+                    </p>
+                  )}
+                  {!bigQueryDiagnostics.schemaChecks.fxTable.isReady && (
+                    <p>
+                      daily_fx 缺少欄位：
+                      {bigQueryDiagnostics.schemaChecks.fxTable.missingColumns.join(", ")}
+                    </p>
+                  )}
+                </div>
+              )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
                 {bigQueryDiagnostics.recentSymbols.map((symbol) => (

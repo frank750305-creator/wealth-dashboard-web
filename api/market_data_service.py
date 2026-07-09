@@ -54,8 +54,25 @@ def bigquery_market_status() -> Dict:
 def load_bigquery_market_diagnostics() -> Dict:
     bigquery = _bigquery_module()
     client = _bigquery_client(bigquery)
+    _, _, price_table_name, fx_table_name = _settings()
     price_table = _table_path("BIGQUERY_PRICE_TABLE", DEFAULT_PRICE_TABLE)
     fx_table = _table_path("BIGQUERY_FX_TABLE", DEFAULT_FX_TABLE)
+    schema_checks = _load_schema_checks(
+        bigquery=bigquery,
+        client=client,
+        price_table_name=price_table_name,
+        fx_table_name=fx_table_name,
+    )
+    diagnostics = {
+        "status": bigquery_market_status(),
+        "schemaChecks": schema_checks,
+        "priceSummary": {},
+        "fxSummary": {},
+        "recentSymbols": [],
+    }
+
+    if not schema_checks["priceTable"]["isReady"] or not schema_checks["fxTable"]["isReady"]:
+        return diagnostics
 
     price_summary_query = f"""
     SELECT
@@ -93,21 +110,19 @@ def load_bigquery_market_diagnostics() -> Dict:
     except Exception as exc:
         raise MarketDataQueryError(f"BigQuery diagnostics query failed: {exc}") from exc
 
-    return {
-        "status": bigquery_market_status(),
-        "priceSummary": _summary_row_to_dict(
-            price_summary,
-            date_fields=("first_date", "latest_date"),
-        ),
-        "fxSummary": _summary_row_to_dict(
-            fx_summary,
-            date_fields=("first_date", "latest_date"),
-        ),
-        "recentSymbols": [
-            _summary_row_to_dict(row, date_fields=("latest_date",))
-            for row in recent_symbols
-        ],
-    }
+    diagnostics["priceSummary"] = _summary_row_to_dict(
+        price_summary,
+        date_fields=("first_date", "latest_date"),
+    )
+    diagnostics["fxSummary"] = _summary_row_to_dict(
+        fx_summary,
+        date_fields=("first_date", "latest_date"),
+    )
+    diagnostics["recentSymbols"] = [
+        _summary_row_to_dict(row, date_fields=("latest_date",))
+        for row in recent_symbols
+    ]
+    return diagnostics
 
 
 def load_portfolio_return_input(
@@ -309,6 +324,66 @@ def _rows_to_frame(rows, *, date_column: str, value_column: str) -> pd.DataFrame
     frame["date"] = pd.to_datetime(frame["date"])
     frame = frame.drop_duplicates(subset=["date", "symbol"], keep="last")
     return frame.pivot(index="date", columns="symbol", values="value").sort_index()
+
+
+def _load_schema_checks(*, bigquery, client, price_table_name: str, fx_table_name: str) -> Dict:
+    project_id, dataset, _, _ = _settings()
+    information_schema = f"`{project_id}.{dataset}.INFORMATION_SCHEMA.COLUMNS`"
+    table_names = _dedupe([price_table_name, fx_table_name])
+    required_columns = {
+        price_table_name: ["date", "symbol", "raw_price", "adj_price"],
+        fx_table_name: ["date", "currency", "rate"],
+    }
+    query = f"""
+    SELECT
+        table_name,
+        column_name,
+        data_type
+    FROM {information_schema}
+    WHERE table_name IN UNNEST(@table_names)
+    ORDER BY table_name, ordinal_position
+    """
+
+    try:
+        rows = client.query(
+            query,
+            job_config=bigquery.QueryJobConfig(
+                query_parameters=[
+                    bigquery.ArrayQueryParameter("table_names", "STRING", table_names),
+                ]
+            ),
+        ).result()
+    except Exception as exc:
+        raise MarketDataQueryError(f"BigQuery schema query failed: {exc}") from exc
+
+    columns_by_table: Dict[str, List[Dict[str, str]]] = {table_name: [] for table_name in table_names}
+    for row in rows:
+        columns_by_table.setdefault(row["table_name"], []).append(
+            {
+                "name": row["column_name"],
+                "type": row["data_type"],
+            }
+        )
+
+    def table_check(table_name: str) -> Dict:
+        present_columns = [column["name"] for column in columns_by_table.get(table_name, [])]
+        missing_columns = [
+            column
+            for column in required_columns[table_name]
+            if column not in present_columns
+        ]
+        return {
+            "tableName": f"{project_id}.{dataset}.{table_name}",
+            "requiredColumns": required_columns[table_name],
+            "presentColumns": present_columns,
+            "missingColumns": missing_columns,
+            "isReady": len(missing_columns) == 0,
+        }
+
+    return {
+        "priceTable": table_check(price_table_name),
+        "fxTable": table_check(fx_table_name),
+    }
 
 
 def _summary_row_to_dict(row, *, date_fields: tuple[str, ...]) -> Dict:
