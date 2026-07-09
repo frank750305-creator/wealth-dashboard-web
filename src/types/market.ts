@@ -143,6 +143,11 @@ export type PortfolioWealthPoint = {
   dailyReturn: number | null;
 };
 
+export type PortfolioCorrelationMatrix = {
+  symbols: string[];
+  values: Array<Array<number | null>>;
+};
+
 export type PortfolioAnalysisDataWindow = {
   startDate: string | null;
   endDate: string | null;
@@ -156,6 +161,7 @@ export type PortfolioAnalysisResponse = {
   weights: PortfolioAnalysisWeight[];
   metrics: PortfolioMetricSet;
   assetStatistics: PortfolioAssetStatistic[];
+  correlationMatrix: PortfolioCorrelationMatrix;
   wealthPath: PortfolioWealthPoint[];
   dataWindow: PortfolioAnalysisDataWindow;
   marketData?: {
@@ -177,6 +183,7 @@ export type PortfolioOptimizationResponse = {
   weights: PortfolioAnalysisWeight[];
   metrics: PortfolioMetricSet;
   assetStatistics: PortfolioAssetStatistic[];
+  correlationMatrix: PortfolioCorrelationMatrix;
   wealthPath: PortfolioWealthPoint[];
   dataWindow: PortfolioAnalysisDataWindow;
   marketData?: PortfolioAnalysisResponse["marketData"];

@@ -56,6 +56,7 @@ def analyze_portfolio_returns(
         ],
         "metrics": metrics,
         "assetStatistics": asset_statistics,
+        "correlationMatrix": _correlation_matrix(symbols, returns_matrix),
         "wealthPath": _wealth_path(model["portfolioDailyReturns"], model["dates"]),
         "dataWindow": {
             "startDate": model["dates"][0] if model["dates"] else None,
@@ -129,6 +130,7 @@ def optimize_portfolio_weights(
         "weights": analysis["weights"],
         "metrics": analysis["metrics"],
         "assetStatistics": analysis["assetStatistics"],
+        "correlationMatrix": analysis["correlationMatrix"],
         "wealthPath": analysis["wealthPath"],
         "dataWindow": analysis["dataWindow"],
     }
@@ -302,6 +304,37 @@ def _asset_statistics(symbols: Sequence[str], annual_returns: Iterable[float], a
         }
         for symbol, annual_return, annual_volatility in zip(symbols, annual_returns, annual_volatilities)
     ]
+
+
+def _correlation_matrix(symbols: Sequence[str], returns_matrix: np.ndarray) -> Dict:
+    values = []
+    for row_index in range(len(symbols)):
+        row_values = []
+        for column_index in range(len(symbols)):
+            if row_index == column_index:
+                row_values.append(1.0)
+                continue
+
+            left = returns_matrix[:, row_index]
+            right = returns_matrix[:, column_index]
+            mask = np.isfinite(left) & np.isfinite(right)
+            if int(mask.sum()) < 2:
+                row_values.append(None)
+                continue
+
+            left_values = left[mask]
+            right_values = right[mask]
+            if _sample_std(left_values) <= EPSILON or _sample_std(right_values) <= EPSILON:
+                row_values.append(None)
+                continue
+
+            row_values.append(_json_number(float(np.corrcoef(left_values, right_values)[0, 1])))
+        values.append(row_values)
+
+    return {
+        "symbols": list(symbols),
+        "values": values,
+    }
 
 
 def _wealth_path(portfolio_daily_returns: np.ndarray, dates: Optional[List[str]]) -> List[Dict]:
