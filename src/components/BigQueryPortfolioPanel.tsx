@@ -31,6 +31,8 @@ type SavedPortfolioPreset = {
   updatedAt: string;
 };
 
+type PortfolioResult = PortfolioAnalysisResponse | PortfolioOptimizationResponse;
+
 const initialRows: AssetRow[] = [
   { id: "asset-0050", symbol: "0050.TW", weight: 50, currency: "TWD" },
   { id: "asset-spy", symbol: "SPDR S&P500 ETF", weight: 50, currency: "USD" },
@@ -84,6 +86,40 @@ function loadPresetsFromStorage() {
 function writePresetsToStorage(presets: SavedPortfolioPreset[]) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(presetStorageKey, JSON.stringify(presets));
+}
+
+function csvCell(value: unknown) {
+  if (value === null || value === undefined) return "";
+  const text = String(value);
+  return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function downloadTextFile(fileName: string, content: string, mimeType: string) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function resultStamp() {
+  return new Date().toISOString().slice(0, 19).replaceAll(":", "").replace("T", "-");
+}
+
+function wealthPathCsv(result: PortfolioResult) {
+  const header = ["date", "wealth_index", "daily_return"];
+  const rows = result.wealthPath.map((point) => [point.date, point.value, point.dailyReturn]);
+  return [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+function assetStatisticsCsv(result: PortfolioResult) {
+  const header = ["symbol", "annual_return", "annual_volatility"];
+  const rows = result.assetStatistics.map((asset) => [asset.symbol, asset.annualReturn, asset.annualVolatility]);
+  return [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
 function formatMetric(value: number | null, kind: "percent" | "number") {
@@ -317,6 +353,62 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
       setSelectedPresetId(nextPresets[0]?.id || "");
       return nextPresets;
     });
+  }
+
+  function exportPayload() {
+    if (!displayResult) return null;
+
+    return {
+      exportedAt: new Date().toISOString(),
+      presetName,
+      configuration: {
+        rows: activeRows().map((row) => ({
+          symbol: row.symbol.trim(),
+          weight: Number(row.weight) / 100,
+          currency: row.currency.trim().toUpperCase() || "USD",
+        })),
+        benchmarkSymbol,
+        startDate,
+        endDate,
+        priceBasis,
+        pricingCurrency,
+        mode,
+        optimizationMode,
+        targetVolatility,
+      },
+      result: displayResult,
+    };
+  }
+
+  function handleExportJson() {
+    const payload = exportPayload();
+    if (!payload) return;
+
+    downloadTextFile(
+      `bigquery-portfolio-${resultStamp()}.json`,
+      JSON.stringify(payload, null, 2),
+      "application/json;charset=utf-8",
+    );
+  }
+
+  function handleExportWealthCsv() {
+    if (!displayResult) return;
+
+    downloadTextFile(
+      `bigquery-wealth-path-${resultStamp()}.csv`,
+      wealthPathCsv(displayResult),
+      "text/csv;charset=utf-8",
+    );
+  }
+
+  function handleExportAssetCsv() {
+    if (!displayResult) return;
+
+    downloadTextFile(
+      `bigquery-asset-statistics-${resultStamp()}.csv`,
+      assetStatisticsCsv(displayResult),
+      "text/csv;charset=utf-8",
+    );
   }
 
   async function handleAnalyze() {
@@ -697,6 +789,35 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
 
       {displayResult && (
         <div className="space-y-4">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-slate-950 border border-slate-800 rounded-lg p-3">
+            <div>
+              <p className="text-xs font-bold text-slate-200">分析結果匯出</p>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                {displayResult.dataWindow.startDate ?? "--"} ~ {displayResult.dataWindow.endDate ?? "--"}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={handleExportJson}
+                className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
+              >
+                JSON
+              </button>
+              <button
+                onClick={handleExportWealthCsv}
+                className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
+              >
+                財富 CSV
+              </button>
+              <button
+                onClick={handleExportAssetCsv}
+                className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
+              >
+                資產 CSV
+              </button>
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
             {metricCards.map((metric) => (
               <div key={metric.key} className="bg-slate-950 border border-slate-800 rounded-lg p-3">
