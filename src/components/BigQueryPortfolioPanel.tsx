@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { analyzePortfolioFromBigQuery, fetchBigQueryAssets, optimizePortfolioFromBigQuery } from "@/lib/marketApi";
 import type { BigQueryAsset, PortfolioAnalysisResponse, PortfolioOptimizationResponse } from "@/types/market";
@@ -32,6 +32,26 @@ type SavedPortfolioPreset = {
 };
 
 type PortfolioResult = PortfolioAnalysisResponse | PortfolioOptimizationResponse;
+
+type ExportedPortfolioPayload = {
+  presetName?: string;
+  configuration?: {
+    rows?: Array<{
+      symbol?: string;
+      weight?: number;
+      currency?: string;
+    }>;
+    benchmarkSymbol?: string | null;
+    startDate?: string | null;
+    endDate?: string | null;
+    priceBasis?: "adjusted" | "raw";
+    pricingCurrency?: "original" | "TWD";
+    mode?: "overlap" | "long_rebuild";
+    optimizationMode?: "max_sharpe" | "min_vol" | "max_return" | "target_vol";
+    targetVolatility?: number;
+  };
+  result?: PortfolioResult;
+};
 
 const initialRows: AssetRow[] = [
   { id: "asset-0050", symbol: "0050.TW", weight: 50, currency: "TWD" },
@@ -142,6 +162,18 @@ function inferSymbolCurrency(symbol: string) {
   return symbol.trim().toUpperCase().endsWith(".TW") ? "TWD" : "USD";
 }
 
+function isPortfolioResult(value: unknown): value is PortfolioResult {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<PortfolioResult>;
+  return Boolean(candidate.metrics && candidate.dataWindow && Array.isArray(candidate.wealthPath));
+}
+
+function importedWeightToPercent(weight: unknown) {
+  const numeric = Number(weight);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.abs(numeric) <= 1 ? Number((numeric * 100).toFixed(2)) : numeric;
+}
+
 export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortfolioPanelProps) {
   const [rows, setRows] = useState<AssetRow[]>(initialRows);
   const [benchmarkSymbol, setBenchmarkSymbol] = useState("0050.TW");
@@ -166,6 +198,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
   const [presetName, setPresetName] = useState("核心配置");
   const [selectedPresetId, setSelectedPresetId] = useState("");
   const [savedPresets, setSavedPresets] = useState<SavedPortfolioPreset[]>([]);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   const totalWeight = useMemo(
     () => rows.reduce((sum, row) => sum + (Number.isFinite(row.weight) ? row.weight : 0), 0),
@@ -355,6 +388,62 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
     });
   }
 
+  async function handleImportJson(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    try {
+      const payload = JSON.parse(await file.text()) as ExportedPortfolioPayload;
+      const config = payload.configuration;
+      if (!config?.rows?.length) {
+        throw new Error("匯入檔缺少 configuration.rows。");
+      }
+
+      const importedRows = config.rows
+        .filter((row) => typeof row.symbol === "string" && row.symbol.trim())
+        .map((row) =>
+          makePresetRow({
+            symbol: row.symbol?.trim() ?? "",
+            weight: importedWeightToPercent(row.weight),
+            currency: row.currency?.trim().toUpperCase() || inferSymbolCurrency(row.symbol ?? ""),
+          }),
+        );
+
+      if (!importedRows.length) {
+        throw new Error("匯入檔沒有可用商品。");
+      }
+
+      setRows(importedRows);
+      setBenchmarkSymbol(config.benchmarkSymbol?.trim() || "");
+      setStartDate(config.startDate || "2020-01-01");
+      setEndDate(config.endDate || new Date().toISOString().slice(0, 10));
+      setPriceBasis(config.priceBasis === "raw" ? "raw" : "adjusted");
+      setPricingCurrency(config.pricingCurrency === "original" ? "original" : "TWD");
+      setMode(config.mode === "long_rebuild" ? "long_rebuild" : "overlap");
+      setOptimizationMode(config.optimizationMode ?? "max_sharpe");
+      setTargetVolatility(Number.isFinite(config.targetVolatility) ? Number(config.targetVolatility) : 12);
+      setPresetName(payload.presetName?.trim() || file.name.replace(/\.json$/i, ""));
+      setSelectedPresetId("");
+      setError(null);
+
+      if (isPortfolioResult(payload.result)) {
+        if ("optimizationMode" in payload.result) {
+          setOptimizationResult(payload.result as PortfolioOptimizationResponse);
+          setResult(null);
+        } else {
+          setResult(payload.result as PortfolioAnalysisResponse);
+          setOptimizationResult(null);
+        }
+      } else {
+        setResult(null);
+        setOptimizationResult(null);
+      }
+    } catch (err: unknown) {
+      setError(`JSON 匯入失敗：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   function exportPayload() {
     if (!displayResult) return null;
 
@@ -527,6 +616,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-[0.8fr_1.2fr] gap-3 bg-slate-950 border border-slate-800 rounded-lg p-3">
+        <input ref={importInputRef} type="file" accept="application/json,.json" hidden onChange={handleImportJson} />
         <label className="space-y-1 text-xs">
           <span className="text-slate-500">配置名稱</span>
           <input
@@ -535,7 +625,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
             className="w-full bg-slate-900 border border-slate-700 rounded-md px-2 py-2 text-slate-100"
           />
         </label>
-        <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto_auto] gap-2 text-xs">
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto_auto_auto] gap-2 text-xs">
           <label className="space-y-1">
             <span className="text-slate-500">已存配置</span>
             <select
@@ -574,6 +664,12 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
             className="md:self-end px-3 py-2 rounded-md bg-slate-900 border border-slate-700 hover:border-red-500 text-slate-300 hover:text-red-300 font-bold disabled:cursor-not-allowed disabled:text-slate-600"
           >
             刪除
+          </button>
+          <button
+            onClick={() => importInputRef.current?.click()}
+            className="md:self-end px-3 py-2 rounded-md bg-cyan-700 hover:bg-cyan-600 text-white font-bold"
+          >
+            匯入 JSON
           </button>
         </div>
       </div>
