@@ -16,3 +16,15 @@ export type MarketSourcesResponse = {
   sources: MarketSource[];
   securityNotes: string[];
 };
+
+export type BigQueryMarketStatus = {
+  generatedAt: string;
+  projectId: string;
+  dataset: string;
+  priceTable: string;
+  fxTable: string;
+  credentialSource: string;
+  hasServiceAccountEnv: boolean;
+  hasGoogleApplicationCredentials: boolean;
+  requiredEnvVars: string[];
+};

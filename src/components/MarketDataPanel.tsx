@@ -21,9 +21,15 @@ const statusMeta: Record<MarketSourceStatus, { label: string; className: string 
 };
 
 export function MarketDataPanel() {
-  const { data, error, isLoading, reload } = useMarketSources();
+  const { data, bigQueryStatus, error, bigQueryError, isLoading, reload } = useMarketSources();
   const sources = data?.sources ?? [];
   const securedCount = sources.filter((source) => source.status !== "needs_secret").length;
+  const hasBigQueryCredentials = Boolean(
+    bigQueryStatus?.hasServiceAccountEnv || bigQueryStatus?.hasGoogleApplicationCredentials,
+  );
+  const bigQueryBadge = hasBigQueryCredentials
+    ? "已設定憑證"
+    : "等待 Vercel 金鑰";
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -45,7 +51,7 @@ export function MarketDataPanel() {
           </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
           <div className="bg-slate-950 border border-slate-800 rounded-lg p-4">
             <p className="text-slate-500 mb-1">資料源</p>
             <p className="text-2xl font-bold text-white font-mono">{sources.length}</p>
@@ -60,7 +66,66 @@ export function MarketDataPanel() {
               {data?.generatedAt ? new Date(data.generatedAt).toLocaleString("zh-TW") : "--"}
             </p>
           </div>
+          <div className="bg-slate-950 border border-slate-800 rounded-lg p-4">
+            <p className="text-slate-500 mb-1">BigQuery API</p>
+            <p className={`text-sm font-bold ${hasBigQueryCredentials ? "text-emerald-300" : "text-amber-300"}`}>
+              {bigQueryStatus ? bigQueryBadge : "--"}
+            </p>
+          </div>
         </div>
+
+        <section className="bg-slate-950 border border-slate-800 rounded-lg p-4 space-y-3">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-bold text-slate-100">BigQuery 連線狀態</h3>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                投組分析 API 會從這裡讀取 daily_prices / daily_fx
+              </p>
+            </div>
+            <span
+              className={`self-start text-[10px] px-2 py-1 rounded border font-bold ${
+                hasBigQueryCredentials
+                  ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/40"
+                  : "bg-amber-500/10 text-amber-300 border-amber-500/40"
+              }`}
+            >
+              {bigQueryStatus ? bigQueryBadge : "讀取中"}
+            </span>
+          </div>
+
+          {bigQueryError ? (
+            <div className="border border-red-900/60 bg-red-950/30 rounded-lg p-3 text-xs text-red-300 whitespace-pre-wrap">
+              {bigQueryError}
+            </div>
+          ) : (
+            <dl className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+              <div>
+                <dt className="text-slate-500">Project / Dataset</dt>
+                <dd className="text-slate-200 mt-0.5 font-mono">
+                  {bigQueryStatus ? `${bigQueryStatus.projectId}.${bigQueryStatus.dataset}` : "--"}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-slate-500">憑證來源</dt>
+                <dd className="text-slate-200 mt-0.5 font-mono">
+                  {bigQueryStatus?.credentialSource ?? "--"}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-slate-500">價格表</dt>
+                <dd className="text-cyan-200 mt-0.5 font-mono break-all">
+                  {bigQueryStatus?.priceTable ?? "--"}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-slate-500">匯率表</dt>
+                <dd className="text-cyan-200 mt-0.5 font-mono break-all">
+                  {bigQueryStatus?.fxTable ?? "--"}
+                </dd>
+              </div>
+            </dl>
+          )}
+        </section>
 
         {isLoading && (
           <div className="border border-dashed border-slate-800 rounded-lg p-8 text-center text-slate-500 text-sm">
