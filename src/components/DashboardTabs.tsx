@@ -8,6 +8,7 @@ type DashboardTabsProps = {
 const tabs: { id: DashboardTab; label: string }[] = [
   { id: "main", label: "📊 現金流與資產傳承" },
   { id: "tax", label: "🏛️ 所得稅與最低稅負(AMT)精算" },
+  { id: "market", label: "🌐 市場資料平台" },
 ];
 
 export function DashboardTabs({ activeTab, onActiveTabChange }: DashboardTabsProps) {

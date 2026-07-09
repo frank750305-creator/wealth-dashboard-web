@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict
+from datetime import datetime, timezone
 import math
 import os
 
@@ -27,6 +28,80 @@ app.add_middleware(
 @app.get("/api/health")
 async def health_check():
     return {"status": "ok", "service": "wealth-dashboard-api"}
+
+@app.get("/api/v1/market/sources")
+async def market_sources():
+    return {
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+        "sources": [
+            {
+                "id": "bigquery-fund-database",
+                "name": "基金與 ETF 歷史價格庫",
+                "provider": "Google BigQuery",
+                "category": "資料倉儲",
+                "status": "needs_secret",
+                "currentStorage": "fund-war-room.fund_database.daily_prices",
+                "integrationPath": "Server-side API reads BigQuery using Vercel environment credentials",
+                "nextAction": "Move GCP service account JSON into environment variables before enabling reads",
+            },
+            {
+                "id": "moneydj-nav",
+                "name": "MoneyDJ 基金淨值抓取",
+                "provider": "MoneyDJ",
+                "category": "基金淨值",
+                "status": "batch_only",
+                "currentStorage": "Local SQLite / BigQuery ingestion scripts",
+                "integrationPath": "Scheduled batch job writes normalized NAV data into the warehouse",
+                "nextAction": "Extract crawler logic into a job module and add retry/rate-limit controls",
+            },
+            {
+                "id": "cnyes-nav",
+                "name": "鉅亨基金底層資料解析",
+                "provider": "Cnyes",
+                "category": "基金淨值",
+                "status": "batch_only",
+                "currentStorage": "Local SQLite ingestion script",
+                "integrationPath": "Fallback NAV collector for funds not covered by MoneyDJ",
+                "nextAction": "Normalize output schema to match daily_prices before production scheduling",
+            },
+            {
+                "id": "yahoo-market-price",
+                "name": "台股與美股 ETF 報價補值",
+                "provider": "Yahoo Finance",
+                "category": "股票 / ETF",
+                "status": "batch_only",
+                "currentStorage": "BigQuery daily_prices backfill script",
+                "integrationPath": "Daily batch fills price gaps and upserts into the warehouse",
+                "nextAction": "Move ticker config into versioned metadata and add job observability",
+            },
+            {
+                "id": "fred-fx",
+                "name": "FRED 匯率資料",
+                "provider": "Federal Reserve Economic Data",
+                "category": "總經 / 匯率",
+                "status": "needs_secret",
+                "currentStorage": "Local Excel export / BigQuery daily_fx upload",
+                "integrationPath": "Server-side job fetches FRED series and stores normalized FX rows",
+                "nextAction": "Move the FRED key into Vercel environment variables and rotate any key previously stored in code",
+            },
+            {
+                "id": "dividend-radar",
+                "name": "配息基準日雷達",
+                "provider": "MoneyDJ",
+                "category": "配息資料",
+                "status": "batch_only",
+                "currentStorage": "BigQuery dividend field updater",
+                "integrationPath": "Dividend job updates existing daily price rows after NAV ingestion",
+                "nextAction": "Convert raw SQL string assembly into parameterized or table-driven update logic",
+            },
+        ],
+        "securityNotes": [
+            "Do not commit gcp_key.json, service-account files, .env files, or downloaded spreadsheets.",
+            "Move external API keys to Vercel environment variables before enabling serverless jobs.",
+            "Keep crawlers as scheduled ingestion jobs; serve the website from normalized warehouse tables.",
+            "Rotate any API key that has ever been hard-coded in a local script before production use.",
+        ],
+    }
 
 # --- 法規常數 ---
 TAX_EXEMPT_VAL = 1333.0

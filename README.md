@@ -55,6 +55,12 @@ Main simulation:
 POST /api/v1/wealth/simulate
 ```
 
+Market data source manifest:
+
+```text
+GET /api/v1/market/sources
+```
+
 Vercel rewrites `/api/*` traffic to `api/index.py`.
 
 ## Frontend Architecture

@@ -9,4 +9,4 @@ export type DashboardSection =
   | "family"
   | "insurance";
 
-export type DashboardTab = "main" | "tax";
+export type DashboardTab = "main" | "tax" | "market";

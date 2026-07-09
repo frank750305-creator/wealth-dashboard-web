@@ -1,5 +1,6 @@
 import type { ComponentProps } from "react";
 import { MainResultsPanel } from "@/components/MainResultsPanel";
+import { MarketDataPanel } from "@/components/MarketDataPanel";
 import { TaxParametersPanel } from "@/components/TaxParametersPanel";
 import type { DashboardTab } from "@/types/dashboard";
 
@@ -50,6 +51,8 @@ export function ResultsWorkspacePanel({
           onTaxParamChange={onTaxParamChange}
         />
       )}
+
+      {activeTab === "market" && <MarketDataPanel />}
     </div>
   );
 }
