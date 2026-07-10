@@ -59,6 +59,13 @@ type ModeComparisonResult = {
   longRebuild: PortfolioAnalysisResponse;
 };
 
+type DecisionSignal = {
+  label: string;
+  value: string;
+  status: "strong" | "watch" | "risk" | "neutral";
+  note: string;
+};
+
 type ExportedPortfolioPayload = {
   presetName?: string;
   configuration?: {
@@ -281,6 +288,105 @@ function metricDeltaClass(value: number | null) {
   if (value > 0) return "text-emerald-300";
   if (value < 0) return "text-rose-300";
   return "text-slate-300";
+}
+
+function isFiniteNumber(value: number | null | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function decisionSignalClass(status: DecisionSignal["status"]) {
+  if (status === "strong") return "border-emerald-500/20 bg-emerald-950/10";
+  if (status === "watch") return "border-amber-500/25 bg-amber-950/10";
+  if (status === "risk") return "border-rose-500/25 bg-rose-950/10";
+  return "border-slate-800 bg-slate-950";
+}
+
+function decisionSignalBadgeClass(status: DecisionSignal["status"]) {
+  if (status === "strong") return "bg-emerald-500/15 text-emerald-200";
+  if (status === "watch") return "bg-amber-500/15 text-amber-200";
+  if (status === "risk") return "bg-rose-500/15 text-rose-200";
+  return "bg-slate-800 text-slate-300";
+}
+
+function decisionSignalStatusLabel(status: DecisionSignal["status"]) {
+  if (status === "strong") return "穩健";
+  if (status === "watch") return "觀察";
+  if (status === "risk") return "風險";
+  return "中性";
+}
+
+function buildDecisionSignals(
+  result: PortfolioResult,
+  riskRows: Array<{ symbol: string; riskContributionPercent?: number | null }>,
+) {
+  const metrics = result.metrics;
+  const signals: DecisionSignal[] = [];
+
+  if (isFiniteNumber(metrics.cagr)) {
+    const status = metrics.cagr >= 0.08 ? "strong" : metrics.cagr >= 0 ? "watch" : "risk";
+    signals.push({
+      label: "年化報酬",
+      value: formatMetric(metrics.cagr, "percent"),
+      status,
+      note: status === "strong" ? "長期成長力較明確" : status === "watch" ? "正報酬，但還要看波動" : "回測期間未形成正成長",
+    });
+  }
+
+  if (isFiniteNumber(metrics.sharpe)) {
+    const status = metrics.sharpe >= 1 ? "strong" : metrics.sharpe >= 0.4 ? "watch" : "risk";
+    signals.push({
+      label: "報酬效率",
+      value: formatMetric(metrics.sharpe, "number"),
+      status,
+      note: status === "strong" ? "每承擔一份風險的報酬較好" : status === "watch" ? "效率普通，適合和替代組合比較" : "風險補償偏低",
+    });
+  }
+
+  if (isFiniteNumber(metrics.maxDrawdown)) {
+    const drawdown = Math.abs(metrics.maxDrawdown);
+    const status = drawdown >= 0.3 ? "risk" : drawdown >= 0.15 ? "watch" : "strong";
+    signals.push({
+      label: "最大回撤",
+      value: formatMetric(metrics.maxDrawdown, "percent"),
+      status,
+      note: status === "strong" ? "歷史下跌幅度相對可控" : status === "watch" ? "需要預留心理與現金緩衝" : "極端下跌壓力偏高",
+    });
+  }
+
+  if (isFiniteNumber(metrics.confidenceLowerBound)) {
+    const status = metrics.confidenceLowerBound <= -0.2 ? "risk" : metrics.confidenceLowerBound <= -0.08 ? "watch" : "strong";
+    signals.push({
+      label: "信賴下緣",
+      value: formatMetric(metrics.confidenceLowerBound, "percent"),
+      status,
+      note: status === "strong" ? "壞情境壓力較低" : status === "watch" ? "壞情境需要納入資金規劃" : "壞情境下損失可能偏大",
+    });
+  }
+
+  const observations = result.dataWindow.observations;
+  if (Number.isFinite(observations)) {
+    const status = observations >= 756 ? "strong" : observations >= 252 ? "watch" : "risk";
+    signals.push({
+      label: "資料期間",
+      value: `${observations.toLocaleString("zh-TW")} 筆`,
+      status,
+      note: status === "strong" ? "樣本較充足" : status === "watch" ? "樣本可用，但仍需小心解讀" : "樣本偏少，結果容易失真",
+    });
+  }
+
+  const topRisk = riskRows.find((row) => isFiniteNumber(row.riskContributionPercent));
+  if (topRisk && isFiniteNumber(topRisk.riskContributionPercent)) {
+    const concentration = Math.abs(topRisk.riskContributionPercent);
+    const status = concentration >= 0.5 ? "risk" : concentration >= 0.35 ? "watch" : "strong";
+    signals.push({
+      label: "風險集中",
+      value: `${topRisk.symbol} ${formatMetric(concentration, "percent")}`,
+      status,
+      note: status === "strong" ? "風險來源分散度較好" : status === "watch" ? "主要風險來源需要追蹤" : "單一資產主導組合風險",
+    });
+  }
+
+  return signals;
 }
 
 function formatSignedWeightDelta(value: number) {
@@ -548,6 +654,10 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
         Math.abs(right.riskContributionPercent ?? 0) - Math.abs(left.riskContributionPercent ?? 0),
     );
   }, [displayResult]);
+  const decisionSignals = useMemo(() => {
+    if (!displayResult) return [];
+    return buildDecisionSignals(displayResult, riskContributionRows);
+  }, [displayResult, riskContributionRows]);
   const rebalanceSummary = useMemo(
     () => summarizeRebalance(rebalanceRows, portfolioValue),
     [rebalanceRows, portfolioValue],
@@ -1505,6 +1615,30 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
               ) : null}
             </div>
           </div>
+
+          {decisionSignals.length ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+              {decisionSignals.map((signal) => (
+                <div
+                  key={signal.label}
+                  className={`rounded-lg border p-3 min-w-0 ${decisionSignalClass(signal.status)}`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] text-slate-500 truncate">{signal.label}</p>
+                    <span
+                      className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-bold ${decisionSignalBadgeClass(signal.status)}`}
+                    >
+                      {decisionSignalStatusLabel(signal.status)}
+                    </span>
+                  </div>
+                  <p className="mt-2 font-mono text-sm font-bold text-slate-100 truncate" title={signal.value}>
+                    {signal.value}
+                  </p>
+                  <p className="mt-1 text-[11px] text-slate-500 leading-relaxed">{signal.note}</p>
+                </div>
+              ))}
+            </div>
+          ) : null}
 
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
             {metricGroups.map((group) => (
