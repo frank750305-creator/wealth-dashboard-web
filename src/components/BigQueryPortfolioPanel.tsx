@@ -1016,6 +1016,23 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
     setError(null);
   }
 
+  function handleInferCurrencies() {
+    const activeAssetRows = activeRows();
+
+    if (!activeAssetRows.length) {
+      setError("至少需要一個商品代號才能自動判斷幣別。");
+      return;
+    }
+
+    setRows((currentRows) =>
+      currentRows.map((row) => {
+        if (!row.symbol.trim()) return row;
+        return { ...row, currency: inferSymbolCurrency(row.symbol) };
+      }),
+    );
+    setError(null);
+  }
+
   function handlePortfolioValueChange(value: number) {
     const nextValue = normalizePortfolioValue(value, 0);
     setPortfolioValue(nextValue);
@@ -1686,7 +1703,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
           ))}
 
           <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={() => setRows((currentRows) => [...currentRows, makeRow()])}
                 className="w-9 h-9 rounded-md bg-slate-950 border border-slate-700 text-cyan-300 hover:border-cyan-600"
@@ -1729,6 +1746,12 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
                 className="h-9 px-3 rounded-md bg-slate-950 border border-slate-700 text-[11px] font-bold text-slate-300 hover:border-cyan-600 hover:text-cyan-200"
               >
                 代號
+              </button>
+              <button
+                onClick={handleInferCurrencies}
+                className="h-9 px-3 rounded-md bg-slate-950 border border-slate-700 text-[11px] font-bold text-slate-300 hover:border-cyan-600 hover:text-cyan-200"
+              >
+                幣別
               </button>
             </div>
             <div className="text-right">
