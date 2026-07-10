@@ -69,6 +69,8 @@ def load_bigquery_market_diagnostics() -> Dict:
         "priceSummary": {},
         "fxSummary": {},
         "recentSymbols": [],
+        "staleSymbols": [],
+        "fxCurrencies": [],
     }
 
     if not schema_checks["priceTable"]["isReady"] or not schema_checks["fxTable"]["isReady"]:
@@ -102,11 +104,52 @@ def load_bigquery_market_diagnostics() -> Dict:
     ORDER BY latest_date DESC, row_count DESC
     LIMIT 8
     """
+    stale_symbols_query = f"""
+    WITH latest AS (
+        SELECT MAX(DATE(date)) AS latest_date
+        FROM {price_table}
+    ),
+    symbol_stats AS (
+        SELECT
+            symbol,
+            MAX(DATE(date)) AS latest_date,
+            COUNT(1) AS row_count,
+            COUNTIF(SAFE_CAST(adj_price AS FLOAT64) > 0) AS adjusted_price_rows,
+            COUNTIF(SAFE_CAST(raw_price AS FLOAT64) > 0) AS raw_price_rows
+        FROM {price_table}
+        GROUP BY symbol
+    )
+    SELECT
+        symbol,
+        latest_date,
+        row_count,
+        adjusted_price_rows,
+        raw_price_rows,
+        DATE_DIFF((SELECT latest_date FROM latest), latest_date, DAY) AS stale_days
+    FROM symbol_stats
+    WHERE latest_date IS NOT NULL
+      AND DATE_DIFF((SELECT latest_date FROM latest), latest_date, DAY) > 0
+    ORDER BY stale_days DESC, latest_date ASC, row_count DESC
+    LIMIT 12
+    """
+    fx_currencies_query = f"""
+    SELECT
+        currency,
+        MIN(DATE(date)) AS first_date,
+        MAX(DATE(date)) AS latest_date,
+        COUNT(1) AS row_count
+    FROM {fx_table}
+    GROUP BY currency
+    ORDER BY latest_date DESC, currency
+    LIMIT 12
+    """
 
     try:
         price_summary = next(iter(client.query(price_summary_query).result()), None)
         fx_summary = next(iter(client.query(fx_summary_query).result()), None)
         recent_symbols = list(client.query(recent_symbols_query).result())
+        stale_symbols = list(client.query(stale_symbols_query).result())
+        fx_currencies = list(client.query(fx_currencies_query).result())
     except Exception as exc:
         raise MarketDataQueryError(f"BigQuery diagnostics query failed: {exc}") from exc
 
@@ -121,6 +164,14 @@ def load_bigquery_market_diagnostics() -> Dict:
     diagnostics["recentSymbols"] = [
         _summary_row_to_dict(row, date_fields=("latest_date",))
         for row in recent_symbols
+    ]
+    diagnostics["staleSymbols"] = [
+        _summary_row_to_dict(row, date_fields=("latest_date",))
+        for row in stale_symbols
+    ]
+    diagnostics["fxCurrencies"] = [
+        _summary_row_to_dict(row, date_fields=("first_date", "latest_date"))
+        for row in fx_currencies
     ]
     return diagnostics
 

@@ -122,6 +122,10 @@ export function MarketDataPanel() {
   const fxFreshnessDays = daysSinceDate(bigQueryDiagnostics?.fxSummary.latest_date);
   const priceFreshnessStatus = freshnessStatus(priceFreshnessDays);
   const fxFreshnessStatus = freshnessStatus(fxFreshnessDays);
+  const staleSymbols = bigQueryDiagnostics?.staleSymbols ?? [];
+  const fxCurrencies = bigQueryDiagnostics?.fxCurrencies ?? [];
+  const staleSymbolStatus: QualityStatus = staleSymbols.length >= 5 ? "risk" : staleSymbols.length > 0 ? "watch" : "strong";
+  const fxCurrencyStatus: QualityStatus = coverageStatus(fxCurrencies.length, 2, 1);
   const schemaStatus: QualityStatus = bigQueryDiagnostics
     ? bigQueryDiagnostics.schemaChecks.priceTable.isReady && bigQueryDiagnostics.schemaChecks.fxTable.isReady
       ? "strong"
@@ -161,6 +165,20 @@ export function MarketDataPanel() {
       note: "daily_prices 歷史價格筆數",
     },
   ];
+  const issueCards: Array<{ label: string; value: string; status: QualityStatus; note: string }> = [
+    {
+      label: "落後商品",
+      value: `${staleSymbols.length} 檔`,
+      status: bigQueryDiagnostics ? staleSymbolStatus : "neutral",
+      note: staleSymbols.length ? "部分商品最新日落後於價格表最新日" : "未偵測到落後商品",
+    },
+    {
+      label: "匯率幣別",
+      value: `${fxCurrencies.length} 組`,
+      status: bigQueryDiagnostics ? fxCurrencyStatus : "neutral",
+      note: "daily_fx 可供換算的幣別數",
+    },
+  ];
   const handleExportDiagnosticsCsv = () => {
     if (!bigQueryDiagnostics) return;
 
@@ -177,12 +195,27 @@ export function MarketDataPanel() {
       ["summary", "fx_latest_date", bigQueryDiagnostics.fxSummary.latest_date ?? "", "", ""],
       ["summary", "fx_row_count", bigQueryDiagnostics.fxSummary.row_count ?? "", "", ""],
       ["summary", "fx_currency_count", bigQueryDiagnostics.fxSummary.currency_count ?? "", "", ""],
+      ...issueCards.map((card) => ["issue", card.label, card.value, card.status, card.note]),
       ...bigQueryDiagnostics.recentSymbols.map((symbol) => [
         "recent_symbol",
         symbol.symbol,
         symbol.latest_date ?? "",
         freshnessStatus(daysSinceDate(symbol.latest_date)),
         symbol.row_count,
+      ]),
+      ...staleSymbols.map((symbol) => [
+        "stale_symbol",
+        symbol.symbol,
+        symbol.latest_date ?? "",
+        symbol.stale_days ?? "",
+        symbol.row_count,
+      ]),
+      ...fxCurrencies.map((currency) => [
+        "fx_currency",
+        currency.currency,
+        currency.latest_date ?? "",
+        freshnessStatus(daysSinceDate(currency.latest_date)),
+        currency.row_count,
       ]),
     ];
 
@@ -378,6 +411,23 @@ export function MarketDataPanel() {
                 ))}
               </div>
 
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                {issueCards.map((card) => (
+                  <div key={card.label} className={`rounded-lg border p-3 min-w-0 ${qualityClass(card.status)}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[11px] text-slate-500 truncate">{card.label}</p>
+                      <span className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-bold ${qualityBadgeClass(card.status)}`}>
+                        {qualityLabel(card.status)}
+                      </span>
+                    </div>
+                    <p className="mt-2 font-mono text-sm font-bold text-slate-100 truncate" title={card.value}>
+                      {card.value}
+                    </p>
+                    <p className="mt-1 text-[11px] text-slate-500 leading-relaxed">{card.note}</p>
+                  </div>
+                ))}
+              </div>
+
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 text-xs">
                 <div className="bg-slate-900 border border-slate-800 rounded-lg p-3 space-y-3">
                   <div className="flex items-center justify-between gap-3">
@@ -474,6 +524,64 @@ export function MarketDataPanel() {
                   )}
                 </div>
               )}
+
+              {staleSymbols.length ? (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-3 text-[11px]">
+                    <span className="text-slate-500">落後商品</span>
+                    <span className="text-slate-600 font-mono">{staleSymbols.length} 檔</span>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                    {staleSymbols.slice(0, 8).map((symbol) => {
+                      const staleDays = symbol.stale_days ?? daysSinceDate(symbol.latest_date);
+                      return (
+                        <div key={symbol.symbol} className="bg-slate-900 border border-slate-800 rounded-md p-2 space-y-1">
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-slate-200 truncate">{symbol.symbol}</span>
+                            <span
+                              className={`rounded px-2 py-0.5 text-[10px] font-bold ${qualityBadgeClass(
+                                freshnessStatus(staleDays),
+                              )}`}
+                            >
+                              {staleDays === null ? "--" : `${staleDays} 天`}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between gap-3 text-[11px] text-slate-500">
+                            <span className="font-mono">{symbol.latest_date ?? "--"}</span>
+                            <span className="font-mono">{formatCount(symbol.row_count)} rows</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
+              {fxCurrencies.length ? (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-3 text-[11px]">
+                    <span className="text-slate-500">匯率幣別狀態</span>
+                    <span className="text-slate-600 font-mono">{fxCurrencies.length} 組</span>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                    {fxCurrencies.map((currency) => (
+                      <div key={currency.currency} className="flex items-center justify-between gap-3 bg-slate-900 border border-slate-800 rounded-md p-2">
+                        <span className="text-slate-200 truncate">{currency.currency}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-slate-500 font-mono">{currency.latest_date ?? "--"}</span>
+                          <span
+                            className={`rounded px-2 py-0.5 text-[10px] font-bold ${qualityBadgeClass(
+                              freshnessStatus(daysSinceDate(currency.latest_date)),
+                            )}`}
+                          >
+                            {qualityLabel(freshnessStatus(daysSinceDate(currency.latest_date)))}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
 
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-3 text-[11px]">
