@@ -5,6 +5,7 @@ import type { BigQueryAsset, BigQueryAssetProfileResponse, MarketSourceStatus } 
 import { BigQueryPortfolioPanel } from "./BigQueryPortfolioPanel";
 
 type QualityStatus = "strong" | "watch" | "risk" | "neutral";
+type AssetDecisionSignal = "candidate" | "watch" | "risk" | "neutral";
 
 type AssetComparisonRow = {
   symbol: string;
@@ -17,6 +18,10 @@ type AssetComparisonRow = {
   maxDrawdown: number | null;
   freshnessDays: number | null;
   qualityStatus: QualityStatus;
+  riskAdjustedReturn: number | null;
+  score: number;
+  signal: AssetDecisionSignal;
+  signalNote: string;
 };
 
 const statusMeta: Record<MarketSourceStatus, { label: string; className: string }> = {
@@ -100,6 +105,20 @@ function qualityBadgeClass(status: QualityStatus) {
   return "bg-slate-800 text-slate-300";
 }
 
+function decisionSignalLabel(signal: AssetDecisionSignal) {
+  if (signal === "candidate") return "候選";
+  if (signal === "watch") return "觀察";
+  if (signal === "risk") return "風險";
+  return "中性";
+}
+
+function decisionSignalClass(signal: AssetDecisionSignal) {
+  if (signal === "candidate") return "bg-emerald-500/15 text-emerald-200";
+  if (signal === "watch") return "bg-amber-500/15 text-amber-200";
+  if (signal === "risk") return "bg-rose-500/15 text-rose-200";
+  return "bg-slate-800 text-slate-300";
+}
+
 function csvCell(value: unknown) {
   if (value === null || value === undefined) return "";
   const text = String(value);
@@ -161,6 +180,10 @@ function parseSymbolList(value: string) {
     .slice(0, 12);
 }
 
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
 function comparisonRowFromProfile(profile: BigQueryAssetProfileResponse): AssetComparisonRow {
   const freshnessDays = daysSinceDate(profile.summary.latest_date);
   const missingRows = profile.summary.missing_selected_price_rows;
@@ -171,6 +194,38 @@ function comparisonRowFromProfile(profile: BigQueryAssetProfileResponse): AssetC
       : freshness === "watch" || missingRows > 0
         ? "watch"
         : "strong";
+  const annualizedReturn = profile.metrics.annualizedReturn;
+  const annualizedVolatility = profile.metrics.annualizedVolatility;
+  const maxDrawdown = profile.metrics.maxDrawdown;
+  const returnScore = typeof annualizedReturn === "number" ? clamp(annualizedReturn * 120, -30, 35) : 0;
+  const volatilityPenalty =
+    typeof annualizedVolatility === "number" ? clamp(annualizedVolatility * 60, 0, 25) : 10;
+  const drawdownPenalty = typeof maxDrawdown === "number" ? clamp(Math.abs(maxDrawdown) * 70, 0, 30) : 10;
+  const freshnessPenalty = freshnessDays === null ? 8 : freshnessDays > 10 ? 18 : freshnessDays > 3 ? 8 : 0;
+  const missingPenalty = missingRows > 5 ? 12 : missingRows > 0 ? 5 : 0;
+  const score = Math.round(clamp(50 + returnScore - volatilityPenalty - drawdownPenalty - freshnessPenalty - missingPenalty, 0, 100));
+  const riskAdjustedReturn =
+    typeof annualizedReturn === "number" &&
+    typeof annualizedVolatility === "number" &&
+    annualizedVolatility > 0
+      ? annualizedReturn / annualizedVolatility
+      : null;
+  const signal: AssetDecisionSignal =
+    qualityStatus === "risk" || score < 40
+      ? "risk"
+      : score >= 70 && qualityStatus === "strong"
+        ? "candidate"
+        : score >= 55
+          ? "watch"
+          : "neutral";
+  const signalNote =
+    signal === "candidate"
+      ? "報酬、風險與資料品質相對較佳"
+      : signal === "watch"
+        ? "具備可比性，但仍需檢查波動或資料品質"
+        : signal === "risk"
+          ? "資料品質或風險報酬條件偏弱"
+          : "暫無明確優勢";
 
   return {
     symbol: profile.symbol,
@@ -183,6 +238,10 @@ function comparisonRowFromProfile(profile: BigQueryAssetProfileResponse): AssetC
     maxDrawdown: profile.metrics.maxDrawdown,
     freshnessDays,
     qualityStatus,
+    riskAdjustedReturn,
+    score,
+    signal,
+    signalNote,
   };
 }
 
@@ -199,6 +258,10 @@ function assetComparisonCsv(rows: AssetComparisonRow[], priceBasis: "adjusted" |
     "max_drawdown",
     "freshness_days",
     "quality_status",
+    "risk_adjusted_return",
+    "score",
+    "signal",
+    "signal_note",
   ];
   const csvRows = rows.map((row) => [
     row.symbol,
@@ -212,6 +275,10 @@ function assetComparisonCsv(rows: AssetComparisonRow[], priceBasis: "adjusted" |
     row.maxDrawdown ?? "",
     row.freshnessDays ?? "",
     row.qualityStatus,
+    row.riskAdjustedReturn ?? "",
+    row.score,
+    row.signal,
+    row.signalNote,
   ]);
 
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
@@ -1099,6 +1166,20 @@ export function MarketDataPanel() {
                     "異常/觀察",
                     `${comparisonRows.filter((row) => row.qualityStatus !== "strong").length} 檔`,
                   ],
+                  [
+                    "最高分",
+                    comparisonRows.length
+                      ? `${[...comparisonRows].sort((left, right) => right.score - left.score)[0].symbol} · ${[...comparisonRows].sort((left, right) => right.score - left.score)[0].score}`
+                      : "--",
+                  ],
+                  [
+                    "候選",
+                    `${comparisonRows.filter((row) => row.signal === "candidate").length} 檔`,
+                  ],
+                  [
+                    "風險",
+                    `${comparisonRows.filter((row) => row.signal === "risk").length} 檔`,
+                  ],
                 ].map(([label, value]) => (
                   <div key={label} className="rounded-md border border-slate-800 bg-slate-900/60 p-3 min-w-0">
                     <p className="text-[11px] text-slate-600 truncate">{label}</p>
@@ -1110,10 +1191,11 @@ export function MarketDataPanel() {
               </div>
 
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[980px] text-xs">
+                <table className="w-full min-w-[1120px] text-xs">
                   <thead>
                     <tr className="text-left text-[11px] text-slate-600">
                       <th className="py-2 pr-3 font-medium">Symbol</th>
+                      <th className="py-2 px-3 font-medium text-right">Score</th>
                       <th className="py-2 px-3 font-medium">Latest</th>
                       <th className="py-2 px-3 font-medium text-right">Rows</th>
                       <th className="py-2 px-3 font-medium text-right">Price</th>
@@ -1121,12 +1203,14 @@ export function MarketDataPanel() {
                       <th className="py-2 px-3 font-medium text-right">Ann. Return</th>
                       <th className="py-2 px-3 font-medium text-right">Vol</th>
                       <th className="py-2 px-3 font-medium text-right">Drawdown</th>
+                      <th className="py-2 px-3 font-medium text-right">RA Return</th>
+                      <th className="py-2 px-3 font-medium text-right">Signal</th>
                       <th className="py-2 pl-3 font-medium text-right">Quality</th>
                     </tr>
                   </thead>
                   <tbody>
                     {[...comparisonRows]
-                      .sort((left, right) => (right.annualizedReturn ?? -Infinity) - (left.annualizedReturn ?? -Infinity))
+                      .sort((left, right) => right.score - left.score)
                       .map((row) => (
                         <tr key={row.symbol} className="border-t border-slate-900">
                           <td className="py-2 pr-3">
@@ -1136,6 +1220,19 @@ export function MarketDataPanel() {
                             >
                               {row.symbol}
                             </button>
+                          </td>
+                          <td className="py-2 px-3 text-right">
+                            <span
+                              className={`inline-flex min-w-10 justify-center rounded px-2 py-0.5 font-mono text-[11px] font-bold ${
+                                row.score >= 70
+                                  ? "bg-emerald-500/15 text-emerald-200"
+                                  : row.score >= 55
+                                    ? "bg-amber-500/15 text-amber-200"
+                                    : "bg-rose-500/15 text-rose-200"
+                              }`}
+                            >
+                              {row.score}
+                            </span>
                           </td>
                           <td className="py-2 px-3 font-mono text-slate-400">
                             {row.latestDate ?? "--"}
@@ -1166,6 +1263,17 @@ export function MarketDataPanel() {
                           </td>
                           <td className="py-2 px-3 text-right font-mono text-rose-300">
                             {formatPercent(row.maxDrawdown)}
+                          </td>
+                          <td className="py-2 px-3 text-right font-mono text-slate-300">
+                            {typeof row.riskAdjustedReturn === "number" ? row.riskAdjustedReturn.toFixed(2) : "--"}
+                          </td>
+                          <td className="py-2 px-3 text-right">
+                            <span
+                              className={`rounded px-2 py-0.5 text-[10px] font-bold ${decisionSignalClass(row.signal)}`}
+                              title={row.signalNote}
+                            >
+                              {decisionSignalLabel(row.signal)}
+                            </span>
                           </td>
                           <td className="py-2 pl-3 text-right">
                             <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${qualityBadgeClass(row.qualityStatus)}`}>
