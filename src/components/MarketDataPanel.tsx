@@ -6,6 +6,19 @@ import { BigQueryPortfolioPanel } from "./BigQueryPortfolioPanel";
 
 type QualityStatus = "strong" | "watch" | "risk" | "neutral";
 
+type AssetComparisonRow = {
+  symbol: string;
+  latestDate: string | null;
+  rowCount: number;
+  latestPrice: number | null;
+  totalReturn: number | null;
+  annualizedReturn: number | null;
+  annualizedVolatility: number | null;
+  maxDrawdown: number | null;
+  freshnessDays: number | null;
+  qualityStatus: QualityStatus;
+};
+
 const statusMeta: Record<MarketSourceStatus, { label: string; className: string }> = {
   ready: {
     label: "可接 API",
@@ -133,6 +146,77 @@ function assetProfileCsv(profile: BigQueryAssetProfileResponse) {
   return rows.map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
+function parseSymbolList(value: string) {
+  const seen = new Set<string>();
+  return value
+    .split(/[\s,，、]+/)
+    .map((symbol) => symbol.trim())
+    .filter(Boolean)
+    .filter((symbol) => {
+      const key = symbol.toUpperCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 12);
+}
+
+function comparisonRowFromProfile(profile: BigQueryAssetProfileResponse): AssetComparisonRow {
+  const freshnessDays = daysSinceDate(profile.summary.latest_date);
+  const missingRows = profile.summary.missing_selected_price_rows;
+  const freshness = freshnessStatus(freshnessDays);
+  const qualityStatus: QualityStatus =
+    freshness === "risk" || missingRows > 5
+      ? "risk"
+      : freshness === "watch" || missingRows > 0
+        ? "watch"
+        : "strong";
+
+  return {
+    symbol: profile.symbol,
+    latestDate: profile.summary.latest_date,
+    rowCount: profile.summary.row_count,
+    latestPrice: profile.metrics.latestPrice,
+    totalReturn: profile.metrics.totalReturn,
+    annualizedReturn: profile.metrics.annualizedReturn,
+    annualizedVolatility: profile.metrics.annualizedVolatility,
+    maxDrawdown: profile.metrics.maxDrawdown,
+    freshnessDays,
+    qualityStatus,
+  };
+}
+
+function assetComparisonCsv(rows: AssetComparisonRow[], priceBasis: "adjusted" | "raw") {
+  const header = [
+    "symbol",
+    "price_basis",
+    "latest_date",
+    "row_count",
+    "latest_price",
+    "total_return",
+    "annualized_return",
+    "annualized_volatility",
+    "max_drawdown",
+    "freshness_days",
+    "quality_status",
+  ];
+  const csvRows = rows.map((row) => [
+    row.symbol,
+    priceBasis,
+    row.latestDate ?? "",
+    row.rowCount,
+    row.latestPrice ?? "",
+    row.totalReturn ?? "",
+    row.annualizedReturn ?? "",
+    row.annualizedVolatility ?? "",
+    row.maxDrawdown ?? "",
+    row.freshnessDays ?? "",
+    row.qualityStatus,
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
 export function MarketDataPanel() {
   const {
     data,
@@ -151,6 +235,10 @@ export function MarketDataPanel() {
   const [assetPanelError, setAssetPanelError] = useState<string | null>(null);
   const [isSearchingAssets, setIsSearchingAssets] = useState(false);
   const [isLoadingAssetProfile, setIsLoadingAssetProfile] = useState(false);
+  const [comparisonSymbols, setComparisonSymbols] = useState("0050.TW SPY QQQ");
+  const [comparisonRows, setComparisonRows] = useState<AssetComparisonRow[]>([]);
+  const [comparisonError, setComparisonError] = useState<string | null>(null);
+  const [isLoadingComparison, setIsLoadingComparison] = useState(false);
   const sources = data?.sources ?? [];
   const securedCount = sources.filter((source) => source.status !== "needs_secret").length;
   const hasBigQueryCredentials = Boolean(
@@ -362,6 +450,33 @@ export function MarketDataPanel() {
     downloadTextFile(
       `bigquery-asset-profile-${assetProfile.symbol}-${resultStamp()}.csv`,
       assetProfileCsv(assetProfile),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleCompareAssets = async () => {
+    const symbols = parseSymbolList(comparisonSymbols);
+    if (!hasBigQueryCredentials || !symbols.length) return;
+
+    setIsLoadingComparison(true);
+    setComparisonError(null);
+    try {
+      const profiles = await Promise.all(
+        symbols.map((symbol) => fetchBigQueryAssetProfile(symbol, assetPriceBasis)),
+      );
+      setComparisonRows(profiles.map(comparisonRowFromProfile));
+    } catch (err: unknown) {
+      setComparisonRows([]);
+      setComparisonError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsLoadingComparison(false);
+    }
+  };
+  const handleExportAssetComparisonCsv = () => {
+    if (!comparisonRows.length) return;
+
+    downloadTextFile(
+      `bigquery-asset-watchlist-${resultStamp()}.csv`,
+      assetComparisonCsv(comparisonRows, assetPriceBasis),
       "text/csv;charset=utf-8",
     );
   };
@@ -910,6 +1025,162 @@ export function MarketDataPanel() {
           ) : (
             <div className="border border-dashed border-slate-800 rounded-lg p-4 text-xs text-slate-500">
               選擇商品後，這裡會顯示單一商品的資料主檔與價格品質。
+            </div>
+          )}
+        </section>
+
+        <section className="bg-slate-950 border border-slate-800 rounded-lg p-4 space-y-4">
+          <div className="flex flex-col xl:flex-row xl:items-start justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-bold text-slate-100">BigQuery Watchlist 比較</h3>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                批次比較多檔商品的報酬、波動、回撤與資料品質
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {comparisonRows.length ? (
+                <button
+                  onClick={handleExportAssetComparisonCsv}
+                  className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
+                >
+                  Watchlist CSV
+                </button>
+              ) : null}
+              <button
+                onClick={handleCompareAssets}
+                disabled={!hasBigQueryCredentials || isLoadingComparison || !parseSymbolList(comparisonSymbols).length}
+                className="px-3 py-2 text-xs font-bold rounded-md bg-cyan-700 hover:bg-cyan-600 text-white disabled:cursor-not-allowed disabled:bg-slate-900 disabled:text-slate-600"
+              >
+                {isLoadingComparison ? "比較中" : "比較商品"}
+              </button>
+            </div>
+          </div>
+
+          <textarea
+            value={comparisonSymbols}
+            onChange={(event) => setComparisonSymbols(event.target.value)}
+            rows={3}
+            placeholder="0050.TW SPY QQQ"
+            className="w-full resize-y rounded-md border border-slate-800 bg-slate-900 px-3 py-2 font-mono text-xs text-slate-100 outline-none placeholder:text-slate-700 focus:border-cyan-600"
+          />
+          <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
+            <span>最多比較 12 檔；可用空白、逗號或換行分隔</span>
+            <span className="font-mono">
+              {parseSymbolList(comparisonSymbols).length} symbols · {assetPriceBasis}
+            </span>
+          </div>
+
+          {comparisonError ? (
+            <div className="border border-red-900/60 bg-red-950/30 rounded-lg p-3 text-xs text-red-300 whitespace-pre-wrap">
+              {comparisonError}
+            </div>
+          ) : null}
+
+          {comparisonRows.length ? (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                {[
+                  ["商品數", `${comparisonRows.length} 檔`],
+                  [
+                    "平均年化報酬",
+                    formatPercent(
+                      comparisonRows.reduce((sum, row) => sum + (row.annualizedReturn ?? 0), 0) /
+                        Math.max(1, comparisonRows.filter((row) => row.annualizedReturn !== null).length),
+                    ),
+                  ],
+                  [
+                    "平均波動",
+                    formatPercent(
+                      comparisonRows.reduce((sum, row) => sum + (row.annualizedVolatility ?? 0), 0) /
+                        Math.max(1, comparisonRows.filter((row) => row.annualizedVolatility !== null).length),
+                    ),
+                  ],
+                  [
+                    "異常/觀察",
+                    `${comparisonRows.filter((row) => row.qualityStatus !== "strong").length} 檔`,
+                  ],
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded-md border border-slate-800 bg-slate-900/60 p-3 min-w-0">
+                    <p className="text-[11px] text-slate-600 truncate">{label}</p>
+                    <p className="mt-1 font-mono text-sm font-bold text-slate-100 truncate" title={value}>
+                      {value}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[980px] text-xs">
+                  <thead>
+                    <tr className="text-left text-[11px] text-slate-600">
+                      <th className="py-2 pr-3 font-medium">Symbol</th>
+                      <th className="py-2 px-3 font-medium">Latest</th>
+                      <th className="py-2 px-3 font-medium text-right">Rows</th>
+                      <th className="py-2 px-3 font-medium text-right">Price</th>
+                      <th className="py-2 px-3 font-medium text-right">Total</th>
+                      <th className="py-2 px-3 font-medium text-right">Ann. Return</th>
+                      <th className="py-2 px-3 font-medium text-right">Vol</th>
+                      <th className="py-2 px-3 font-medium text-right">Drawdown</th>
+                      <th className="py-2 pl-3 font-medium text-right">Quality</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...comparisonRows]
+                      .sort((left, right) => (right.annualizedReturn ?? -Infinity) - (left.annualizedReturn ?? -Infinity))
+                      .map((row) => (
+                        <tr key={row.symbol} className="border-t border-slate-900">
+                          <td className="py-2 pr-3">
+                            <button
+                              onClick={() => handleLoadAssetProfile(row.symbol)}
+                              className="font-bold text-cyan-200 hover:text-cyan-100"
+                            >
+                              {row.symbol}
+                            </button>
+                          </td>
+                          <td className="py-2 px-3 font-mono text-slate-400">
+                            {row.latestDate ?? "--"}
+                            <span className="ml-2 text-slate-600">
+                              {row.freshnessDays === null ? "" : `${row.freshnessDays}d`}
+                            </span>
+                          </td>
+                          <td className="py-2 px-3 text-right font-mono text-slate-400">{formatCount(row.rowCount)}</td>
+                          <td className="py-2 px-3 text-right font-mono text-slate-300">{formatPrice(row.latestPrice)}</td>
+                          <td
+                            className={`py-2 px-3 text-right font-mono ${
+                              typeof row.totalReturn === "number" && row.totalReturn < 0 ? "text-rose-300" : "text-emerald-300"
+                            }`}
+                          >
+                            {formatPercent(row.totalReturn)}
+                          </td>
+                          <td
+                            className={`py-2 px-3 text-right font-mono ${
+                              typeof row.annualizedReturn === "number" && row.annualizedReturn < 0
+                                ? "text-rose-300"
+                                : "text-emerald-300"
+                            }`}
+                          >
+                            {formatPercent(row.annualizedReturn)}
+                          </td>
+                          <td className="py-2 px-3 text-right font-mono text-amber-200">
+                            {formatPercent(row.annualizedVolatility)}
+                          </td>
+                          <td className="py-2 px-3 text-right font-mono text-rose-300">
+                            {formatPercent(row.maxDrawdown)}
+                          </td>
+                          <td className="py-2 pl-3 text-right">
+                            <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${qualityBadgeClass(row.qualityStatus)}`}>
+                              {qualityLabel(row.qualityStatus)}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (
+            <div className="border border-dashed border-slate-800 rounded-lg p-4 text-xs text-slate-500">
+              輸入多個商品代號後，這裡會顯示 watchlist 橫向比較。
             </div>
           )}
         </section>
