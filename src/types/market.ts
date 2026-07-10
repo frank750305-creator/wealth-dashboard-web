@@ -97,6 +97,49 @@ export type BigQueryAssetSearchResponse = {
   assets: BigQueryAsset[];
 };
 
+export type BigQueryAssetProfileSummary = {
+  first_date: string | null;
+  latest_date: string | null;
+  row_count: number;
+  selected_price_rows: number;
+  missing_selected_price_rows: number;
+  adjusted_price_rows: number;
+  raw_price_rows: number;
+};
+
+export type BigQueryAssetProfileMetrics = {
+  firstPrice: number | null;
+  latestPrice: number | null;
+  minPrice: number | null;
+  maxPrice: number | null;
+  totalReturn: number | null;
+  annualizedReturn: number | null;
+  annualizedVolatility: number | null;
+  maxDrawdown: number | null;
+  positiveDayRatio: number | null;
+  bestDay: number | null;
+  worstDay: number | null;
+  latestDailyReturn: number | null;
+};
+
+export type BigQueryAssetPricePoint = {
+  date: string | null;
+  raw_price: number | null;
+  adj_price: number | null;
+  selected_price: number | null;
+  daily_return: number | null;
+};
+
+export type BigQueryAssetProfileResponse = {
+  generatedAt: string;
+  status: Omit<BigQueryMarketStatus, "generatedAt">;
+  symbol: string;
+  priceBasis: "adjusted" | "raw";
+  summary: BigQueryAssetProfileSummary;
+  metrics: BigQueryAssetProfileMetrics;
+  recentPrices: BigQueryAssetPricePoint[];
+};
+
 export type PortfolioAnalyzeBigQueryPayload = {
   weights_by_symbol: Record<string, number>;
   benchmark_symbol?: string | null;

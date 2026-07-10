@@ -245,6 +245,139 @@ def search_bigquery_assets(*, query: Optional[str] = None, limit: int = 20) -> D
     }
 
 
+def load_bigquery_asset_profile(*, symbol: str, price_basis: str = "adjusted", recent_limit: int = 30) -> Dict:
+    clean_symbol = (symbol or "").strip()
+    if not clean_symbol:
+        raise MarketDataError("Symbol is required.")
+
+    bigquery = _bigquery_module()
+    client = _bigquery_client(bigquery)
+    selected_price_column = _price_column(price_basis)
+    normalized_price_basis = _normalize_price_basis(price_basis)
+    price_table = _table_path("BIGQUERY_PRICE_TABLE", DEFAULT_PRICE_TABLE)
+    bounded_recent_limit = max(5, min(int(recent_limit or 30), 120))
+
+    query = f"""
+    SELECT
+        DATE(date) AS price_date,
+        symbol,
+        SAFE_CAST(adj_price AS FLOAT64) AS adj_price,
+        SAFE_CAST(raw_price AS FLOAT64) AS raw_price,
+        SAFE_CAST({selected_price_column} AS FLOAT64) AS selected_price
+    FROM {price_table}
+    WHERE symbol = @symbol
+    ORDER BY price_date
+    """
+
+    try:
+        rows = list(
+            client.query(
+                query,
+                job_config=bigquery.QueryJobConfig(
+                    query_parameters=[
+                        bigquery.ScalarQueryParameter("symbol", "STRING", clean_symbol),
+                    ]
+                ),
+            ).result()
+        )
+    except Exception as exc:
+        raise MarketDataQueryError(f"BigQuery asset profile query failed: {exc}") from exc
+
+    records = [
+        {
+            "date": row["price_date"],
+            "symbol": row["symbol"],
+            "adj_price": row["adj_price"],
+            "raw_price": row["raw_price"],
+            "selected_price": row["selected_price"],
+        }
+        for row in rows
+    ]
+    if not records:
+        raise MarketDataError(f"No BigQuery price data found for: {clean_symbol}")
+
+    frame = pd.DataFrame.from_records(records)
+    frame["date"] = pd.to_datetime(frame["date"])
+    for column in ("adj_price", "raw_price", "selected_price"):
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
+
+    frame = frame.sort_values("date")
+    frame["daily_return"] = frame["selected_price"].pct_change(fill_method=None)
+    valid_frame = frame[frame["selected_price"].notna() & (frame["selected_price"] > 0)].copy()
+    if valid_frame.empty:
+        raise MarketDataError(f"No valid {normalized_price_basis} price data found for: {clean_symbol}")
+
+    valid_returns = valid_frame["selected_price"].pct_change(fill_method=None).replace([np.inf, -np.inf], np.nan)
+    first_price = float(valid_frame["selected_price"].iloc[0])
+    latest_price = float(valid_frame["selected_price"].iloc[-1])
+    first_date = valid_frame["date"].iloc[0]
+    latest_date = valid_frame["date"].iloc[-1]
+    elapsed_days = max(int((latest_date - first_date).days), 0)
+    total_return = latest_price / first_price - 1 if first_price > 0 else None
+    annualized_return = (
+        (latest_price / first_price) ** (365.25 / elapsed_days) - 1
+        if first_price > 0 and elapsed_days > 0
+        else None
+    )
+    annualized_volatility = (
+        float(valid_returns.std(ddof=0) * np.sqrt(252))
+        if valid_returns.dropna().shape[0] > 1
+        else None
+    )
+    drawdown_series = valid_frame["selected_price"] / valid_frame["selected_price"].cummax() - 1
+    valid_return_count = int(valid_returns.dropna().shape[0])
+    positive_day_ratio = (
+        float((valid_returns.dropna() > 0).sum() / valid_return_count)
+        if valid_return_count
+        else None
+    )
+
+    frame_for_recent = frame.tail(bounded_recent_limit).copy()
+    frame_for_recent["date"] = frame_for_recent["date"].dt.strftime("%Y-%m-%d")
+
+    def finite_or_none(value):
+        return float(value) if value is not None and np.isfinite(value) else None
+
+    return {
+        "status": bigquery_market_status(),
+        "symbol": clean_symbol,
+        "priceBasis": normalized_price_basis,
+        "summary": {
+            "first_date": frame["date"].min().strftime("%Y-%m-%d"),
+            "latest_date": frame["date"].max().strftime("%Y-%m-%d"),
+            "row_count": int(len(frame)),
+            "selected_price_rows": int(valid_frame.shape[0]),
+            "missing_selected_price_rows": int(len(frame) - valid_frame.shape[0]),
+            "adjusted_price_rows": int((frame["adj_price"].notna() & (frame["adj_price"] > 0)).sum()),
+            "raw_price_rows": int((frame["raw_price"].notna() & (frame["raw_price"] > 0)).sum()),
+        },
+        "metrics": {
+            "firstPrice": finite_or_none(first_price),
+            "latestPrice": finite_or_none(latest_price),
+            "minPrice": finite_or_none(valid_frame["selected_price"].min()),
+            "maxPrice": finite_or_none(valid_frame["selected_price"].max()),
+            "totalReturn": finite_or_none(total_return),
+            "annualizedReturn": finite_or_none(annualized_return),
+            "annualizedVolatility": finite_or_none(annualized_volatility),
+            "maxDrawdown": finite_or_none(drawdown_series.min()),
+            "positiveDayRatio": finite_or_none(positive_day_ratio),
+            "bestDay": finite_or_none(valid_returns.max()),
+            "worstDay": finite_or_none(valid_returns.min()),
+            "latestDailyReturn": finite_or_none(valid_returns.dropna().iloc[-1] if valid_return_count else None),
+        },
+        "recentPrices": [
+            {
+                "date": row["date"],
+                "raw_price": finite_or_none(row["raw_price"]),
+                "adj_price": finite_or_none(row["adj_price"]),
+                "selected_price": finite_or_none(row["selected_price"]),
+                "daily_return": finite_or_none(row["daily_return"]),
+            }
+            for row in frame_for_recent.to_dict("records")
+        ],
+    }
+
+
 def load_portfolio_return_input(
     *,
     symbols: Iterable[str],

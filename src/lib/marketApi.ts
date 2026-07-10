@@ -1,6 +1,7 @@
 import type {
   BigQueryMarketStatus,
   BigQueryMarketDiagnostics,
+  BigQueryAssetProfileResponse,
   BigQueryAssetSearchResponse,
   MarketSourcesResponse,
   PortfolioAnalysisResponse,
@@ -67,6 +68,29 @@ export async function fetchBigQueryAssets(query = "", limit = 20): Promise<BigQu
   if (!response.ok) {
     const errText = await response.text();
     throw new Error(`BigQuery 商品搜尋異常 (代碼: ${response.status})\n${errText}`);
+  }
+
+  return response.json();
+}
+
+export async function fetchBigQueryAssetProfile(
+  symbol: string,
+  priceBasis: "adjusted" | "raw" = "adjusted",
+): Promise<BigQueryAssetProfileResponse> {
+  const cleanSymbol = symbol.trim();
+  const params = new URLSearchParams({
+    price_basis: priceBasis,
+    recent_limit: "30",
+  });
+
+  const response = await fetch(`/api/v1/market/bigquery/assets/${encodeURIComponent(cleanSymbol)}?${params.toString()}`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`BigQuery 商品詳情讀取異常 (代碼: ${response.status})\n${errText}`);
   }
 
   return response.json();
