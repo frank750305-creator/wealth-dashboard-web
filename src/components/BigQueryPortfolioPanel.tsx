@@ -544,6 +544,64 @@ function importedWeightToPercent(weight: unknown) {
   return Math.abs(numeric) <= 1 ? Number((numeric * 100).toFixed(2)) : numeric;
 }
 
+function parseWeightCell(weight: unknown) {
+  const text = String(weight ?? "").trim();
+  if (!text) return 0;
+
+  if (text.endsWith("%")) {
+    const numeric = Number(text.slice(0, -1));
+    return Number.isFinite(numeric) ? numeric : 0;
+  }
+
+  return importedWeightToPercent(text);
+}
+
+function splitConfigurationLine(line: string) {
+  const delimiter = line.includes("\t") ? "\t" : ",";
+  return line.split(delimiter).map((cell) => cell.trim());
+}
+
+function isConfigurationHeader(cells: string[]) {
+  const normalizedCells = cells.map((cell) => cell.trim().toLowerCase());
+  return normalizedCells.some((cell) =>
+    ["symbol", "ticker", "weight", "weight_percent", "currency"].includes(cell),
+  );
+}
+
+function parsePastedConfiguration(text: string): Array<Pick<AssetRow, "symbol" | "weight" | "currency">> {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  return lines.flatMap((line, index) => {
+    const cells = splitConfigurationLine(line);
+    if (index === 0 && isConfigurationHeader(cells)) return [];
+
+    const [symbolRaw, weightRaw, currencyRaw] = cells;
+    const symbol = symbolRaw?.trim();
+    if (!symbol) return [];
+
+    return [
+      {
+        symbol,
+        weight: parseWeightCell(weightRaw),
+        currency: currencyRaw?.trim().toUpperCase() || inferSymbolCurrency(symbol),
+      },
+    ];
+  });
+}
+
+function configurationCsv(rows: AssetRow[]) {
+  const header = ["symbol", "weight_percent", "currency"];
+  const dataRows = rows.map((row) => [
+    row.symbol.trim(),
+    (Number(row.weight) || 0).toFixed(2),
+    row.currency.trim().toUpperCase() || inferSymbolCurrency(row.symbol),
+  ]);
+  return [header, ...dataRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
 function applyTradeAssumptions(
   rows: RebalanceRecommendation[],
   portfolioValue: number,
@@ -653,6 +711,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied">("idle");
   const [symbolCopyStatus, setSymbolCopyStatus] = useState<"idle" | "copied">("idle");
   const [configCopyStatus, setConfigCopyStatus] = useState<"idle" | "copied">("idle");
+  const [bulkConfigText, setBulkConfigText] = useState("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [isComparingModes, setIsComparingModes] = useState(false);
@@ -673,6 +732,9 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
     const activeAssetRows = rows.filter((row) => row.symbol.trim());
     const normalizedSymbols = activeAssetRows.map((row) => row.symbol.trim().toUpperCase());
     const duplicateSymbols = [...new Set(normalizedSymbols.filter((symbol, index) => normalizedSymbols.indexOf(symbol) !== index))];
+    const negativeWeightSymbols = activeAssetRows
+      .filter((row) => (Number(row.weight) || 0) < 0)
+      .map((row) => row.symbol.trim());
     const weightGap = Math.abs(totalWeight - 100);
     const dateSpan = daysBetween(startDate, endDate);
     const checks: InputCheck[] = [
@@ -698,6 +760,12 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
         value: duplicateSymbols.length ? duplicateSymbols.join(", ") : "無",
         status: duplicateSymbols.length ? "risk" : "strong",
         note: duplicateSymbols.length ? "同一商品重複輸入會讓權重失真" : "未發現重複商品",
+      },
+      {
+        label: "負權重",
+        value: negativeWeightSymbols.length ? negativeWeightSymbols.join(", ") : "無",
+        status: negativeWeightSymbols.length ? "risk" : "strong",
+        note: negativeWeightSymbols.length ? "現階段不建議用負權重跑一般配置" : "權重皆為正值或零",
       },
       {
         label: "日期區間",
@@ -1082,6 +1150,51 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
     } catch (err: unknown) {
       setError(`配置複製失敗：${err instanceof Error ? err.message : String(err)}`);
     }
+  }
+
+  function handleExportConfigurationCsv() {
+    const activeAssetRows = activeRows();
+
+    if (!activeAssetRows.length) {
+      setError("至少需要一個商品代號才能下載配置。");
+      return;
+    }
+
+    downloadTextFile(
+      `bigquery-configuration-${resultStamp()}.csv`,
+      configurationCsv(activeAssetRows),
+      "text/csv;charset=utf-8",
+    );
+    setError(null);
+  }
+
+  function handleApplyBulkConfiguration() {
+    const importedRows = parsePastedConfiguration(bulkConfigText).map(makePresetRow);
+
+    if (!importedRows.length) {
+      setError("貼上內容沒有可用配置。");
+      return;
+    }
+
+    setRows(importedRows);
+    setSelectedPresetId("");
+    setResult(null);
+    setOptimizationResult(null);
+    setModeComparisonResult(null);
+    setRebalanceRows([]);
+    setBulkConfigText("");
+    setError(null);
+  }
+
+  function handleResetConfiguration() {
+    setRows(initialRows.map(makePresetRow));
+    setSelectedPresetId("");
+    setResult(null);
+    setOptimizationResult(null);
+    setModeComparisonResult(null);
+    setRebalanceRows([]);
+    setBulkConfigText("");
+    setError(null);
   }
 
   function handlePortfolioValueChange(value: number) {
@@ -1822,6 +1935,41 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
                 {totalWeight.toFixed(1)}%
               </p>
               <p className="text-[10px] text-slate-600">權重總和</p>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-slate-800 bg-slate-950 p-3 space-y-2">
+            <div className="flex items-center justify-between gap-3 text-[11px]">
+              <span className="text-slate-500">批次配置</span>
+              <span className="font-mono text-slate-600">CSV / TSV</span>
+            </div>
+            <textarea
+              value={bulkConfigText}
+              onChange={(event) => setBulkConfigText(event.target.value)}
+              rows={3}
+              placeholder={"symbol,weight_percent,currency\n0050.TW,50,TWD\nSPY,50,USD"}
+              className="w-full resize-y rounded-md border border-slate-800 bg-slate-900 px-2 py-2 font-mono text-[11px] text-slate-100 outline-none placeholder:text-slate-700 focus:border-cyan-600"
+            />
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={handleApplyBulkConfiguration}
+                disabled={!bulkConfigText.trim()}
+                className="h-9 px-3 rounded-md bg-cyan-700 text-[11px] font-bold text-white hover:bg-cyan-600 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
+              >
+                套用貼上
+              </button>
+              <button
+                onClick={handleExportConfigurationCsv}
+                className="h-9 px-3 rounded-md border border-slate-700 bg-slate-900 text-[11px] font-bold text-slate-300 hover:border-cyan-600 hover:text-cyan-200"
+              >
+                下載 CSV
+              </button>
+              <button
+                onClick={handleResetConfiguration}
+                className="h-9 px-3 rounded-md border border-slate-700 bg-slate-900 text-[11px] font-bold text-slate-300 hover:border-amber-500 hover:text-amber-200"
+              >
+                重設預設
+              </button>
             </div>
           </div>
 
