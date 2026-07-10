@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMarketSources } from "@/hooks/useMarketSources";
 import { fetchBigQueryAssetProfile, fetchBigQueryAssets } from "@/lib/marketApi";
 import type { BigQueryAsset, BigQueryAssetProfileResponse, MarketSourceStatus } from "@/types/market";
@@ -13,6 +13,17 @@ type AssetComparisonSortKey =
   | "maxDrawdown"
   | "riskAdjustedReturn"
   | "freshnessDays";
+
+type SavedWatchlistPreset = {
+  id: string;
+  name: string;
+  symbols: string;
+  priceBasis: "adjusted" | "raw";
+  sortKey: AssetComparisonSortKey;
+  signalFilter: AssetDecisionSignal | "all";
+  minimumScore: number;
+  updatedAt: string;
+};
 
 type AssetComparisonRow = {
   symbol: string;
@@ -57,6 +68,7 @@ const bigQueryEnvironmentVars = [
   { key: "BIGQUERY_FX_TABLE", value: "daily_fx", kind: "plain" },
   { key: "GCP_SERVICE_ACCOUNT_JSON", value: "Service account JSON", kind: "secret" },
 ];
+const watchlistPresetStorageKey = "wealth-dashboard.bigqueryWatchlistPresets";
 
 function formatCount(value: number | undefined) {
   return typeof value === "number" && Number.isFinite(value) ? value.toLocaleString("zh-TW") : "--";
@@ -146,6 +158,33 @@ function downloadTextFile(fileName: string, content: string, mimeType: string) {
 
 function resultStamp() {
   return new Date().toISOString().slice(0, 19).replaceAll(":", "").replace("T", "-");
+}
+
+function loadWatchlistPresetsFromStorage() {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(watchlistPresetStorageKey) || "[]");
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed.filter((item): item is SavedWatchlistPreset => {
+      if (!item || typeof item !== "object") return false;
+      const preset = item as Partial<SavedWatchlistPreset>;
+      return (
+        typeof preset.id === "string" &&
+        typeof preset.name === "string" &&
+        typeof preset.symbols === "string" &&
+        typeof preset.updatedAt === "string"
+      );
+    });
+  } catch {
+    return [];
+  }
+}
+
+function writeWatchlistPresetsToStorage(presets: SavedWatchlistPreset[]) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(watchlistPresetStorageKey, JSON.stringify(presets));
 }
 
 function assetProfileCsv(profile: BigQueryAssetProfileResponse) {
@@ -332,6 +371,9 @@ export function MarketDataPanel() {
   const [comparisonSignalFilter, setComparisonSignalFilter] = useState<AssetDecisionSignal | "all">("all");
   const [comparisonSortKey, setComparisonSortKey] = useState<AssetComparisonSortKey>("score");
   const [minimumComparisonScore, setMinimumComparisonScore] = useState(0);
+  const [watchlistPresetName, setWatchlistPresetName] = useState("核心 ETF");
+  const [selectedWatchlistPresetId, setSelectedWatchlistPresetId] = useState("");
+  const [savedWatchlistPresets, setSavedWatchlistPresets] = useState<SavedWatchlistPreset[]>([]);
   const sources = data?.sources ?? [];
   const securedCount = sources.filter((source) => source.status !== "needs_secret").length;
   const hasBigQueryCredentials = Boolean(
@@ -408,6 +450,20 @@ export function MarketDataPanel() {
     }),
     comparisonSortKey,
   );
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const presets = loadWatchlistPresetsFromStorage();
+      setSavedWatchlistPresets(presets);
+      setSelectedWatchlistPresetId((currentId) => currentId || presets[0]?.id || "");
+      setWatchlistPresetName((currentName) => currentName || presets[0]?.name || "核心 ETF");
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, []);
+
   const assetProfileQualityCards: Array<{ label: string; value: string; status: QualityStatus; note: string }> = assetProfile
     ? [
         {
@@ -579,6 +635,51 @@ export function MarketDataPanel() {
       assetComparisonCsv(visibleComparisonRows, assetPriceBasis),
       "text/csv;charset=utf-8",
     );
+  };
+  const handleSaveWatchlistPreset = () => {
+    const cleanName = watchlistPresetName.trim() || "未命名 Watchlist";
+    const now = new Date().toISOString();
+    const preset: SavedWatchlistPreset = {
+      id: selectedWatchlistPresetId || `watchlist-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      name: cleanName,
+      symbols: comparisonSymbols,
+      priceBasis: assetPriceBasis,
+      sortKey: comparisonSortKey,
+      signalFilter: comparisonSignalFilter,
+      minimumScore: minimumComparisonScore,
+      updatedAt: now,
+    };
+
+    setSavedWatchlistPresets((currentPresets) => {
+      const nextPresets = [preset, ...currentPresets.filter((item) => item.id !== preset.id)].slice(0, 12);
+      writeWatchlistPresetsToStorage(nextPresets);
+      return nextPresets;
+    });
+    setSelectedWatchlistPresetId(preset.id);
+  };
+  const handleLoadWatchlistPreset = () => {
+    const preset = savedWatchlistPresets.find((item) => item.id === selectedWatchlistPresetId);
+    if (!preset) return;
+
+    setWatchlistPresetName(preset.name);
+    setComparisonSymbols(preset.symbols);
+    setAssetPriceBasis(preset.priceBasis === "raw" ? "raw" : "adjusted");
+    setComparisonSortKey(preset.sortKey ?? "score");
+    setComparisonSignalFilter(preset.signalFilter ?? "all");
+    setMinimumComparisonScore(Number.isFinite(preset.minimumScore) ? preset.minimumScore : 0);
+    setComparisonRows([]);
+    setComparisonError(null);
+  };
+  const handleDeleteWatchlistPreset = () => {
+    if (!selectedWatchlistPresetId) return;
+
+    setSavedWatchlistPresets((currentPresets) => {
+      const nextPresets = currentPresets.filter((preset) => preset.id !== selectedWatchlistPresetId);
+      writeWatchlistPresetsToStorage(nextPresets);
+      setSelectedWatchlistPresetId(nextPresets[0]?.id || "");
+      setWatchlistPresetName(nextPresets[0]?.name || "核心 ETF");
+      return nextPresets;
+    });
   };
 
   return (
@@ -1168,6 +1269,58 @@ export function MarketDataPanel() {
             <span className="font-mono">
               {parseSymbolList(comparisonSymbols).length} symbols · {assetPriceBasis}
             </span>
+          </div>
+
+          <div className="grid grid-cols-1 xl:grid-cols-[0.8fr_1.2fr] gap-2 rounded-lg border border-slate-800 bg-slate-900/60 p-3 text-xs">
+            <label className="space-y-1">
+              <span className="text-slate-500">Watchlist 名稱</span>
+              <input
+                value={watchlistPresetName}
+                onChange={(event) => setWatchlistPresetName(event.target.value)}
+                className="w-full rounded-md border border-slate-800 bg-slate-950 px-3 py-2 text-slate-100"
+              />
+            </label>
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto_auto] gap-2">
+              <label className="space-y-1">
+                <span className="text-slate-500">已存 Watchlist</span>
+                <select
+                  value={selectedWatchlistPresetId}
+                  onChange={(event) => {
+                    const preset = savedWatchlistPresets.find((item) => item.id === event.target.value);
+                    setSelectedWatchlistPresetId(event.target.value);
+                    if (preset) setWatchlistPresetName(preset.name);
+                  }}
+                  className="w-full rounded-md border border-slate-800 bg-slate-950 px-3 py-2 text-slate-100"
+                >
+                  <option value="">尚未選擇</option>
+                  {savedWatchlistPresets.map((preset) => (
+                    <option key={preset.id} value={preset.id}>
+                      {preset.name} · {new Date(preset.updatedAt).toLocaleDateString("zh-TW")}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                onClick={handleSaveWatchlistPreset}
+                className="md:self-end px-3 py-2 rounded-md bg-emerald-700 hover:bg-emerald-600 text-white font-bold"
+              >
+                儲存
+              </button>
+              <button
+                onClick={handleLoadWatchlistPreset}
+                disabled={!selectedWatchlistPresetId}
+                className="md:self-end px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:text-slate-600"
+              >
+                載入
+              </button>
+              <button
+                onClick={handleDeleteWatchlistPreset}
+                disabled={!selectedWatchlistPresetId}
+                className="md:self-end px-3 py-2 rounded-md border border-slate-700 bg-slate-950 text-slate-300 hover:border-rose-500 hover:text-rose-300 font-bold disabled:cursor-not-allowed disabled:text-slate-700"
+              >
+                刪除
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_1.2fr] gap-2 text-xs">
