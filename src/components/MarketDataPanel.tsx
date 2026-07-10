@@ -13,6 +13,7 @@ type AssetComparisonSortKey =
   | "maxDrawdown"
   | "riskAdjustedReturn"
   | "freshnessDays";
+type AllocationMode = "score" | "risk" | "equal";
 
 type SavedWatchlistPreset = {
   id: string;
@@ -40,6 +41,13 @@ type AssetComparisonRow = {
   score: number;
   signal: AssetDecisionSignal;
   signalNote: string;
+};
+
+type AllocationDraftRow = AssetComparisonRow & {
+  allocationWeight: number;
+  allocationAmount: number;
+  allocationBasis: number;
+  allocationNote: string;
 };
 
 const statusMeta: Record<MarketSourceStatus, { label: string; className: string }> = {
@@ -80,6 +88,12 @@ function formatPrice(value: number | null | undefined) {
 
 function formatPercent(value: number | null | undefined) {
   return typeof value === "number" && Number.isFinite(value) ? `${(value * 100).toFixed(2)}%` : "--";
+}
+
+function formatCurrency(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value.toLocaleString("zh-TW", { maximumFractionDigits: 0 })
+    : "--";
 }
 
 function daysSinceDate(value?: string | null) {
@@ -335,6 +349,87 @@ function assetComparisonCsv(rows: AssetComparisonRow[], priceBasis: "adjusted" |
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
+function allocationModeLabel(mode: AllocationMode) {
+  if (mode === "score") return "分數加權";
+  if (mode === "risk") return "風險調整";
+  return "等權重";
+}
+
+function allocationBasisForRow(row: AssetComparisonRow, mode: AllocationMode) {
+  if (row.signal === "risk" || row.qualityStatus === "risk" || row.score < 40) return 0;
+  if (mode === "equal") return 1;
+  if (mode === "score") return Math.max(0, row.score - 35);
+
+  const volatility = typeof row.annualizedVolatility === "number" && row.annualizedVolatility > 0 ? row.annualizedVolatility : 0.25;
+  const drawdownPenalty = typeof row.maxDrawdown === "number" ? 1 + Math.abs(row.maxDrawdown) : 1.2;
+  return Math.max(0, row.score - 35) / volatility / drawdownPenalty;
+}
+
+function allocationNoteForRow(row: AssetComparisonRow, mode: AllocationMode) {
+  if (row.signal === "risk" || row.qualityStatus === "risk") return "排除：資料品質或風險訊號偏弱";
+  if (row.score < 40) return "排除：分數低於配置門檻";
+  if (mode === "risk") return "納入：分數經波動與回撤調整";
+  if (mode === "score") return "納入：依 Watchlist 分數配置";
+  return "納入：符合門檻後等權配置";
+}
+
+function allocationDraftRows(rows: AssetComparisonRow[], mode: AllocationMode, capital: number): AllocationDraftRow[] {
+  const positiveRows = rows.map((row) => ({ row, basis: allocationBasisForRow(row, mode) }));
+  const totalBasis = positiveRows.reduce((sum, item) => sum + item.basis, 0);
+
+  return positiveRows
+    .map(({ row, basis }) => {
+      const allocationWeight = totalBasis > 0 && basis > 0 ? basis / totalBasis : 0;
+      return {
+        ...row,
+        allocationWeight,
+        allocationAmount: allocationWeight * Math.max(0, capital),
+        allocationBasis: basis,
+        allocationNote: allocationNoteForRow(row, mode),
+      };
+    })
+    .sort((left, right) => right.allocationWeight - left.allocationWeight || right.score - left.score);
+}
+
+function allocationDraftCsv(rows: AllocationDraftRow[], mode: AllocationMode, capital: number, priceBasis: "adjusted" | "raw") {
+  const header = [
+    "symbol",
+    "price_basis",
+    "allocation_mode",
+    "model_capital",
+    "allocation_weight",
+    "allocation_amount",
+    "score",
+    "signal",
+    "quality_status",
+    "annualized_return",
+    "annualized_volatility",
+    "max_drawdown",
+    "risk_adjusted_return",
+    "latest_date",
+    "allocation_note",
+  ];
+  const csvRows = rows.map((row) => [
+    row.symbol,
+    priceBasis,
+    mode,
+    capital,
+    row.allocationWeight,
+    row.allocationAmount,
+    row.score,
+    row.signal,
+    row.qualityStatus,
+    row.annualizedReturn ?? "",
+    row.annualizedVolatility ?? "",
+    row.maxDrawdown ?? "",
+    row.riskAdjustedReturn ?? "",
+    row.latestDate ?? "",
+    row.allocationNote,
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
 function averageComparisonMetric(rows: AssetComparisonRow[], selector: (row: AssetComparisonRow) => number | null) {
   const values = rows.map(selector).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
   if (!values.length) return null;
@@ -364,6 +459,9 @@ function assetComparisonMemo(
     signalFilter: AssetDecisionSignal | "all";
     minimumScore: number;
     totalRows: number;
+    allocationRows?: AllocationDraftRow[];
+    allocationMode?: AllocationMode;
+    allocationCapital?: number;
   },
 ) {
   const candidateRows = rows.filter((row) => row.signal === "candidate");
@@ -376,6 +474,7 @@ function assetComparisonMemo(
   const symbolText = parseSymbolList(options.symbols).join(", ") || "--";
   const topRows = rows.slice(0, 8);
   const reviewRows = [...riskRows, ...qualityRows.filter((row) => !riskRows.some((riskRow) => riskRow.symbol === row.symbol))].slice(0, 8);
+  const memoAllocationRows = (options.allocationRows ?? []).filter((row) => row.allocationWeight > 0).slice(0, 8);
   const tableHeader = "| 商品 | 分數 | 訊號 | 年化報酬 | 年化波動 | 最大回撤 | 最新日 | 說明 |";
   const tableDivider = "|---|---:|---|---:|---:|---:|---|---|";
   const tableRows = topRows.map((row) =>
@@ -401,6 +500,16 @@ function assetComparisonMemo(
       markdownCell(row.signalNote),
     ].join(" | "),
   );
+  const allocationTableRows = memoAllocationRows.map((row) =>
+    [
+      markdownCell(row.symbol),
+      markdownCell(formatPercent(row.allocationWeight)),
+      markdownCell(formatCurrency(row.allocationAmount)),
+      row.score,
+      markdownCell(decisionSignalLabel(row.signal)),
+      markdownCell(row.allocationNote),
+    ].join(" | "),
+  );
 
   return [
     `# ${options.name || "未命名 Watchlist"} 研究摘要`,
@@ -423,6 +532,13 @@ function assetComparisonMemo(
     topRows.length ? tableHeader : "目前篩選條件下沒有商品。",
     topRows.length ? tableDivider : "",
     ...tableRows.map((row) => `| ${row} |`),
+    "",
+    "## 模型配置草稿",
+    `- 配置模式：${options.allocationMode ? allocationModeLabel(options.allocationMode) : "--"}`,
+    `- 模型本金：${formatCurrency(options.allocationCapital)}`,
+    memoAllocationRows.length ? "| 商品 | 權重 | 金額 | 分數 | 訊號 | 說明 |" : "目前篩選條件下沒有可納入配置的商品。",
+    memoAllocationRows.length ? "|---|---:|---:|---:|---|---|" : "",
+    ...allocationTableRows.map((row) => `| ${row} |`),
     "",
     "## 需要複核的風險",
     reviewRows.length ? "| 商品 | 分數 | 訊號 | 品質 | 最新日 | 距今天 | 說明 |" : "目前篩選結果未偵測到明確風險。",
@@ -476,6 +592,8 @@ export function MarketDataPanel() {
   const [comparisonSignalFilter, setComparisonSignalFilter] = useState<AssetDecisionSignal | "all">("all");
   const [comparisonSortKey, setComparisonSortKey] = useState<AssetComparisonSortKey>("score");
   const [minimumComparisonScore, setMinimumComparisonScore] = useState(0);
+  const [allocationMode, setAllocationMode] = useState<AllocationMode>("risk");
+  const [allocationCapital, setAllocationCapital] = useState(1_000_000);
   const [watchlistPresetName, setWatchlistPresetName] = useState("核心 ETF");
   const [selectedWatchlistPresetId, setSelectedWatchlistPresetId] = useState("");
   const [savedWatchlistPresets, setSavedWatchlistPresets] = useState<SavedWatchlistPreset[]>([]);
@@ -556,6 +674,8 @@ export function MarketDataPanel() {
     }),
     comparisonSortKey,
   );
+  const modelAllocationRows = allocationDraftRows(visibleComparisonRows, allocationMode, allocationCapital);
+  const activeAllocationRows = modelAllocationRows.filter((row) => row.allocationWeight > 0);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -742,6 +862,15 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleExportAllocationDraftCsv = () => {
+    if (!modelAllocationRows.length) return;
+
+    downloadTextFile(
+      `bigquery-allocation-draft-${resultStamp()}.csv`,
+      allocationDraftCsv(modelAllocationRows, allocationMode, allocationCapital, assetPriceBasis),
+      "text/csv;charset=utf-8",
+    );
+  };
   const buildAssetComparisonMemo = () =>
     assetComparisonMemo(visibleComparisonRows, {
       name: watchlistPresetName.trim() || "未命名 Watchlist",
@@ -751,6 +880,9 @@ export function MarketDataPanel() {
       signalFilter: comparisonSignalFilter,
       minimumScore: minimumComparisonScore,
       totalRows: comparisonRows.length,
+      allocationRows: modelAllocationRows,
+      allocationMode,
+      allocationCapital,
     });
   const handleExportAssetComparisonMemo = () => {
     if (!visibleComparisonRows.length) return;
@@ -1574,6 +1706,113 @@ export function MarketDataPanel() {
                   </div>
                 ))}
               </div>
+
+              <section className="rounded-lg border border-slate-800 bg-slate-900/50 p-3 space-y-3">
+                <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-3">
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-100">模型配置草稿</h4>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      依目前 Watchlist 篩選結果產生研究用權重；風險訊號與低分商品會自動排除
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-[150px_160px_auto] gap-2 text-xs">
+                    <label className="space-y-1">
+                      <span className="text-slate-500">配置模式</span>
+                      <select
+                        value={allocationMode}
+                        onChange={(event) => setAllocationMode(event.target.value as AllocationMode)}
+                        className="w-full rounded-md border border-slate-800 bg-slate-950 px-3 py-2 text-slate-100"
+                      >
+                        <option value="risk">風險調整</option>
+                        <option value="score">分數加權</option>
+                        <option value="equal">等權重</option>
+                      </select>
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-slate-500">模型本金</span>
+                      <input
+                        type="number"
+                        min={0}
+                        step={10000}
+                        value={allocationCapital}
+                        onChange={(event) => setAllocationCapital(Math.max(0, Number(event.target.value) || 0))}
+                        className="w-full rounded-md border border-slate-800 bg-slate-950 px-3 py-2 text-right font-mono text-slate-100"
+                      />
+                    </label>
+                    <button
+                      onClick={handleExportAllocationDraftCsv}
+                      disabled={!modelAllocationRows.length}
+                      className="sm:self-end px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+                    >
+                      配置 CSV
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                  {[
+                    ["模式", allocationModeLabel(allocationMode)],
+                    ["納入商品", `${activeAllocationRows.length} / ${visibleComparisonRows.length} 檔`],
+                    ["配置金額", formatCurrency(activeAllocationRows.reduce((sum, row) => sum + row.allocationAmount, 0))],
+                    [
+                      "最高權重",
+                      activeAllocationRows.length
+                        ? `${activeAllocationRows[0].symbol} · ${formatPercent(activeAllocationRows[0].allocationWeight)}`
+                        : "--",
+                    ],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded-md border border-slate-800 bg-slate-950/70 p-3 min-w-0">
+                      <p className="text-[11px] text-slate-600 truncate">{label}</p>
+                      <p className="mt-1 font-mono text-sm font-bold text-slate-100 truncate" title={value}>
+                        {value}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[900px] text-xs">
+                    <thead>
+                      <tr className="text-left text-[11px] text-slate-600">
+                        <th className="py-2 pr-3 font-medium">Symbol</th>
+                        <th className="py-2 px-3 font-medium text-right">Weight</th>
+                        <th className="py-2 px-3 font-medium text-right">Amount</th>
+                        <th className="py-2 px-3 font-medium text-right">Score</th>
+                        <th className="py-2 px-3 font-medium text-right">Vol</th>
+                        <th className="py-2 px-3 font-medium text-right">Drawdown</th>
+                        <th className="py-2 px-3 font-medium">Signal</th>
+                        <th className="py-2 pl-3 font-medium">Note</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {modelAllocationRows.slice(0, 10).map((row) => (
+                        <tr key={row.symbol} className="border-t border-slate-800/80">
+                          <td className="py-2 pr-3 font-bold text-cyan-200">{row.symbol}</td>
+                          <td className="py-2 px-3 text-right font-mono text-slate-100">
+                            {formatPercent(row.allocationWeight)}
+                          </td>
+                          <td className="py-2 px-3 text-right font-mono text-slate-300">
+                            {formatCurrency(row.allocationAmount)}
+                          </td>
+                          <td className="py-2 px-3 text-right font-mono text-slate-300">{row.score}</td>
+                          <td className="py-2 px-3 text-right font-mono text-amber-200">
+                            {formatPercent(row.annualizedVolatility)}
+                          </td>
+                          <td className="py-2 px-3 text-right font-mono text-rose-300">
+                            {formatPercent(row.maxDrawdown)}
+                          </td>
+                          <td className="py-2 px-3">
+                            <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${decisionSignalClass(row.signal)}`}>
+                              {decisionSignalLabel(row.signal)}
+                            </span>
+                          </td>
+                          <td className="py-2 pl-3 text-slate-500">{row.allocationNote}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
 
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[1120px] text-xs">
