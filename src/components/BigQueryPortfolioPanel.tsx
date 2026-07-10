@@ -978,6 +978,24 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
     setError(null);
   }
 
+  function handleSortByWeight() {
+    const activeAssetRows = activeRows();
+
+    if (activeAssetRows.length < 2) {
+      setError("至少需要兩個商品才能排序。");
+      return;
+    }
+
+    setRows((currentRows) => {
+      const activeRowsSorted = currentRows
+        .filter((row) => row.symbol.trim())
+        .sort((left, right) => (Number(right.weight) || 0) - (Number(left.weight) || 0));
+      const blankRows = currentRows.filter((row) => !row.symbol.trim());
+      return [...activeRowsSorted, ...blankRows];
+    });
+    setError(null);
+  }
+
   function handlePortfolioValueChange(value: number) {
     const nextValue = normalizePortfolioValue(value, 0);
     setPortfolioValue(nextValue);
@@ -1679,6 +1697,12 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
                 className="h-9 px-3 rounded-md bg-slate-950 border border-slate-700 text-[11px] font-bold text-slate-300 hover:border-cyan-600 hover:text-cyan-200"
               >
                 清空白
+              </button>
+              <button
+                onClick={handleSortByWeight}
+                className="h-9 px-3 rounded-md bg-slate-950 border border-slate-700 text-[11px] font-bold text-slate-300 hover:border-cyan-600 hover:text-cyan-200"
+              >
+                排序
               </button>
             </div>
             <div className="text-right">
