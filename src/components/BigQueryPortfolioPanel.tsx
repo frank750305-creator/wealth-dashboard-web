@@ -805,6 +805,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
   const [rebalanceRows, setRebalanceRows] = useState<RebalanceRecommendation[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied">("idle");
+  const [memoCopyStatus, setMemoCopyStatus] = useState<"idle" | "copied">("idle");
   const [symbolCopyStatus, setSymbolCopyStatus] = useState<"idle" | "copied">("idle");
   const [configCopyStatus, setConfigCopyStatus] = useState<"idle" | "copied">("idle");
   const [bulkConfigText, setBulkConfigText] = useState("");
@@ -1812,6 +1813,116 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
     return lines.join("\n");
   }
 
+  function committeeMemoText() {
+    if (!displayResult) return "";
+
+    const activeAssetRows = activeRows();
+    const analysisType = optimizationResult ? "AI 調倉 / 最佳化" : "投組分析";
+    const dataWindow = displayResult.dataWindow;
+    const metrics = displayResult.metrics;
+    const policyRiskCount = policySignals.filter((signal) => signal.status === "risk").length;
+    const policyWatchCount = policySignals.filter((signal) => signal.status === "watch").length;
+    const conclusion =
+      policyRiskCount > 0
+        ? "不建議直接通過。至少一項投資政策檢核未達標，應調整配置或降低政策目標。"
+        : policyWatchCount > 0
+          ? "可列入觀察清單。配置接近政策要求，但仍需比較替代方案。"
+          : "可列入候選配置。回測結果目前符合主要投資政策條件。";
+
+    const lines = [
+      `# ${presetName.trim() || "未命名配置"} 投資委員會 Memo`,
+      "",
+      `產出時間：${new Date().toISOString()}`,
+      `分析類型：${analysisType}`,
+      `資料期間：${dataWindow.startDate ?? "--"} ~ ${dataWindow.endDate ?? "--"} (${dataWindow.observations.toLocaleString("zh-TW")} 筆)`,
+      `基準指標：${benchmarkSymbol.trim() || "--"}`,
+      "",
+      "## 一、初步結論",
+      conclusion,
+      "",
+      "## 二、投資政策",
+      `- 要求年化報酬：${requiredReturn.toFixed(1)}%`,
+      `- 最大忍受損失：${maxLossTolerance.toFixed(1)}%`,
+      `- 信賴區間：${(confidenceLevel * 100).toFixed(0)}%`,
+      `- 無風險利率：${riskFreeRate.toFixed(1)}%`,
+      "",
+      "## 三、核心指標",
+      `- CAGR：${formatMetric(metrics.cagr, "percent")}`,
+      `- 年化波動：${formatMetric(metrics.annualVolatility, "percent")}`,
+      `- Sharpe：${formatMetric(metrics.sharpe, "number")}`,
+      `- Sortino：${formatMetric(metrics.sortino, "number")}`,
+      `- 最大回撤：${formatMetric(metrics.maxDrawdown, "percent")}`,
+      `- 信賴下緣：${formatMetric(metrics.confidenceLowerBound, "percent")}`,
+      "",
+      "## 四、政策檢核",
+      ...(policySignals.length
+        ? policySignals.map(
+            (signal) =>
+              `- [${decisionSignalStatusLabel(signal.status)}] ${signal.label}: ${signal.value} - ${signal.note}`,
+          )
+        : ["- 尚無可用政策檢核。"]),
+      "",
+      "## 五、配置結構",
+      ...allocationInsights.map(
+        (insight) =>
+          `- [${inputCheckStatusLabel(insight.status)}] ${insight.label}: ${insight.value} - ${insight.note}`,
+      ),
+      "",
+      "## 六、持倉明細",
+      ...activeAssetRows.map((row) => {
+        const weight = Number(row.weight) || 0;
+        return `- ${row.symbol.trim()}: ${weight.toFixed(2)}% / ${row.currency.trim().toUpperCase() || "USD"}`;
+      }),
+      "",
+      "## 七、決策訊號",
+      ...(decisionSignals.length
+        ? decisionSignals.map(
+            (signal) =>
+              `- [${decisionSignalStatusLabel(signal.status)}] ${signal.label}: ${signal.value} - ${signal.note}`,
+          )
+        : ["- 尚無決策訊號。"]),
+    ];
+
+    if (rebalanceRows.length) {
+      lines.push(
+        "",
+        "## 八、再平衡建議",
+        `- Buy：${formatMoney(rebalanceSummary.totalBuy)}`,
+        `- Sell：${formatMoney(rebalanceSummary.totalSell)}`,
+        `- Net Cash：${formatMoney(rebalanceSummary.netCashFlow, true)}`,
+        `- Turnover：${formatMetric(rebalanceSummary.turnover, "percent")}`,
+        `- Estimated Cost：${formatMoney(rebalanceSummary.totalEstimatedCost)}`,
+        ...rebalanceRows.map((row) => {
+          const actionLabel = row.action === "increase" ? "加碼" : row.action === "decrease" ? "減碼" : row.action === "skip" ? "低於門檻" : "維持";
+          return `- ${row.symbol}: ${actionLabel} ${formatSignedWeightDelta(row.deltaWeight)} / ${formatMoney(row.tradeAmount, true)}`;
+        }),
+      );
+    }
+
+    if (modeComparisonRows.length) {
+      lines.push(
+        "",
+        "## 九、模式比較",
+        "Delta = 長線重建法 - 近期交集法",
+        ...modeComparisonRows.map(
+          (row) =>
+            `- ${row.label}: 近期交集法 ${formatMetric(row.overlapValue, row.kind)} / 長線重建法 ${formatMetric(row.longRebuildValue, row.kind)} / Delta ${formatMetricDelta(row.delta, row.kind)}`,
+        ),
+      );
+    }
+
+    lines.push(
+      "",
+      "## 十、資料與限制",
+      `- 價格基礎：${priceBasis === "adjusted" ? "還原價格" : "原始價格"}`,
+      `- 計價幣別：${pricingCurrency === "TWD" ? "台幣換算" : "原幣"}`,
+      `- 分析模式：${mode === "overlap" ? "近期交集法" : "長線重建法"}`,
+      "- 本報告為量化分析輸出，仍需搭配資料品質、產品條款、稅務與流動性限制判斷。",
+    );
+
+    return lines.join("\n");
+  }
+
   function handleExportJson() {
     const payload = exportPayload();
     if (!payload) return;
@@ -1897,6 +2008,16 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
     );
   }
 
+  function handleExportCommitteeMemo() {
+    if (!displayResult) return;
+
+    downloadTextFile(
+      `bigquery-committee-memo-${resultStamp()}.md`,
+      committeeMemoText(),
+      "text/markdown;charset=utf-8",
+    );
+  }
+
   async function handleCopyDecisionSummary() {
     if (!displayResult || !decisionSignals.length) return;
 
@@ -1910,6 +2031,22 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
       window.setTimeout(() => setCopyStatus("idle"), 2000);
     } catch (err: unknown) {
       setError(`摘要複製失敗：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  async function handleCopyCommitteeMemo() {
+    if (!displayResult) return;
+
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("瀏覽器不支援剪貼簿 API");
+      }
+
+      await navigator.clipboard.writeText(committeeMemoText());
+      setMemoCopyStatus("copied");
+      window.setTimeout(() => setMemoCopyStatus("idle"), 2000);
+    } catch (err: unknown) {
+      setError(`Memo 複製失敗：${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -2772,6 +2909,18 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
                 className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
               >
                 JSON
+              </button>
+              <button
+                onClick={handleExportCommitteeMemo}
+                className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
+              >
+                Memo MD
+              </button>
+              <button
+                onClick={handleCopyCommitteeMemo}
+                className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
+              >
+                {memoCopyStatus === "copied" ? "已複製" : "複製 Memo"}
               </button>
               {decisionSignals.length ? (
                 <button
