@@ -73,6 +73,13 @@ type InputCheck = {
   note: string;
 };
 
+type AllocationInsight = InputCheck;
+
+type AllocationExposureRow = {
+  label: string;
+  value: number;
+};
+
 type ExportedPortfolioPayload = {
   exportedAt?: string;
   presetName?: string;
@@ -98,6 +105,11 @@ type ExportedPortfolioPayload = {
   rebalancing?: RebalanceRecommendation[];
   decisionSignals?: DecisionSignal[];
   inputChecks?: InputCheck[];
+  allocationInsights?: AllocationInsight[];
+  allocationExposures?: {
+    currencies?: AllocationExposureRow[];
+    holdings?: AllocationExposureRow[];
+  };
 };
 
 type StoredPortfolioSnapshot = {
@@ -644,6 +656,21 @@ function configurationCsv(rows: AssetRow[]) {
   return [header, ...dataRows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
+function allocationSummaryCsv(
+  insights: AllocationInsight[],
+  currencyRows: AllocationExposureRow[],
+  holdingRows: AllocationExposureRow[],
+) {
+  const rows = [
+    ["section", "label", "value", "status", "note"],
+    ...insights.map((insight) => ["summary", insight.label, insight.value, insight.status, insight.note]),
+    ...currencyRows.map((row) => ["currency", row.label, row.value, "", ""]),
+    ...holdingRows.map((row) => ["holding", row.label, row.value, "", ""]),
+  ];
+
+  return rows.map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
 function applyTradeAssumptions(
   rows: RebalanceRecommendation[],
   portfolioValue: number,
@@ -772,6 +799,103 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
     () => rows.reduce((sum, row) => sum + (Number.isFinite(row.weight) ? row.weight : 0), 0),
     [rows],
   );
+  const allocationRows = useMemo(() => {
+    const activeAssetRows = rows.filter((row) => row.symbol.trim());
+    const positiveTotalWeight = activeAssetRows.reduce(
+      (sum, row) => sum + Math.max(Number(row.weight) || 0, 0),
+      0,
+    );
+
+    return activeAssetRows
+      .map((row) => {
+        const positiveWeight = Math.max(Number(row.weight) || 0, 0);
+        return {
+          label: row.symbol.trim(),
+          value: positiveTotalWeight > 0 ? positiveWeight / positiveTotalWeight : 0,
+        };
+      })
+      .sort((left, right) => right.value - left.value);
+  }, [rows]);
+  const currencyExposureRows = useMemo(() => {
+    const exposures = new Map<string, number>();
+
+    rows.forEach((row) => {
+      if (!row.symbol.trim()) return;
+      const currency = row.currency.trim().toUpperCase() || inferSymbolCurrency(row.symbol);
+      const positiveWeight = Math.max(Number(row.weight) || 0, 0);
+      exposures.set(currency, (exposures.get(currency) ?? 0) + positiveWeight);
+    });
+
+    const totalPositiveWeight = [...exposures.values()].reduce((sum, value) => sum + value, 0);
+    return [...exposures.entries()]
+      .map(([label, value]) => ({
+        label,
+        value: totalPositiveWeight > 0 ? value / totalPositiveWeight : 0,
+      }))
+      .sort((left, right) => right.value - left.value);
+  }, [rows]);
+  const allocationInsights = useMemo(() => {
+    const activeCount = allocationRows.length;
+    const topHolding = allocationRows[0];
+    const topThreeWeight = allocationRows.slice(0, 3).reduce((sum, row) => sum + row.value, 0);
+    const hhi = allocationRows.reduce((sum, row) => sum + row.value ** 2, 0);
+    const mainCurrency = currencyExposureRows[0];
+    const insights: AllocationInsight[] = [
+      {
+        label: "有效商品",
+        value: `${activeCount} 檔`,
+        status: activeCount >= 6 ? "strong" : activeCount >= 3 ? "watch" : activeCount > 0 ? "risk" : "neutral",
+        note:
+          activeCount >= 6
+            ? "商品數具備基本分散度"
+            : activeCount >= 3
+              ? "商品數可用，但還有集中風險"
+              : activeCount > 0
+                ? "商品數偏少，容易被單一資產主導"
+                : "尚未輸入商品",
+      },
+      {
+        label: "最大持倉",
+        value: topHolding ? `${topHolding.label} ${formatMetric(topHolding.value, "percent")}` : "--",
+        status: !topHolding ? "neutral" : topHolding.value >= 0.4 ? "risk" : topHolding.value >= 0.25 ? "watch" : "strong",
+        note:
+          !topHolding
+            ? "尚無有效持倉"
+            : topHolding.value >= 0.4
+              ? "單一商品占比偏高"
+              : topHolding.value >= 0.25
+                ? "最大持倉需要持續追蹤"
+                : "最大持倉占比相對可控",
+      },
+      {
+        label: "前三大權重",
+        value: activeCount ? formatMetric(topThreeWeight, "percent") : "--",
+        status: !activeCount ? "neutral" : topThreeWeight >= 0.8 ? "risk" : topThreeWeight >= 0.65 ? "watch" : "strong",
+        note: !activeCount ? "尚無有效持倉" : topThreeWeight >= 0.8 ? "前三大過度主導配置" : topThreeWeight >= 0.65 ? "前三大集中度偏高" : "前幾大持倉分散度尚可",
+      },
+      {
+        label: "HHI 集中度",
+        value: activeCount ? hhi.toFixed(2) : "--",
+        status: !activeCount ? "neutral" : hhi >= 0.35 ? "risk" : hhi >= 0.22 ? "watch" : "strong",
+        note: !activeCount ? "尚無有效權重" : hhi >= 0.35 ? "整體配置集中度偏高" : hhi >= 0.22 ? "有一定集中度，適合和風險貢獻一起看" : "配置集中度較低",
+      },
+      {
+        label: "主要幣別",
+        value: mainCurrency ? `${mainCurrency.label} ${formatMetric(mainCurrency.value, "percent")}` : "--",
+        status: !mainCurrency ? "neutral" : mainCurrency.value >= 0.85 ? "risk" : mainCurrency.value >= 0.7 ? "watch" : "strong",
+        note:
+          !mainCurrency
+            ? "尚無幣別曝險"
+            : mainCurrency.value >= 0.85
+              ? "幣別曝險高度集中"
+              : mainCurrency.value >= 0.7
+                ? "主要幣別占比較高"
+                : "幣別曝險較分散",
+      },
+    ];
+
+    return insights;
+  }, [allocationRows, currencyExposureRows]);
   const inputChecks = useMemo(() => {
     const activeAssetRows = rows.filter((row) => row.symbol.trim());
     const normalizedSymbols = activeAssetRows.map((row) => row.symbol.trim().toUpperCase());
@@ -1242,6 +1366,20 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
     setError(null);
   }
 
+  function handleExportAllocationCsv() {
+    if (!allocationRows.length) {
+      setError("至少需要一個商品代號才能下載配置分析。");
+      return;
+    }
+
+    downloadTextFile(
+      `bigquery-allocation-summary-${resultStamp()}.csv`,
+      allocationSummaryCsv(allocationInsights, currencyExposureRows, allocationRows),
+      "text/csv;charset=utf-8",
+    );
+    setError(null);
+  }
+
   function handleApplyBulkConfiguration() {
     const importedRows = parsePastedConfiguration(bulkConfigText).map(makePresetRow);
 
@@ -1491,6 +1629,11 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
       rebalancing: rebalanceRows,
       decisionSignals,
       inputChecks,
+      allocationInsights,
+      allocationExposures: {
+        currencies: currencyExposureRows,
+        holdings: allocationRows,
+      },
     };
   }
 
@@ -1523,6 +1666,12 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
       ...inputChecks.map(
         (check) =>
           `- [${inputCheckStatusLabel(check.status)}] ${check.label}: ${check.value} - ${check.note}`,
+      ),
+      "",
+      "配置結構",
+      ...allocationInsights.map(
+        (insight) =>
+          `- [${inputCheckStatusLabel(insight.status)}] ${insight.label}: ${insight.value} - ${insight.note}`,
       ),
       "",
       "決策摘要",
@@ -2112,6 +2261,101 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
               >
                 重設預設
               </button>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-slate-800 bg-slate-950 p-3 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold text-slate-200">配置結構分析</p>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  {allocationRows.length ? `${allocationRows.length} 檔有效商品` : "尚無有效商品"}
+                </p>
+              </div>
+              <button
+                onClick={handleExportAllocationCsv}
+                disabled={!allocationRows.length}
+                className="h-9 px-3 rounded-md border border-slate-700 bg-slate-900 text-[11px] font-bold text-slate-300 hover:border-cyan-600 hover:text-cyan-200 disabled:cursor-not-allowed disabled:text-slate-600"
+              >
+                分析 CSV
+              </button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-2">
+              {allocationInsights.map((insight) => (
+                <div
+                  key={insight.label}
+                  className={`rounded-lg border p-3 min-w-0 ${decisionSignalClass(insight.status)}`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] text-slate-500 truncate">{insight.label}</p>
+                    <span
+                      className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-bold ${decisionSignalBadgeClass(insight.status)}`}
+                    >
+                      {inputCheckStatusLabel(insight.status)}
+                    </span>
+                  </div>
+                  <p className="mt-2 font-mono text-xs font-bold text-slate-100 truncate" title={insight.value}>
+                    {insight.value}
+                  </p>
+                  <p className="mt-1 text-[11px] text-slate-500 leading-relaxed">{insight.note}</p>
+                </div>
+              ))}
+            </div>
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-[11px] text-slate-500">
+                  <span>幣別曝險</span>
+                  <span className="font-mono">{currencyExposureRows.length} 組</span>
+                </div>
+                {currencyExposureRows.length ? (
+                  <div className="space-y-2">
+                    {currencyExposureRows.map((row) => (
+                      <div key={row.label} className="space-y-1">
+                        <div className="flex items-center justify-between gap-2 text-[11px]">
+                          <span className="font-bold text-slate-200 truncate">{row.label}</span>
+                          <span className="font-mono text-slate-400">{formatMetric(row.value, "percent")}</span>
+                        </div>
+                        <div className="h-2 overflow-hidden rounded-full bg-slate-900">
+                          <div
+                            className="h-full rounded-full bg-cyan-500"
+                            style={{ width: `${Math.max(row.value * 100, 2)}%` }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-slate-600">--</p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-[11px] text-slate-500">
+                  <span>前五大持倉</span>
+                  <span className="font-mono">{allocationRows.slice(0, 5).length} 檔</span>
+                </div>
+                {allocationRows.length ? (
+                  <div className="space-y-2">
+                    {allocationRows.slice(0, 5).map((row) => (
+                      <div key={row.label} className="space-y-1">
+                        <div className="flex items-center justify-between gap-2 text-[11px]">
+                          <span className="font-bold text-slate-200 truncate" title={row.label}>
+                            {row.label}
+                          </span>
+                          <span className="font-mono text-slate-400">{formatMetric(row.value, "percent")}</span>
+                        </div>
+                        <div className="h-2 overflow-hidden rounded-full bg-slate-900">
+                          <div
+                            className="h-full rounded-full bg-emerald-500"
+                            style={{ width: `${Math.max(row.value * 100, 2)}%` }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-slate-600">--</p>
+                )}
+              </div>
             </div>
           </div>
 
