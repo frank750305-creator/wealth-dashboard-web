@@ -6,6 +6,13 @@ import { BigQueryPortfolioPanel } from "./BigQueryPortfolioPanel";
 
 type QualityStatus = "strong" | "watch" | "risk" | "neutral";
 type AssetDecisionSignal = "candidate" | "watch" | "risk" | "neutral";
+type AssetComparisonSortKey =
+  | "score"
+  | "annualizedReturn"
+  | "annualizedVolatility"
+  | "maxDrawdown"
+  | "riskAdjustedReturn"
+  | "freshnessDays";
 
 type AssetComparisonRow = {
   symbol: string;
@@ -284,6 +291,22 @@ function assetComparisonCsv(rows: AssetComparisonRow[], priceBasis: "adjusted" |
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
+function sortComparisonRows(rows: AssetComparisonRow[], sortKey: AssetComparisonSortKey) {
+  const sortedRows = [...rows];
+
+  return sortedRows.sort((left, right) => {
+    if (sortKey === "annualizedVolatility" || sortKey === "maxDrawdown" || sortKey === "freshnessDays") {
+      const leftValue = sortKey === "maxDrawdown" ? Math.abs(left.maxDrawdown ?? Infinity) : left[sortKey] ?? Infinity;
+      const rightValue = sortKey === "maxDrawdown" ? Math.abs(right.maxDrawdown ?? Infinity) : right[sortKey] ?? Infinity;
+      return leftValue - rightValue;
+    }
+
+    const leftValue = left[sortKey] ?? -Infinity;
+    const rightValue = right[sortKey] ?? -Infinity;
+    return rightValue - leftValue;
+  });
+}
+
 export function MarketDataPanel() {
   const {
     data,
@@ -306,6 +329,9 @@ export function MarketDataPanel() {
   const [comparisonRows, setComparisonRows] = useState<AssetComparisonRow[]>([]);
   const [comparisonError, setComparisonError] = useState<string | null>(null);
   const [isLoadingComparison, setIsLoadingComparison] = useState(false);
+  const [comparisonSignalFilter, setComparisonSignalFilter] = useState<AssetDecisionSignal | "all">("all");
+  const [comparisonSortKey, setComparisonSortKey] = useState<AssetComparisonSortKey>("score");
+  const [minimumComparisonScore, setMinimumComparisonScore] = useState(0);
   const sources = data?.sources ?? [];
   const securedCount = sources.filter((source) => source.status !== "needs_secret").length;
   const hasBigQueryCredentials = Boolean(
@@ -375,6 +401,13 @@ export function MarketDataPanel() {
       note: "daily_fx 可供換算的幣別數",
     },
   ];
+  const visibleComparisonRows = sortComparisonRows(
+    comparisonRows.filter((row) => {
+      const signalMatched = comparisonSignalFilter === "all" || row.signal === comparisonSignalFilter;
+      return signalMatched && row.score >= minimumComparisonScore;
+    }),
+    comparisonSortKey,
+  );
   const assetProfileQualityCards: Array<{ label: string; value: string; status: QualityStatus; note: string }> = assetProfile
     ? [
         {
@@ -539,11 +572,11 @@ export function MarketDataPanel() {
     }
   };
   const handleExportAssetComparisonCsv = () => {
-    if (!comparisonRows.length) return;
+    if (!visibleComparisonRows.length) return;
 
     downloadTextFile(
       `bigquery-asset-watchlist-${resultStamp()}.csv`,
-      assetComparisonCsv(comparisonRows, assetPriceBasis),
+      assetComparisonCsv(visibleComparisonRows, assetPriceBasis),
       "text/csv;charset=utf-8",
     );
   };
@@ -1137,6 +1170,53 @@ export function MarketDataPanel() {
             </span>
           </div>
 
+          <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_1.2fr] gap-2 text-xs">
+            <label className="space-y-1">
+              <span className="text-slate-500">排序</span>
+              <select
+                value={comparisonSortKey}
+                onChange={(event) => setComparisonSortKey(event.target.value as AssetComparisonSortKey)}
+                className="w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-slate-100"
+              >
+                <option value="score">分數高到低</option>
+                <option value="annualizedReturn">年化報酬高到低</option>
+                <option value="riskAdjustedReturn">風險調整報酬高到低</option>
+                <option value="annualizedVolatility">波動低到高</option>
+                <option value="maxDrawdown">回撤低到高</option>
+                <option value="freshnessDays">資料新鮮優先</option>
+              </select>
+            </label>
+            <label className="space-y-1">
+              <span className="text-slate-500">訊號</span>
+              <select
+                value={comparisonSignalFilter}
+                onChange={(event) => setComparisonSignalFilter(event.target.value as AssetDecisionSignal | "all")}
+                className="w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-slate-100"
+              >
+                <option value="all">全部</option>
+                <option value="candidate">候選</option>
+                <option value="watch">觀察</option>
+                <option value="neutral">中性</option>
+                <option value="risk">風險</option>
+              </select>
+            </label>
+            <label className="space-y-1">
+              <span className="flex items-center justify-between gap-2 text-slate-500">
+                <span>最低分數</span>
+                <span className="font-mono text-slate-400">{minimumComparisonScore}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={90}
+                step={5}
+                value={minimumComparisonScore}
+                onChange={(event) => setMinimumComparisonScore(Number(event.target.value))}
+                className="w-full accent-cyan-500"
+              />
+            </label>
+          </div>
+
           {comparisonError ? (
             <div className="border border-red-900/60 bg-red-950/30 rounded-lg p-3 text-xs text-red-300 whitespace-pre-wrap">
               {comparisonError}
@@ -1147,38 +1227,38 @@ export function MarketDataPanel() {
             <div className="space-y-3">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
                 {[
-                  ["商品數", `${comparisonRows.length} 檔`],
+                  ["顯示商品", `${visibleComparisonRows.length} / ${comparisonRows.length} 檔`],
                   [
                     "平均年化報酬",
                     formatPercent(
-                      comparisonRows.reduce((sum, row) => sum + (row.annualizedReturn ?? 0), 0) /
-                        Math.max(1, comparisonRows.filter((row) => row.annualizedReturn !== null).length),
+                      visibleComparisonRows.reduce((sum, row) => sum + (row.annualizedReturn ?? 0), 0) /
+                        Math.max(1, visibleComparisonRows.filter((row) => row.annualizedReturn !== null).length),
                     ),
                   ],
                   [
                     "平均波動",
                     formatPercent(
-                      comparisonRows.reduce((sum, row) => sum + (row.annualizedVolatility ?? 0), 0) /
-                        Math.max(1, comparisonRows.filter((row) => row.annualizedVolatility !== null).length),
+                      visibleComparisonRows.reduce((sum, row) => sum + (row.annualizedVolatility ?? 0), 0) /
+                        Math.max(1, visibleComparisonRows.filter((row) => row.annualizedVolatility !== null).length),
                     ),
                   ],
                   [
                     "異常/觀察",
-                    `${comparisonRows.filter((row) => row.qualityStatus !== "strong").length} 檔`,
+                    `${visibleComparisonRows.filter((row) => row.qualityStatus !== "strong").length} 檔`,
                   ],
                   [
                     "最高分",
-                    comparisonRows.length
-                      ? `${[...comparisonRows].sort((left, right) => right.score - left.score)[0].symbol} · ${[...comparisonRows].sort((left, right) => right.score - left.score)[0].score}`
+                    visibleComparisonRows.length
+                      ? `${visibleComparisonRows[0].symbol} · ${visibleComparisonRows[0].score}`
                       : "--",
                   ],
                   [
                     "候選",
-                    `${comparisonRows.filter((row) => row.signal === "candidate").length} 檔`,
+                    `${visibleComparisonRows.filter((row) => row.signal === "candidate").length} 檔`,
                   ],
                   [
                     "風險",
-                    `${comparisonRows.filter((row) => row.signal === "risk").length} 檔`,
+                    `${visibleComparisonRows.filter((row) => row.signal === "risk").length} 檔`,
                   ],
                 ].map(([label, value]) => (
                   <div key={label} className="rounded-md border border-slate-800 bg-slate-900/60 p-3 min-w-0">
@@ -1209,9 +1289,7 @@ export function MarketDataPanel() {
                     </tr>
                   </thead>
                   <tbody>
-                    {[...comparisonRows]
-                      .sort((left, right) => right.score - left.score)
-                      .map((row) => (
+                    {visibleComparisonRows.map((row) => (
                         <tr key={row.symbol} className="border-t border-slate-900">
                           <td className="py-2 pr-3">
                             <button
@@ -1281,7 +1359,7 @@ export function MarketDataPanel() {
                             </span>
                           </td>
                         </tr>
-                      ))}
+                    ))}
                   </tbody>
                 </table>
               </div>
