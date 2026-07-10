@@ -922,6 +922,47 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
     setError(null);
   }
 
+  function handleMergeDuplicateSymbols() {
+    const normalizedSymbols = activeRows().map((row) => row.symbol.trim().toUpperCase());
+    const hasDuplicates = normalizedSymbols.some((symbol, index) => normalizedSymbols.indexOf(symbol) !== index);
+
+    if (!hasDuplicates) {
+      setError("沒有可合併的重複商品代號。");
+      return;
+    }
+
+    setRows((currentRows) => {
+      const mergedBySymbol = new Map<string, AssetRow>();
+      const mergedRows: AssetRow[] = [];
+      const blankRows: AssetRow[] = [];
+
+      currentRows.forEach((row) => {
+        const symbol = row.symbol.trim();
+
+        if (!symbol) {
+          blankRows.push(row);
+          return;
+        }
+
+        const key = symbol.toUpperCase();
+        const existingRow = mergedBySymbol.get(key);
+
+        if (existingRow) {
+          existingRow.weight = Number(((Number(existingRow.weight) || 0) + (Number(row.weight) || 0)).toFixed(2));
+          return;
+        }
+
+        const nextRow = { ...row, symbol };
+        mergedBySymbol.set(key, nextRow);
+        mergedRows.push(nextRow);
+      });
+
+      return [...mergedRows, ...blankRows];
+    });
+
+    setError(null);
+  }
+
   function handlePortfolioValueChange(value: number) {
     const nextValue = normalizePortfolioValue(value, 0);
     setPortfolioValue(nextValue);
@@ -1611,6 +1652,12 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
                 className="h-9 px-3 rounded-md bg-slate-950 border border-slate-700 text-[11px] font-bold text-slate-300 hover:border-cyan-600 hover:text-cyan-200"
               >
                 等權
+              </button>
+              <button
+                onClick={handleMergeDuplicateSymbols}
+                className="h-9 px-3 rounded-md bg-slate-950 border border-slate-700 text-[11px] font-bold text-slate-300 hover:border-cyan-600 hover:text-cyan-200"
+              >
+                合併
               </button>
             </div>
             <div className="text-right">
