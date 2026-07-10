@@ -66,6 +66,13 @@ type DecisionSignal = {
   note: string;
 };
 
+type InputCheck = {
+  label: string;
+  value: string;
+  status: "strong" | "watch" | "risk" | "neutral";
+  note: string;
+};
+
 type ExportedPortfolioPayload = {
   presetName?: string;
   configuration?: {
@@ -316,6 +323,13 @@ function decisionSignalStatusLabel(status: DecisionSignal["status"]) {
   return "中性";
 }
 
+function inputCheckStatusLabel(status: InputCheck["status"]) {
+  if (status === "strong") return "通過";
+  if (status === "watch") return "檢查";
+  if (status === "risk") return "修正";
+  return "資訊";
+}
+
 function buildDecisionSignals(
   result: PortfolioResult,
   riskRows: Array<{ symbol: string; riskContributionPercent?: number | null }>,
@@ -388,6 +402,14 @@ function buildDecisionSignals(
   }
 
   return signals;
+}
+
+function daysBetween(startDate: string, endDate: string) {
+  if (!startDate || !endDate) return null;
+  const startTime = new Date(startDate).getTime();
+  const endTime = new Date(endDate).getTime();
+  if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) return null;
+  return Math.floor((endTime - startTime) / 86400000);
 }
 
 function formatSignedWeightDelta(value: number) {
@@ -644,6 +666,51 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
     () => rows.reduce((sum, row) => sum + (Number.isFinite(row.weight) ? row.weight : 0), 0),
     [rows],
   );
+  const inputChecks = useMemo(() => {
+    const activeAssetRows = rows.filter((row) => row.symbol.trim());
+    const normalizedSymbols = activeAssetRows.map((row) => row.symbol.trim().toUpperCase());
+    const duplicateSymbols = [...new Set(normalizedSymbols.filter((symbol, index) => normalizedSymbols.indexOf(symbol) !== index))];
+    const weightGap = Math.abs(totalWeight - 100);
+    const dateSpan = daysBetween(startDate, endDate);
+    const checks: InputCheck[] = [
+      {
+        label: "商品數",
+        value: `${activeAssetRows.length} 檔`,
+        status: activeAssetRows.length >= 2 ? "strong" : activeAssetRows.length === 1 ? "watch" : "risk",
+        note:
+          activeAssetRows.length >= 2
+            ? "可進行組合分散分析"
+            : activeAssetRows.length === 1
+              ? "單一商品只能看自身表現"
+              : "至少需要一個商品",
+      },
+      {
+        label: "權重總和",
+        value: `${totalWeight.toFixed(1)}%`,
+        status: weightGap < 0.01 ? "strong" : weightGap <= 5 ? "watch" : "risk",
+        note: weightGap < 0.01 ? "權重已對齊 100%" : weightGap <= 5 ? "偏離不大，但建議修正" : "偏離過大，分析結果會失真",
+      },
+      {
+        label: "重複代號",
+        value: duplicateSymbols.length ? duplicateSymbols.join(", ") : "無",
+        status: duplicateSymbols.length ? "risk" : "strong",
+        note: duplicateSymbols.length ? "同一商品重複輸入會讓權重失真" : "未發現重複商品",
+      },
+      {
+        label: "日期區間",
+        value: dateSpan === null ? "--" : `${dateSpan.toLocaleString("zh-TW")} 天`,
+        status: dateSpan === null || dateSpan < 0 ? "risk" : dateSpan < 365 ? "watch" : "strong",
+        note:
+          dateSpan === null || dateSpan < 0
+            ? "起日與迄日需要修正"
+            : dateSpan < 365
+              ? "樣本期間偏短，解讀要保守"
+              : "期間足夠進行回測",
+      },
+    ];
+
+    return checks;
+  }, [endDate, rows, startDate, totalWeight]);
 
   const isBusy = isAnalyzing || isOptimizing || isComparingModes;
   const canSubmit = hasBigQueryCredentials && rows.some((row) => row.symbol.trim()) && !isBusy;
@@ -1483,6 +1550,28 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
             <p className={`text-xs font-mono ${Math.abs(totalWeight - 100) < 0.01 ? "text-emerald-300" : "text-amber-300"}`}>
               {totalWeight.toFixed(1)}%
             </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            {inputChecks.map((check) => (
+              <div
+                key={check.label}
+                className={`rounded-lg border p-3 min-w-0 ${decisionSignalClass(check.status)}`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[11px] text-slate-500 truncate">{check.label}</p>
+                  <span
+                    className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-bold ${decisionSignalBadgeClass(check.status)}`}
+                  >
+                    {inputCheckStatusLabel(check.status)}
+                  </span>
+                </div>
+                <p className="mt-2 font-mono text-xs font-bold text-slate-100 truncate" title={check.value}>
+                  {check.value}
+                </p>
+                <p className="mt-1 text-[11px] text-slate-500 leading-relaxed">{check.note}</p>
+              </div>
+            ))}
           </div>
 
           {hasBigQueryCredentials && (
