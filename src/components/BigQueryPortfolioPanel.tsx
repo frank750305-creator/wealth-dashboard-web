@@ -88,6 +88,7 @@ type ExportedPortfolioPayload = {
   };
   result?: PortfolioResult;
   rebalancing?: RebalanceRecommendation[];
+  decisionSignals?: DecisionSignal[];
 };
 
 const initialRows: AssetRow[] = [
@@ -1022,7 +1023,67 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
       },
       result: displayResult,
       rebalancing: rebalanceRows,
+      decisionSignals,
     };
+  }
+
+  function decisionSummaryText() {
+    if (!displayResult) return "";
+
+    const activeAssetRows = activeRows();
+    const analysisType = optimizationResult ? "AI 調倉 / 最佳化" : "投組分析";
+    const dataWindow = displayResult.dataWindow;
+    const modeLabel = mode === "overlap" ? "近期交集法" : "長線重建法";
+    const priceBasisLabel = priceBasis === "adjusted" ? "還原價格" : "原始價格";
+    const pricingCurrencyLabel = pricingCurrency === "TWD" ? "台幣換算" : "原幣";
+    const lines = [
+      "BigQuery 投組決策摘要",
+      `匯出時間: ${new Date().toISOString()}`,
+      `配置名稱: ${presetName.trim() || "未命名配置"}`,
+      `分析類型: ${analysisType}`,
+      `資料期間: ${dataWindow.startDate ?? "--"} ~ ${dataWindow.endDate ?? "--"} (${dataWindow.observations.toLocaleString("zh-TW")} 筆)`,
+      `資料模式: ${modeLabel}`,
+      `價格基礎: ${priceBasisLabel} / ${pricingCurrencyLabel}`,
+      `基準指標: ${benchmarkSymbol.trim() || "--"}`,
+      "",
+      "配置",
+      ...activeAssetRows.map((row) => {
+        const weight = Number(row.weight) || 0;
+        return `- ${row.symbol.trim()}: ${weight.toFixed(2)}% / ${row.currency.trim().toUpperCase() || "USD"}`;
+      }),
+      "",
+      "決策摘要",
+      ...decisionSignals.map(
+        (signal) =>
+          `- [${decisionSignalStatusLabel(signal.status)}] ${signal.label}: ${signal.value} - ${signal.note}`,
+      ),
+    ];
+
+    if (rebalanceRows.length) {
+      lines.push(
+        "",
+        "再平衡摘要",
+        `- Buy: ${formatMoney(rebalanceSummary.totalBuy)}`,
+        `- Sell: ${formatMoney(rebalanceSummary.totalSell)}`,
+        `- Net Cash: ${formatMoney(rebalanceSummary.netCashFlow, true)}`,
+        `- Turnover: ${formatMetric(rebalanceSummary.turnover, "percent")}`,
+        `- Estimated Cost: ${formatMoney(rebalanceSummary.totalEstimatedCost)}`,
+      );
+    }
+
+    if (modeComparisonRows.length) {
+      lines.push(
+        "",
+        "模式比較",
+        "Delta = 長線重建法 - 近期交集法",
+        ...modeComparisonRows.map(
+          (row) =>
+            `- ${row.label}: 近期交集法 ${formatMetric(row.overlapValue, row.kind)} / 長線重建法 ${formatMetric(row.longRebuildValue, row.kind)} / Delta ${formatMetricDelta(row.delta, row.kind)}`,
+        ),
+      );
+    }
+
+    return lines.join("\n");
   }
 
   function handleExportJson() {
@@ -1033,6 +1094,16 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
       `bigquery-portfolio-${resultStamp()}.json`,
       JSON.stringify(payload, null, 2),
       "application/json;charset=utf-8",
+    );
+  }
+
+  function handleExportDecisionSummary() {
+    if (!displayResult || !decisionSignals.length) return;
+
+    downloadTextFile(
+      `bigquery-decision-summary-${resultStamp()}.txt`,
+      decisionSummaryText(),
+      "text/plain;charset=utf-8",
     );
   }
 
@@ -1585,6 +1656,14 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
               >
                 JSON
               </button>
+              {decisionSignals.length ? (
+                <button
+                  onClick={handleExportDecisionSummary}
+                  className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
+                >
+                  摘要 TXT
+                </button>
+              ) : null}
               <button
                 onClick={handleExportWealthCsv}
                 className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
