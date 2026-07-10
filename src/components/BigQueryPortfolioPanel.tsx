@@ -956,6 +956,24 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
     );
   }
 
+  function handleExportModeComparisonCsv() {
+    if (!modeComparisonRows.length) return;
+
+    const header = ["metric", "overlap", "long_rebuild", "delta"];
+    const rows = modeComparisonRows.map((row) => [
+      row.label,
+      row.overlapValue,
+      row.longRebuildValue,
+      row.delta,
+    ]);
+
+    downloadTextFile(
+      `bigquery-mode-comparison-${resultStamp()}.csv`,
+      [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\n"),
+      "text/csv;charset=utf-8",
+    );
+  }
+
   async function handleAnalyze() {
     setError(null);
     setResult(null);
@@ -1475,6 +1493,14 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
                   className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
                 >
                   調倉 CSV
+                </button>
+              ) : null}
+              {modeComparisonRows.length ? (
+                <button
+                  onClick={handleExportModeComparisonCsv}
+                  className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
+                >
+                  比較 CSV
                 </button>
               ) : null}
             </div>
