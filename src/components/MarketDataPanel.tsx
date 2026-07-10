@@ -2,6 +2,8 @@ import { useMarketSources } from "@/hooks/useMarketSources";
 import type { MarketSourceStatus } from "@/types/market";
 import { BigQueryPortfolioPanel } from "./BigQueryPortfolioPanel";
 
+type QualityStatus = "strong" | "watch" | "risk" | "neutral";
+
 const statusMeta: Record<MarketSourceStatus, { label: string; className: string }> = {
   ready: {
     label: "可接 API",
@@ -29,6 +31,74 @@ const bigQueryEnvironmentVars = [
   { key: "GCP_SERVICE_ACCOUNT_JSON", value: "Service account JSON", kind: "secret" },
 ];
 
+function formatCount(value: number | undefined) {
+  return typeof value === "number" && Number.isFinite(value) ? value.toLocaleString("zh-TW") : "--";
+}
+
+function daysSinceDate(value?: string | null) {
+  if (!value) return null;
+  const time = new Date(`${value}T00:00:00`).getTime();
+  if (!Number.isFinite(time)) return null;
+  return Math.max(0, Math.floor((Date.now() - time) / 86400000));
+}
+
+function freshnessStatus(days: number | null): QualityStatus {
+  if (days === null) return "neutral";
+  if (days <= 3) return "strong";
+  if (days <= 10) return "watch";
+  return "risk";
+}
+
+function coverageStatus(count: number | undefined, strongThreshold: number, watchThreshold: number): QualityStatus {
+  if (typeof count !== "number" || !Number.isFinite(count)) return "neutral";
+  if (count >= strongThreshold) return "strong";
+  if (count >= watchThreshold) return "watch";
+  return "risk";
+}
+
+function qualityLabel(status: QualityStatus) {
+  if (status === "strong") return "正常";
+  if (status === "watch") return "觀察";
+  if (status === "risk") return "異常";
+  return "未知";
+}
+
+function qualityClass(status: QualityStatus) {
+  if (status === "strong") return "border-emerald-500/20 bg-emerald-950/10";
+  if (status === "watch") return "border-amber-500/25 bg-amber-950/10";
+  if (status === "risk") return "border-rose-500/25 bg-rose-950/10";
+  return "border-slate-800 bg-slate-900/60";
+}
+
+function qualityBadgeClass(status: QualityStatus) {
+  if (status === "strong") return "bg-emerald-500/15 text-emerald-200";
+  if (status === "watch") return "bg-amber-500/15 text-amber-200";
+  if (status === "risk") return "bg-rose-500/15 text-rose-200";
+  return "bg-slate-800 text-slate-300";
+}
+
+function csvCell(value: unknown) {
+  if (value === null || value === undefined) return "";
+  const text = String(value);
+  return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function downloadTextFile(fileName: string, content: string, mimeType: string) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function resultStamp() {
+  return new Date().toISOString().slice(0, 19).replaceAll(":", "").replace("T", "-");
+}
+
 export function MarketDataPanel() {
   const {
     data,
@@ -48,6 +118,80 @@ export function MarketDataPanel() {
   const bigQueryBadge = hasBigQueryCredentials
     ? "已設定憑證"
     : "等待 Vercel 金鑰";
+  const priceFreshnessDays = daysSinceDate(bigQueryDiagnostics?.priceSummary.latest_date);
+  const fxFreshnessDays = daysSinceDate(bigQueryDiagnostics?.fxSummary.latest_date);
+  const priceFreshnessStatus = freshnessStatus(priceFreshnessDays);
+  const fxFreshnessStatus = freshnessStatus(fxFreshnessDays);
+  const schemaStatus: QualityStatus = bigQueryDiagnostics
+    ? bigQueryDiagnostics.schemaChecks.priceTable.isReady && bigQueryDiagnostics.schemaChecks.fxTable.isReady
+      ? "strong"
+      : "risk"
+    : "neutral";
+  const symbolCoverageStatus = coverageStatus(bigQueryDiagnostics?.priceSummary.symbol_count, 50, 10);
+  const priceDepthStatus = coverageStatus(bigQueryDiagnostics?.priceSummary.row_count, 50_000, 5_000);
+  const qualityCards: Array<{ label: string; value: string; status: QualityStatus; note: string }> = [
+    {
+      label: "Schema",
+      value: bigQueryDiagnostics ? (schemaStatus === "strong" ? "Ready" : "Missing") : "--",
+      status: schemaStatus,
+      note: schemaStatus === "strong" ? "價格表與匯率表欄位完整" : schemaStatus === "risk" ? "必要欄位缺失" : "尚未讀取",
+    },
+    {
+      label: "價格新鮮度",
+      value: priceFreshnessDays === null ? "--" : `${priceFreshnessDays} 天`,
+      status: priceFreshnessStatus,
+      note: bigQueryDiagnostics?.priceSummary.latest_date ?? "尚無價格最新日",
+    },
+    {
+      label: "匯率新鮮度",
+      value: fxFreshnessDays === null ? "--" : `${fxFreshnessDays} 天`,
+      status: fxFreshnessStatus,
+      note: bigQueryDiagnostics?.fxSummary.latest_date ?? "尚無匯率最新日",
+    },
+    {
+      label: "商品覆蓋",
+      value: `${formatCount(bigQueryDiagnostics?.priceSummary.symbol_count)} 檔`,
+      status: symbolCoverageStatus,
+      note: "daily_prices 可分析商品數",
+    },
+    {
+      label: "價格深度",
+      value: `${formatCount(bigQueryDiagnostics?.priceSummary.row_count)} 筆`,
+      status: priceDepthStatus,
+      note: "daily_prices 歷史價格筆數",
+    },
+  ];
+  const handleExportDiagnosticsCsv = () => {
+    if (!bigQueryDiagnostics) return;
+
+    const rows = [
+      ["section", "name", "value", "status", "note"],
+      ...qualityCards.map((card) => ["quality", card.label, card.value, card.status, card.note]),
+      ["summary", "price_first_date", bigQueryDiagnostics.priceSummary.first_date ?? "", "", ""],
+      ["summary", "price_latest_date", bigQueryDiagnostics.priceSummary.latest_date ?? "", "", ""],
+      ["summary", "price_row_count", bigQueryDiagnostics.priceSummary.row_count ?? "", "", ""],
+      ["summary", "price_symbol_count", bigQueryDiagnostics.priceSummary.symbol_count ?? "", "", ""],
+      ["summary", "adjusted_price_rows", bigQueryDiagnostics.priceSummary.adjusted_price_rows ?? "", "", ""],
+      ["summary", "raw_price_rows", bigQueryDiagnostics.priceSummary.raw_price_rows ?? "", "", ""],
+      ["summary", "fx_first_date", bigQueryDiagnostics.fxSummary.first_date ?? "", "", ""],
+      ["summary", "fx_latest_date", bigQueryDiagnostics.fxSummary.latest_date ?? "", "", ""],
+      ["summary", "fx_row_count", bigQueryDiagnostics.fxSummary.row_count ?? "", "", ""],
+      ["summary", "fx_currency_count", bigQueryDiagnostics.fxSummary.currency_count ?? "", "", ""],
+      ...bigQueryDiagnostics.recentSymbols.map((symbol) => [
+        "recent_symbol",
+        symbol.symbol,
+        symbol.latest_date ?? "",
+        freshnessStatus(daysSinceDate(symbol.latest_date)),
+        symbol.row_count,
+      ]),
+    ];
+
+    downloadTextFile(
+      `bigquery-data-quality-${resultStamp()}.csv`,
+      rows.map((row) => row.map(csvCell).join(",")).join("\n"),
+      "text/csv;charset=utf-8",
+    );
+  };
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -196,9 +340,19 @@ export function MarketDataPanel() {
                 價格表與匯率表的覆蓋率、最近更新日與資料筆數
               </p>
             </div>
-            <span className="self-start text-[10px] px-2 py-1 rounded border font-bold bg-slate-800 text-slate-300 border-slate-700">
-              {bigQueryDiagnostics ? "已讀取" : "待憑證"}
-            </span>
+            <div className="flex flex-wrap gap-2">
+              {bigQueryDiagnostics ? (
+                <button
+                  onClick={handleExportDiagnosticsCsv}
+                  className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
+                >
+                  品質 CSV
+                </button>
+              ) : null}
+              <span className="self-start text-[10px] px-2 py-1 rounded border font-bold bg-slate-800 text-slate-300 border-slate-700">
+                {bigQueryDiagnostics ? "已讀取" : "待憑證"}
+              </span>
+            </div>
           </div>
 
           {bigQueryDiagnosticsError ? (
@@ -207,36 +361,100 @@ export function MarketDataPanel() {
             </div>
           ) : bigQueryDiagnostics ? (
             <div className="space-y-4">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-                <div className="bg-slate-900 border border-slate-800 rounded-lg p-3">
-                  <p className="text-slate-500 mb-1">價格表結構</p>
-                  <p className={`text-lg font-bold ${bigQueryDiagnostics.schemaChecks.priceTable.isReady ? "text-emerald-200" : "text-red-300"}`}>
-                    {bigQueryDiagnostics.schemaChecks.priceTable.isReady ? "Ready" : "Missing"}
-                  </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-2 text-xs">
+                {qualityCards.map((card) => (
+                  <div key={card.label} className={`rounded-lg border p-3 min-w-0 ${qualityClass(card.status)}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[11px] text-slate-500 truncate">{card.label}</p>
+                      <span className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-bold ${qualityBadgeClass(card.status)}`}>
+                        {qualityLabel(card.status)}
+                      </span>
+                    </div>
+                    <p className="mt-2 font-mono text-sm font-bold text-slate-100 truncate" title={card.value}>
+                      {card.value}
+                    </p>
+                    <p className="mt-1 text-[11px] text-slate-500 leading-relaxed">{card.note}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 text-xs">
+                <div className="bg-slate-900 border border-slate-800 rounded-lg p-3 space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="font-bold text-slate-200">daily_prices</p>
+                    <span
+                      className={`rounded px-2 py-0.5 text-[10px] font-bold ${qualityBadgeClass(
+                        bigQueryDiagnostics.schemaChecks.priceTable.isReady ? "strong" : "risk",
+                      )}`}
+                    >
+                      {bigQueryDiagnostics.schemaChecks.priceTable.isReady ? "Ready" : "Missing"}
+                    </span>
+                  </div>
+                  <dl className="grid grid-cols-2 gap-2">
+                    <div>
+                      <dt className="text-slate-500">期間</dt>
+                      <dd className="mt-0.5 font-mono text-slate-100">
+                        {bigQueryDiagnostics.priceSummary.first_date ?? "--"} ~ {bigQueryDiagnostics.priceSummary.latest_date ?? "--"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-slate-500">商品數</dt>
+                      <dd className="mt-0.5 font-mono text-slate-100">
+                        {formatCount(bigQueryDiagnostics.priceSummary.symbol_count)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-slate-500">總筆數</dt>
+                      <dd className="mt-0.5 font-mono text-slate-100">
+                        {formatCount(bigQueryDiagnostics.priceSummary.row_count)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-slate-500">Adj / Raw</dt>
+                      <dd className="mt-0.5 font-mono text-slate-100">
+                        {formatCount(bigQueryDiagnostics.priceSummary.adjusted_price_rows)} / {formatCount(bigQueryDiagnostics.priceSummary.raw_price_rows)}
+                      </dd>
+                    </div>
+                  </dl>
                 </div>
-                <div className="bg-slate-900 border border-slate-800 rounded-lg p-3">
-                  <p className="text-slate-500 mb-1">匯率表結構</p>
-                  <p className={`text-lg font-bold ${bigQueryDiagnostics.schemaChecks.fxTable.isReady ? "text-emerald-200" : "text-red-300"}`}>
-                    {bigQueryDiagnostics.schemaChecks.fxTable.isReady ? "Ready" : "Missing"}
-                  </p>
-                </div>
-                <div className="bg-slate-900 border border-slate-800 rounded-lg p-3">
-                  <p className="text-slate-500 mb-1">價格筆數</p>
-                  <p className="text-lg font-bold text-slate-100 font-mono">
-                    {bigQueryDiagnostics.priceSummary.row_count?.toLocaleString("zh-TW") ?? "--"}
-                  </p>
-                </div>
-                <div className="bg-slate-900 border border-slate-800 rounded-lg p-3">
-                  <p className="text-slate-500 mb-1">價格最新日</p>
-                  <p className="text-sm font-bold text-emerald-200 font-mono">
-                    {bigQueryDiagnostics.priceSummary.latest_date ?? "--"}
-                  </p>
-                </div>
-                <div className="bg-slate-900 border border-slate-800 rounded-lg p-3">
-                  <p className="text-slate-500 mb-1">匯率最新日</p>
-                  <p className="text-sm font-bold text-emerald-200 font-mono">
-                    {bigQueryDiagnostics.fxSummary.latest_date ?? "--"}
-                  </p>
+
+                <div className="bg-slate-900 border border-slate-800 rounded-lg p-3 space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="font-bold text-slate-200">daily_fx</p>
+                    <span
+                      className={`rounded px-2 py-0.5 text-[10px] font-bold ${qualityBadgeClass(
+                        bigQueryDiagnostics.schemaChecks.fxTable.isReady ? "strong" : "risk",
+                      )}`}
+                    >
+                      {bigQueryDiagnostics.schemaChecks.fxTable.isReady ? "Ready" : "Missing"}
+                    </span>
+                  </div>
+                  <dl className="grid grid-cols-2 gap-2">
+                    <div>
+                      <dt className="text-slate-500">期間</dt>
+                      <dd className="mt-0.5 font-mono text-slate-100">
+                        {bigQueryDiagnostics.fxSummary.first_date ?? "--"} ~ {bigQueryDiagnostics.fxSummary.latest_date ?? "--"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-slate-500">幣別數</dt>
+                      <dd className="mt-0.5 font-mono text-slate-100">
+                        {formatCount(bigQueryDiagnostics.fxSummary.currency_count)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-slate-500">總筆數</dt>
+                      <dd className="mt-0.5 font-mono text-slate-100">
+                        {formatCount(bigQueryDiagnostics.fxSummary.row_count)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-slate-500">距今天</dt>
+                      <dd className="mt-0.5 font-mono text-slate-100">
+                        {fxFreshnessDays === null ? "--" : `${fxFreshnessDays} 天`}
+                      </dd>
+                    </div>
+                  </dl>
                 </div>
               </div>
 
@@ -257,13 +475,28 @@ export function MarketDataPanel() {
                 </div>
               )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-                {bigQueryDiagnostics.recentSymbols.map((symbol) => (
-                  <div key={symbol.symbol} className="flex items-center justify-between gap-3 bg-slate-900 border border-slate-800 rounded-md p-2">
-                    <span className="text-slate-200 truncate">{symbol.symbol}</span>
-                    <span className="text-slate-500 font-mono">{symbol.latest_date}</span>
-                  </div>
-                ))}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-3 text-[11px]">
+                  <span className="text-slate-500">近期商品新鮮度</span>
+                  <span className="text-slate-600 font-mono">{bigQueryDiagnostics.recentSymbols.length} 檔</span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                  {bigQueryDiagnostics.recentSymbols.map((symbol) => (
+                    <div key={symbol.symbol} className="flex items-center justify-between gap-3 bg-slate-900 border border-slate-800 rounded-md p-2">
+                      <span className="text-slate-200 truncate">{symbol.symbol}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-500 font-mono">{symbol.latest_date ?? "--"}</span>
+                        <span
+                          className={`rounded px-2 py-0.5 text-[10px] font-bold ${qualityBadgeClass(
+                            freshnessStatus(daysSinceDate(symbol.latest_date)),
+                          )}`}
+                        >
+                          {qualityLabel(freshnessStatus(daysSinceDate(symbol.latest_date)))}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           ) : (
