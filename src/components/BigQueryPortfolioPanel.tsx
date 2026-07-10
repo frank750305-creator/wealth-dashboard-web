@@ -963,6 +963,21 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
     setError(null);
   }
 
+  function handleClearBlankRows() {
+    const hasBlankRows = rows.some((row) => !row.symbol.trim());
+
+    if (!hasBlankRows) {
+      setError("沒有可清除的空白商品列。");
+      return;
+    }
+
+    setRows((currentRows) => {
+      const activeAssetRows = currentRows.filter((row) => row.symbol.trim());
+      return activeAssetRows.length ? activeAssetRows : [makeRow()];
+    });
+    setError(null);
+  }
+
   function handlePortfolioValueChange(value: number) {
     const nextValue = normalizePortfolioValue(value, 0);
     setPortfolioValue(nextValue);
@@ -1658,6 +1673,12 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
                 className="h-9 px-3 rounded-md bg-slate-950 border border-slate-700 text-[11px] font-bold text-slate-300 hover:border-cyan-600 hover:text-cyan-200"
               >
                 合併
+              </button>
+              <button
+                onClick={handleClearBlankRows}
+                className="h-9 px-3 rounded-md bg-slate-950 border border-slate-700 text-[11px] font-bold text-slate-300 hover:border-cyan-600 hover:text-cyan-200"
+              >
+                清空白
               </button>
             </div>
             <div className="text-right">
