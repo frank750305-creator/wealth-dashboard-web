@@ -70,6 +70,16 @@ type DecisionSignal = {
   note: string;
 };
 
+type MonitoringRule = {
+  id: string;
+  category: string;
+  trigger: string;
+  status: DecisionSignal["status"];
+  currentValue: string;
+  threshold: string;
+  nextAction: string;
+};
+
 type InputCheck = {
   label: string;
   value: string;
@@ -113,6 +123,7 @@ type ExportedPortfolioPayload = {
   rebalancing?: RebalanceRecommendation[];
   decisionSignals?: DecisionSignal[];
   policySignals?: DecisionSignal[];
+  monitoringRules?: MonitoringRule[];
   inputChecks?: InputCheck[];
   allocationInsights?: AllocationInsight[];
   allocationExposures?: {
@@ -396,6 +407,20 @@ function inputCheckStatusLabel(status: InputCheck["status"]) {
   if (status === "watch") return "檢查";
   if (status === "risk") return "修正";
   return "資訊";
+}
+
+function monitoringStatusRank(status: DecisionSignal["status"]) {
+  if (status === "risk") return 0;
+  if (status === "watch") return 1;
+  if (status === "neutral") return 2;
+  return 3;
+}
+
+function monitoringNextAction(status: DecisionSignal["status"], riskAction: string, watchAction: string) {
+  if (status === "risk") return riskAction;
+  if (status === "watch") return watchAction;
+  if (status === "strong") return "維持監控";
+  return "補齊資料後再判斷";
 }
 
 function buildDecisionSignals(
@@ -692,6 +717,20 @@ function allocationSummaryCsv(
   ];
 
   return rows.map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+function monitoringRulesCsv(rows: MonitoringRule[]) {
+  const header = ["category", "trigger", "status", "current_value", "threshold", "next_action"];
+  const csvRows = rows.map((row) => [
+    row.category,
+    row.trigger,
+    decisionSignalStatusLabel(row.status),
+    row.currentValue,
+    row.threshold,
+    row.nextAction,
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
 function applyTradeAssumptions(
@@ -1088,6 +1127,127 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
       };
     });
   }, [modeComparisonResult]);
+  const monitoringRules = useMemo<MonitoringRule[]>(() => {
+    if (!displayResult) return [];
+
+    const rules: MonitoringRule[] = [];
+
+    policySignals.forEach((signal) => {
+      rules.push({
+        id: `policy-${signal.label}`,
+        category: "投資政策",
+        trigger: signal.label,
+        status: signal.status,
+        currentValue: signal.value,
+        threshold: "依右側政策參數",
+        nextAction: monitoringNextAction(signal.status, "調整權重或降低政策假設", "列入觀察並比較替代配置"),
+      });
+    });
+
+    inputChecks.forEach((check) => {
+      rules.push({
+        id: `input-${check.label}`,
+        category: "資料輸入",
+        trigger: check.label,
+        status: check.status,
+        currentValue: check.value,
+        threshold: "通過基本輸入檢查",
+        nextAction: monitoringNextAction(check.status, "先修正輸入再分析", "分析可用但建議修正"),
+      });
+    });
+
+    allocationInsights.forEach((insight) => {
+      rules.push({
+        id: `allocation-${insight.label}`,
+        category: "配置結構",
+        trigger: insight.label,
+        status: insight.status,
+        currentValue: insight.value,
+        threshold: "避免單一資產、前三大或幣別過度集中",
+        nextAction: monitoringNextAction(insight.status, "降低集中曝險", "持續追蹤集中度"),
+      });
+    });
+
+    const topRisk = riskContributionRows.find((row) => isFiniteNumber(row.riskContributionPercent));
+    if (topRisk && isFiniteNumber(topRisk.riskContributionPercent)) {
+      const concentration = Math.abs(topRisk.riskContributionPercent);
+      const status: DecisionSignal["status"] =
+        concentration >= 0.5 ? "risk" : concentration >= 0.35 ? "watch" : "strong";
+      rules.push({
+        id: `risk-contribution-${topRisk.symbol}`,
+        category: "風險來源",
+        trigger: "最大風險貢獻",
+        status,
+        currentValue: `${topRisk.symbol} ${formatMetric(concentration, "percent")}`,
+        threshold: "觀察 35% / 風險 50%",
+        nextAction: monitoringNextAction(status, "降低主導風險資產權重", "確認是否符合策略意圖"),
+      });
+    }
+
+    if (rebalanceRows.length) {
+      const turnoverStatus: DecisionSignal["status"] =
+        isFiniteNumber(rebalanceSummary.turnover) && rebalanceSummary.turnover >= 0.3
+          ? "risk"
+          : isFiniteNumber(rebalanceSummary.turnover) && rebalanceSummary.turnover >= 0.15
+            ? "watch"
+            : "strong";
+      rules.push({
+        id: "execution-turnover",
+        category: "交易執行",
+        trigger: "再平衡換手率",
+        status: turnoverStatus,
+        currentValue: formatMetric(rebalanceSummary.turnover, "percent"),
+        threshold: "觀察 15% / 風險 30%",
+        nextAction: monitoringNextAction(turnoverStatus, "分批調倉或重跑限制條件", "確認交易成本與流動性"),
+      });
+
+      const costRatio = portfolioValue > 0 ? rebalanceSummary.totalEstimatedCost / portfolioValue : null;
+      const costStatus: DecisionSignal["status"] =
+        isFiniteNumber(costRatio) && costRatio >= 0.005
+          ? "risk"
+          : isFiniteNumber(costRatio) && costRatio >= 0.002
+            ? "watch"
+            : "strong";
+      rules.push({
+        id: "execution-cost",
+        category: "交易執行",
+        trigger: "估計交易成本",
+        status: costStatus,
+        currentValue: `${formatMoney(rebalanceSummary.totalEstimatedCost)} / ${formatMetric(costRatio, "percent")}`,
+        threshold: "觀察 0.2% / 風險 0.5%",
+        nextAction: monitoringNextAction(costStatus, "降低交易幅度或分批執行", "保留交易成本紀錄"),
+      });
+    }
+
+    const modeCagr = modeComparisonRows.find((row) => row.key === "cagr");
+    if (modeCagr && isFiniteNumber(modeCagr.delta)) {
+      const deltaAbs = Math.abs(modeCagr.delta);
+      const status: DecisionSignal["status"] = deltaAbs >= 0.05 ? "risk" : deltaAbs >= 0.02 ? "watch" : "strong";
+      rules.push({
+        id: "model-cagr-drift",
+        category: "模型穩定",
+        trigger: "模式 CAGR 差異",
+        status,
+        currentValue: formatMetricDelta(modeCagr.delta, "percent"),
+        threshold: "觀察 2pp / 風險 5pp",
+        nextAction: monitoringNextAction(status, "確認資料交集與長線重建假設", "保留兩種模式一起比較"),
+      });
+    }
+
+    return rules.sort((left, right) => monitoringStatusRank(left.status) - monitoringStatusRank(right.status));
+  }, [
+    allocationInsights,
+    displayResult,
+    inputChecks,
+    modeComparisonRows,
+    policySignals,
+    portfolioValue,
+    rebalanceRows.length,
+    rebalanceSummary,
+    riskContributionRows,
+  ]);
+  const monitoringRiskCount = monitoringRules.filter((rule) => rule.status === "risk").length;
+  const monitoringWatchCount = monitoringRules.filter((rule) => rule.status === "watch").length;
   const snapshotComparisonRows = useMemo(() => {
     const snapshotResult = selectedSnapshot?.payload.result;
     if (!displayResult || !isPortfolioResult(snapshotResult)) return [];
@@ -1726,6 +1886,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
       rebalancing: rebalanceRows,
       decisionSignals,
       policySignals,
+      monitoringRules,
       inputChecks,
       allocationInsights,
       allocationExposures: {
@@ -1784,6 +1945,14 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
         (signal) =>
           `- [${decisionSignalStatusLabel(signal.status)}] ${signal.label}: ${signal.value} - ${signal.note}`,
       ),
+      "",
+      "監控條件",
+      ...(monitoringRules.length
+        ? monitoringRules.map(
+            (rule) =>
+              `- [${decisionSignalStatusLabel(rule.status)}] ${rule.category} / ${rule.trigger}: ${rule.currentValue}；門檻 ${rule.threshold}；下一步 ${rule.nextAction}`,
+          )
+        : ["- 尚無監控條件。"]),
     ];
 
     if (rebalanceRows.length) {
@@ -1881,6 +2050,14 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
               `- [${decisionSignalStatusLabel(signal.status)}] ${signal.label}: ${signal.value} - ${signal.note}`,
           )
         : ["- 尚無決策訊號。"]),
+      "",
+      "## 監控條件",
+      ...(monitoringRules.length
+        ? monitoringRules.map(
+            (rule) =>
+              `- [${decisionSignalStatusLabel(rule.status)}] ${rule.category} / ${rule.trigger}: ${rule.currentValue}；門檻 ${rule.threshold}；下一步 ${rule.nextAction}`,
+          )
+        : ["- 尚無監控條件。"]),
     ];
 
     if (rebalanceRows.length) {
@@ -2094,6 +2271,16 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
     downloadTextFile(
       `bigquery-mode-comparison-${resultStamp()}.csv`,
       [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\n"),
+      "text/csv;charset=utf-8",
+    );
+  }
+
+  function handleExportMonitoringCsv() {
+    if (!monitoringRules.length) return;
+
+    downloadTextFile(
+      `bigquery-monitoring-rules-${resultStamp()}.csv`,
+      monitoringRulesCsv(monitoringRules),
       "text/csv;charset=utf-8",
     );
   }
@@ -2922,6 +3109,14 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
               >
                 {memoCopyStatus === "copied" ? "已複製" : "複製 Memo"}
               </button>
+              {monitoringRules.length ? (
+                <button
+                  onClick={handleExportMonitoringCsv}
+                  className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
+                >
+                  監控 CSV
+                </button>
+              ) : null}
               {decisionSignals.length ? (
                 <button
                   onClick={handleExportDecisionSummary}
@@ -3056,6 +3251,57 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
                   <p className="mt-1 text-[11px] text-slate-500 leading-relaxed">{signal.note}</p>
                 </div>
               ))}
+            </div>
+          ) : null}
+
+          {monitoringRules.length ? (
+            <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 space-y-3">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold text-slate-200">監控中心</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Risk {monitoringRiskCount} · Watch {monitoringWatchCount} · Total {monitoringRules.length}
+                  </p>
+                </div>
+                <button
+                  onClick={handleExportMonitoringCsv}
+                  className="h-9 px-3 rounded-md border border-slate-700 bg-slate-900 text-[11px] font-bold text-slate-300 hover:border-cyan-600 hover:text-cyan-200"
+                >
+                  監控 CSV
+                </button>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[920px] text-xs">
+                  <thead>
+                    <tr className="text-left text-[11px] text-slate-600">
+                      <th className="py-2 pr-3 font-medium">Category</th>
+                      <th className="py-2 px-3 font-medium">Trigger</th>
+                      <th className="py-2 px-3 font-medium text-right">Current</th>
+                      <th className="py-2 px-3 font-medium">Threshold</th>
+                      <th className="py-2 px-3 font-medium">Next Action</th>
+                      <th className="py-2 pl-3 font-medium text-right">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {monitoringRules.map((rule) => (
+                      <tr key={rule.id} className="border-t border-slate-900">
+                        <td className="py-2 pr-3 text-slate-300">{rule.category}</td>
+                        <td className="py-2 px-3 text-slate-200">{rule.trigger}</td>
+                        <td className="py-2 px-3 text-right font-mono text-slate-300">{rule.currentValue}</td>
+                        <td className="py-2 px-3 text-slate-500">{rule.threshold}</td>
+                        <td className="py-2 px-3 text-slate-400">{rule.nextAction}</td>
+                        <td className="py-2 pl-3 text-right">
+                          <span
+                            className={`inline-flex min-w-12 justify-center rounded px-2 py-1 text-[11px] font-bold ${decisionSignalBadgeClass(rule.status)}`}
+                          >
+                            {decisionSignalStatusLabel(rule.status)}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           ) : null}
 
