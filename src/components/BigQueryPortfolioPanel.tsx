@@ -23,6 +23,10 @@ type SavedPortfolioPreset = {
   portfolioValue?: number;
   transactionCostBps?: number;
   minTradeAmount?: number;
+  requiredReturn?: number;
+  maxLossTolerance?: number;
+  confidenceLevel?: number;
+  riskFreeRate?: number;
   benchmarkSymbol: string;
   startDate: string;
   endDate: string;
@@ -92,6 +96,10 @@ type ExportedPortfolioPayload = {
     portfolioValue?: number;
     transactionCostBps?: number;
     minTradeAmount?: number;
+    requiredReturn?: number;
+    maxLossTolerance?: number;
+    confidenceLevel?: number;
+    riskFreeRate?: number;
     benchmarkSymbol?: string | null;
     startDate?: string | null;
     endDate?: string | null;
@@ -104,6 +112,7 @@ type ExportedPortfolioPayload = {
   result?: PortfolioResult;
   rebalancing?: RebalanceRecommendation[];
   decisionSignals?: DecisionSignal[];
+  policySignals?: DecisionSignal[];
   inputChecks?: InputCheck[];
   allocationInsights?: AllocationInsight[];
   allocationExposures?: {
@@ -130,6 +139,10 @@ const snapshotStorageKey = "wealth-dashboard.bigqueryPortfolioSnapshots";
 const defaultPortfolioValue = 1_000_000;
 const defaultTransactionCostBps = 10;
 const defaultMinTradeAmount = 1_000;
+const defaultRequiredReturn = 8;
+const defaultMaxLossTolerance = 16;
+const defaultConfidenceLevel = 0.95;
+const defaultRiskFreeRate = 2;
 
 const moneyFormatter = new Intl.NumberFormat("zh-TW", {
   maximumFractionDigits: 0,
@@ -494,6 +507,16 @@ function normalizeMinTradeAmount(value: unknown, fallback = defaultMinTradeAmoun
   return Number.isFinite(numeric) && numeric >= 0 ? numeric : fallback;
 }
 
+function normalizePercentSetting(value: unknown, fallback: number) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric >= 0 ? numeric : fallback;
+}
+
+function normalizeConfidenceLevel(value: unknown, fallback = defaultConfidenceLevel) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 && numeric < 1 ? numeric : fallback;
+}
+
 function estimateTradeCost(tradeAmount: number, transactionCostBps: number) {
   if (!Number.isFinite(tradeAmount) || !Number.isFinite(transactionCostBps)) return 0;
   return Math.abs(tradeAmount) * (transactionCostBps / 10000);
@@ -772,6 +795,10 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
   const [portfolioValue, setPortfolioValue] = useState(defaultPortfolioValue);
   const [transactionCostBps, setTransactionCostBps] = useState(defaultTransactionCostBps);
   const [minTradeAmount, setMinTradeAmount] = useState(defaultMinTradeAmount);
+  const [requiredReturn, setRequiredReturn] = useState(defaultRequiredReturn);
+  const [maxLossTolerance, setMaxLossTolerance] = useState(defaultMaxLossTolerance);
+  const [confidenceLevel, setConfidenceLevel] = useState(defaultConfidenceLevel);
+  const [riskFreeRate, setRiskFreeRate] = useState(defaultRiskFreeRate);
   const [result, setResult] = useState<PortfolioAnalysisResponse | null>(null);
   const [optimizationResult, setOptimizationResult] = useState<PortfolioOptimizationResponse | null>(null);
   const [modeComparisonResult, setModeComparisonResult] = useState<ModeComparisonResult | null>(null);
@@ -970,6 +997,59 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
     if (!displayResult) return [];
     return buildDecisionSignals(displayResult, riskContributionRows);
   }, [displayResult, riskContributionRows]);
+  const policySignals = useMemo(() => {
+    if (!displayResult) return [];
+
+    const metrics = displayResult.metrics;
+    const requiredReturnDecimal = requiredReturn / 100;
+    const maxLossDecimal = maxLossTolerance / 100;
+    const signals: DecisionSignal[] = [];
+
+    if (isFiniteNumber(metrics.cagr)) {
+      const gap = metrics.cagr - requiredReturnDecimal;
+      signals.push({
+        label: "報酬目標",
+        value: `${formatMetric(metrics.cagr, "percent")} / ${requiredReturn.toFixed(1)}%`,
+        status: gap >= 0 ? "strong" : gap >= -0.03 ? "watch" : "risk",
+        note: gap >= 0 ? "回測 CAGR 達成要求報酬" : gap >= -0.03 ? "接近要求報酬，需比較替代配置" : "低於要求報酬，政策目標壓力偏高",
+      });
+    }
+
+    if (isFiniteNumber(metrics.maxDrawdown)) {
+      const drawdown = Math.abs(metrics.maxDrawdown);
+      signals.push({
+        label: "回撤預算",
+        value: `${formatMetric(metrics.maxDrawdown, "percent")} / -${maxLossTolerance.toFixed(1)}%`,
+        status: drawdown <= maxLossDecimal ? "strong" : drawdown <= maxLossDecimal * 1.25 ? "watch" : "risk",
+        note: drawdown <= maxLossDecimal ? "歷史最大回撤在可承受範圍內" : drawdown <= maxLossDecimal * 1.25 ? "回撤略超預算，需留意倉位" : "歷史回撤明顯超出可承受範圍",
+      });
+    }
+
+    if (isFiniteNumber(metrics.confidenceLowerBound)) {
+      signals.push({
+        label: "壞情境下緣",
+        value: `${formatMetric(metrics.confidenceLowerBound, "percent")} / -${maxLossTolerance.toFixed(1)}%`,
+        status: metrics.confidenceLowerBound >= -maxLossDecimal ? "strong" : metrics.confidenceLowerBound >= -maxLossDecimal * 1.25 ? "watch" : "risk",
+        note:
+          metrics.confidenceLowerBound >= -maxLossDecimal
+            ? "信賴下緣仍在損失預算內"
+            : metrics.confidenceLowerBound >= -maxLossDecimal * 1.25
+              ? "壞情境接近損失上限"
+              : "壞情境可能超出損失預算",
+      });
+    }
+
+    if (isFiniteNumber(metrics.sharpe)) {
+      signals.push({
+        label: "政策利率基準",
+        value: `${formatMetric(metrics.sharpe, "number")} / RF ${riskFreeRate.toFixed(1)}%`,
+        status: metrics.sharpe >= 1 ? "strong" : metrics.sharpe >= 0.4 ? "watch" : "risk",
+        note: metrics.sharpe >= 1 ? "相對無風險利率的風險補償較好" : metrics.sharpe >= 0.4 ? "風險補償普通" : "風險補償不足",
+      });
+    }
+
+    return signals;
+  }, [displayResult, maxLossTolerance, requiredReturn, riskFreeRate]);
   const rebalanceSummary = useMemo(
     () => summarizeRebalance(rebalanceRows, portfolioValue),
     [rebalanceRows, portfolioValue],
@@ -1477,6 +1557,10 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
       portfolioValue,
       transactionCostBps,
       minTradeAmount,
+      requiredReturn,
+      maxLossTolerance,
+      confidenceLevel,
+      riskFreeRate,
       benchmarkSymbol,
       startDate,
       endDate,
@@ -1512,6 +1596,10 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
     setPortfolioValue(normalizePortfolioValue(preset.portfolioValue));
     setTransactionCostBps(normalizeTransactionCostBps(preset.transactionCostBps));
     setMinTradeAmount(normalizeMinTradeAmount(preset.minTradeAmount));
+    setRequiredReturn(normalizePercentSetting(preset.requiredReturn, defaultRequiredReturn));
+    setMaxLossTolerance(normalizePercentSetting(preset.maxLossTolerance, defaultMaxLossTolerance));
+    setConfidenceLevel(normalizeConfidenceLevel(preset.confidenceLevel));
+    setRiskFreeRate(normalizePercentSetting(preset.riskFreeRate, defaultRiskFreeRate));
     setPresetName(preset.name);
     setResult(null);
     setOptimizationResult(null);
@@ -1566,6 +1654,10 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
     setPortfolioValue(nextPortfolioValue);
     setTransactionCostBps(nextTransactionCostBps);
     setMinTradeAmount(nextMinTradeAmount);
+    setRequiredReturn(normalizePercentSetting(config.requiredReturn, defaultRequiredReturn));
+    setMaxLossTolerance(normalizePercentSetting(config.maxLossTolerance, defaultMaxLossTolerance));
+    setConfidenceLevel(normalizeConfidenceLevel(config.confidenceLevel));
+    setRiskFreeRate(normalizePercentSetting(config.riskFreeRate, defaultRiskFreeRate));
     setPresetName(payload.presetName?.trim() || fallbackName);
     setSelectedPresetId("");
     setModeComparisonResult(null);
@@ -1616,6 +1708,10 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
         portfolioValue,
         transactionCostBps,
         minTradeAmount,
+        requiredReturn,
+        maxLossTolerance,
+        confidenceLevel,
+        riskFreeRate,
         benchmarkSymbol,
         startDate,
         endDate,
@@ -1628,6 +1724,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
       result: displayResult,
       rebalancing: rebalanceRows,
       decisionSignals,
+      policySignals,
       inputChecks,
       allocationInsights,
       allocationExposures: {
@@ -1655,6 +1752,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
       `資料模式: ${modeLabel}`,
       `價格基礎: ${priceBasisLabel} / ${pricingCurrencyLabel}`,
       `基準指標: ${benchmarkSymbol.trim() || "--"}`,
+      `投資政策: 要求報酬 ${requiredReturn.toFixed(1)}% / 最大忍受損失 ${maxLossTolerance.toFixed(1)}% / 信賴區間 ${(confidenceLevel * 100).toFixed(0)}% / 無風險利率 ${riskFreeRate.toFixed(1)}%`,
       "",
       "配置",
       ...activeAssetRows.map((row) => {
@@ -1672,6 +1770,12 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
       ...allocationInsights.map(
         (insight) =>
           `- [${inputCheckStatusLabel(insight.status)}] ${insight.label}: ${insight.value} - ${insight.note}`,
+      ),
+      "",
+      "投資政策檢核",
+      ...policySignals.map(
+        (signal) =>
+          `- [${decisionSignalStatusLabel(signal.status)}] ${signal.label}: ${signal.value} - ${signal.note}`,
       ),
       "",
       "決策摘要",
@@ -1889,6 +1993,8 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
         pricing_currency: pricingCurrency,
         currency_by_symbol: currencyBySymbolFor(activeAssetRows),
         mode,
+        confidence_level: confidenceLevel,
+        risk_free_rate: riskFreeRate / 100,
       });
 
       setResult(response);
@@ -1931,6 +2037,8 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
         mode,
         optimization_mode: optimizationMode,
         target_volatility: optimizationMode === "target_vol" ? targetVolatility / 100 : null,
+        confidence_level: confidenceLevel,
+        risk_free_rate: riskFreeRate / 100,
       });
 
       const optimizedWeights = Object.fromEntries(
@@ -1990,6 +2098,8 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
         price_basis: priceBasis,
         pricing_currency: pricingCurrency,
         currency_by_symbol: currencyBySymbolFor(activeAssetRows),
+        confidence_level: confidenceLevel,
+        risk_free_rate: riskFreeRate / 100,
       };
 
       const [overlapResponse, longRebuildResponse] = await Promise.all([
@@ -2462,6 +2572,51 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
             />
           </label>
           <label className="space-y-1">
+            <span className="text-slate-500">要求報酬 %</span>
+            <input
+              type="number"
+              min={0}
+              step={0.5}
+              value={requiredReturn}
+              onChange={(event) => setRequiredReturn(normalizePercentSetting(event.target.value, defaultRequiredReturn))}
+              className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-2 text-slate-100 font-mono"
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="text-slate-500">最大損失 %</span>
+            <input
+              type="number"
+              min={0}
+              step={1}
+              value={maxLossTolerance}
+              onChange={(event) => setMaxLossTolerance(normalizePercentSetting(event.target.value, defaultMaxLossTolerance))}
+              className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-2 text-slate-100 font-mono"
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="text-slate-500">信賴區間</span>
+            <select
+              value={confidenceLevel}
+              onChange={(event) => setConfidenceLevel(normalizeConfidenceLevel(event.target.value))}
+              className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-2 text-slate-100"
+            >
+              <option value={0.9}>90%</option>
+              <option value={0.95}>95%</option>
+              <option value={0.99}>99%</option>
+            </select>
+          </label>
+          <label className="space-y-1">
+            <span className="text-slate-500">無風險利率 %</span>
+            <input
+              type="number"
+              min={0}
+              step={0.25}
+              value={riskFreeRate}
+              onChange={(event) => setRiskFreeRate(normalizePercentSetting(event.target.value, defaultRiskFreeRate))}
+              className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-2 text-slate-100 font-mono"
+            />
+          </label>
+          <label className="space-y-1">
             <span className="text-slate-500">起日</span>
             <input
               type="date"
@@ -2693,6 +2848,40 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
                     </div>
                   );
                 })}
+              </div>
+            </div>
+          ) : null}
+
+          {policySignals.length ? (
+            <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold text-slate-200">投資政策檢核</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Return {requiredReturn.toFixed(1)}% · Loss {maxLossTolerance.toFixed(1)}% · Confidence {(confidenceLevel * 100).toFixed(0)}%
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
+                {policySignals.map((signal) => (
+                  <div
+                    key={signal.label}
+                    className={`rounded-lg border p-3 min-w-0 ${decisionSignalClass(signal.status)}`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[11px] text-slate-500 truncate">{signal.label}</p>
+                      <span
+                        className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-bold ${decisionSignalBadgeClass(signal.status)}`}
+                      >
+                        {decisionSignalStatusLabel(signal.status)}
+                      </span>
+                    </div>
+                    <p className="mt-2 font-mono text-sm font-bold text-slate-100 truncate" title={signal.value}>
+                      {signal.value}
+                    </p>
+                    <p className="mt-1 text-[11px] text-slate-500 leading-relaxed">{signal.note}</p>
+                  </div>
+                ))}
               </div>
             </div>
           ) : null}

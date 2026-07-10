@@ -106,6 +106,8 @@ export type PortfolioAnalyzeBigQueryPayload = {
   pricing_currency: "original" | "TWD";
   currency_by_symbol?: Record<string, string>;
   mode: "overlap" | "long_rebuild";
+  confidence_level?: number;
+  risk_free_rate?: number;
 };
 
 export type PortfolioOptimizeBigQueryPayload = {
@@ -119,6 +121,8 @@ export type PortfolioOptimizeBigQueryPayload = {
   mode: "overlap" | "long_rebuild";
   optimization_mode: "max_sharpe" | "min_vol" | "max_return" | "target_vol";
   target_volatility?: number | null;
+  confidence_level?: number;
+  risk_free_rate?: number;
 };
 
 export type PortfolioMetricSet = {
