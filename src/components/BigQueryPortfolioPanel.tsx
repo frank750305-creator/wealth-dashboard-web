@@ -93,17 +93,57 @@ const moneyFormatter = new Intl.NumberFormat("zh-TW", {
   maximumFractionDigits: 0,
 });
 
-const metricCards: Array<{
+type PortfolioMetricCard = {
   key: keyof PortfolioAnalysisResponse["metrics"];
   label: string;
   kind: "percent" | "number";
+};
+
+const metricGroups: Array<{
+  title: string;
+  subtitle: string;
+  cards: PortfolioMetricCard[];
 }> = [
-  { key: "cagr", label: "CAGR", kind: "percent" },
-  { key: "annualVolatility", label: "年化波動", kind: "percent" },
-  { key: "sharpe", label: "Sharpe", kind: "number" },
-  { key: "maxDrawdown", label: "最大回撤", kind: "percent" },
-  { key: "beta", label: "Beta", kind: "number" },
-  { key: "alpha", label: "Alpha", kind: "percent" },
+  {
+    title: "報酬與總風險",
+    subtitle: "看組合整體有沒有賺，以及波動大小",
+    cards: [
+      { key: "cumulativeReturn", label: "累積報酬", kind: "percent" },
+      { key: "cagr", label: "CAGR", kind: "percent" },
+      { key: "annualVolatility", label: "年化波動", kind: "percent" },
+      { key: "confidenceLowerBound", label: "信賴下緣", kind: "percent" },
+    ],
+  },
+  {
+    title: "風險效率",
+    subtitle: "看每承擔一份風險，換到多少報酬",
+    cards: [
+      { key: "sharpe", label: "Sharpe", kind: "number" },
+      { key: "sortino", label: "Sortino", kind: "number" },
+      { key: "maxDrawdown", label: "最大回撤", kind: "percent" },
+      { key: "downsideDeviation", label: "下檔波動", kind: "percent" },
+    ],
+  },
+  {
+    title: "市場連動",
+    subtitle: "看組合跟基準指標的同步程度",
+    cards: [
+      { key: "beta", label: "Beta", kind: "number" },
+      { key: "rSquared", label: "R-Squared", kind: "number" },
+      { key: "treynor", label: "Treynor", kind: "number" },
+      { key: "informationRatio", label: "Info Ratio", kind: "number" },
+    ],
+  },
+  {
+    title: "主動能力與尾端風險",
+    subtitle: "看超額報酬、偏態與極端波動",
+    cards: [
+      { key: "alpha", label: "Alpha", kind: "percent" },
+      { key: "appraisalRatio", label: "Appraisal", kind: "number" },
+      { key: "skewness", label: "Skewness", kind: "number" },
+      { key: "kurtosis", label: "Kurtosis", kind: "number" },
+    ],
+  },
 ];
 
 function makeRow(): AssetRow {
@@ -1334,14 +1374,29 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
             </div>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
-            {metricCards.map((metric) => (
-              <div key={metric.key} className="bg-slate-950 border border-slate-800 rounded-lg p-3">
-                <p className="text-[11px] text-slate-500 mb-1">{metric.label}</p>
-                <p className="text-lg font-bold text-slate-100 font-mono">
-                  {formatMetric(displayResult.metrics[metric.key], metric.kind)}
-                </p>
-              </div>
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+            {metricGroups.map((group) => (
+              <section key={group.title} className="bg-slate-950 border border-slate-800 rounded-lg p-3">
+                <div className="mb-3">
+                  <p className="text-xs font-bold text-slate-200">{group.title}</p>
+                  <p className="text-[11px] text-slate-600 mt-0.5">{group.subtitle}</p>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  {group.cards.map((metric) => {
+                    const value = displayResult.metrics[metric.key];
+                    const isNegative = typeof value === "number" && value < 0;
+
+                    return (
+                      <div key={metric.key} className="rounded-md border border-slate-800 bg-slate-900/60 p-2 min-w-0">
+                        <p className="text-[11px] text-slate-600 truncate">{metric.label}</p>
+                        <p className={`mt-1 text-sm font-bold font-mono ${isNegative ? "text-rose-200" : "text-slate-100"}`}>
+                          {formatMetric(value, metric.kind)}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
             ))}
           </div>
 
