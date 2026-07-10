@@ -144,6 +144,11 @@ function csvCell(value: unknown) {
   return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
 
+function markdownCell(value: unknown) {
+  if (value === null || value === undefined || value === "") return "--";
+  return String(value).replaceAll("|", "/").replaceAll("\n", " ");
+}
+
 function downloadTextFile(fileName: string, content: string, mimeType: string) {
   const blob = new Blob([content], { type: mimeType });
   const url = URL.createObjectURL(blob);
@@ -330,6 +335,106 @@ function assetComparisonCsv(rows: AssetComparisonRow[], priceBasis: "adjusted" |
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
+function averageComparisonMetric(rows: AssetComparisonRow[], selector: (row: AssetComparisonRow) => number | null) {
+  const values = rows.map(selector).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  if (!values.length) return null;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function comparisonSortLabel(sortKey: AssetComparisonSortKey) {
+  if (sortKey === "score") return "分數高到低";
+  if (sortKey === "annualizedReturn") return "年化報酬高到低";
+  if (sortKey === "riskAdjustedReturn") return "風險調整報酬高到低";
+  if (sortKey === "annualizedVolatility") return "波動低到高";
+  if (sortKey === "maxDrawdown") return "回撤低到高";
+  return "資料新鮮優先";
+}
+
+function comparisonSignalFilterLabel(signal: AssetDecisionSignal | "all") {
+  return signal === "all" ? "全部" : decisionSignalLabel(signal);
+}
+
+function assetComparisonMemo(
+  rows: AssetComparisonRow[],
+  options: {
+    name: string;
+    symbols: string;
+    priceBasis: "adjusted" | "raw";
+    sortKey: AssetComparisonSortKey;
+    signalFilter: AssetDecisionSignal | "all";
+    minimumScore: number;
+    totalRows: number;
+  },
+) {
+  const candidateRows = rows.filter((row) => row.signal === "candidate");
+  const watchRows = rows.filter((row) => row.signal === "watch");
+  const riskRows = rows.filter((row) => row.signal === "risk" || row.qualityStatus === "risk");
+  const qualityRows = rows.filter((row) => row.qualityStatus !== "strong");
+  const avgReturn = averageComparisonMetric(rows, (row) => row.annualizedReturn);
+  const avgVolatility = averageComparisonMetric(rows, (row) => row.annualizedVolatility);
+  const avgDrawdown = averageComparisonMetric(rows, (row) => row.maxDrawdown);
+  const symbolText = parseSymbolList(options.symbols).join(", ") || "--";
+  const topRows = rows.slice(0, 8);
+  const reviewRows = [...riskRows, ...qualityRows.filter((row) => !riskRows.some((riskRow) => riskRow.symbol === row.symbol))].slice(0, 8);
+  const tableHeader = "| 商品 | 分數 | 訊號 | 年化報酬 | 年化波動 | 最大回撤 | 最新日 | 說明 |";
+  const tableDivider = "|---|---:|---|---:|---:|---:|---|---|";
+  const tableRows = topRows.map((row) =>
+    [
+      markdownCell(row.symbol),
+      row.score,
+      markdownCell(decisionSignalLabel(row.signal)),
+      markdownCell(formatPercent(row.annualizedReturn)),
+      markdownCell(formatPercent(row.annualizedVolatility)),
+      markdownCell(formatPercent(row.maxDrawdown)),
+      markdownCell(row.latestDate),
+      markdownCell(row.signalNote),
+    ].join(" | "),
+  );
+  const reviewTableRows = reviewRows.map((row) =>
+    [
+      markdownCell(row.symbol),
+      row.score,
+      markdownCell(decisionSignalLabel(row.signal)),
+      markdownCell(qualityLabel(row.qualityStatus)),
+      markdownCell(row.latestDate),
+      markdownCell(row.freshnessDays === null ? "--" : `${row.freshnessDays} 天`),
+      markdownCell(row.signalNote),
+    ].join(" | "),
+  );
+
+  return [
+    `# ${options.name || "未命名 Watchlist"} 研究摘要`,
+    "",
+    `- 產出時間：${new Date().toLocaleString("zh-TW")}`,
+    `- 商品清單：${symbolText}`,
+    `- 價格口徑：${options.priceBasis}`,
+    `- 排序：${comparisonSortLabel(options.sortKey)}`,
+    `- 訊號篩選：${comparisonSignalFilterLabel(options.signalFilter)}`,
+    `- 最低分數：${options.minimumScore}`,
+    "",
+    "## 篩選概況",
+    `- 顯示商品：${rows.length} / ${options.totalRows} 檔`,
+    `- 候選 / 觀察 / 風險：${candidateRows.length} / ${watchRows.length} / ${riskRows.length}`,
+    `- 平均年化報酬：${formatPercent(avgReturn)}`,
+    `- 平均年化波動：${formatPercent(avgVolatility)}`,
+    `- 平均最大回撤：${formatPercent(avgDrawdown)}`,
+    "",
+    "## 優先研究名單",
+    topRows.length ? tableHeader : "目前篩選條件下沒有商品。",
+    topRows.length ? tableDivider : "",
+    ...tableRows.map((row) => `| ${row} |`),
+    "",
+    "## 需要複核的風險",
+    reviewRows.length ? "| 商品 | 分數 | 訊號 | 品質 | 最新日 | 距今天 | 說明 |" : "目前篩選結果未偵測到明確風險。",
+    reviewRows.length ? "|---|---:|---|---|---|---:|---|" : "",
+    ...reviewTableRows.map((row) => `| ${row} |`),
+    "",
+    "## 使用限制",
+    "- 此摘要只依 BigQuery daily_prices 的歷史價格計算，尚未納入估值、產業、流動性、配息、匯率與交易成本。",
+    "- 分數是研究排序工具，不是買賣建議；正式決策前仍需人工覆核。",
+  ].join("\n");
+}
+
 function sortComparisonRows(rows: AssetComparisonRow[], sortKey: AssetComparisonSortKey) {
   const sortedRows = [...rows];
 
@@ -374,6 +479,7 @@ export function MarketDataPanel() {
   const [watchlistPresetName, setWatchlistPresetName] = useState("核心 ETF");
   const [selectedWatchlistPresetId, setSelectedWatchlistPresetId] = useState("");
   const [savedWatchlistPresets, setSavedWatchlistPresets] = useState<SavedWatchlistPreset[]>([]);
+  const [watchlistMemoCopyStatus, setWatchlistMemoCopyStatus] = useState<"idle" | "copied">("idle");
   const sources = data?.sources ?? [];
   const securedCount = sources.filter((source) => source.status !== "needs_secret").length;
   const hasBigQueryCredentials = Boolean(
@@ -635,6 +741,36 @@ export function MarketDataPanel() {
       assetComparisonCsv(visibleComparisonRows, assetPriceBasis),
       "text/csv;charset=utf-8",
     );
+  };
+  const buildAssetComparisonMemo = () =>
+    assetComparisonMemo(visibleComparisonRows, {
+      name: watchlistPresetName.trim() || "未命名 Watchlist",
+      symbols: comparisonSymbols,
+      priceBasis: assetPriceBasis,
+      sortKey: comparisonSortKey,
+      signalFilter: comparisonSignalFilter,
+      minimumScore: minimumComparisonScore,
+      totalRows: comparisonRows.length,
+    });
+  const handleExportAssetComparisonMemo = () => {
+    if (!visibleComparisonRows.length) return;
+
+    downloadTextFile(
+      `bigquery-watchlist-memo-${resultStamp()}.md`,
+      buildAssetComparisonMemo(),
+      "text/markdown;charset=utf-8",
+    );
+  };
+  const handleCopyAssetComparisonMemo = async () => {
+    if (!visibleComparisonRows.length || typeof navigator === "undefined" || !navigator.clipboard) return;
+
+    try {
+      await navigator.clipboard.writeText(buildAssetComparisonMemo());
+      setWatchlistMemoCopyStatus("copied");
+      window.setTimeout(() => setWatchlistMemoCopyStatus("idle"), 1800);
+    } catch (err: unknown) {
+      setComparisonError(err instanceof Error ? err.message : String(err));
+    }
   };
   const handleSaveWatchlistPreset = () => {
     const cleanName = watchlistPresetName.trim() || "未命名 Watchlist";
@@ -1240,12 +1376,28 @@ export function MarketDataPanel() {
             </div>
             <div className="flex flex-wrap gap-2">
               {comparisonRows.length ? (
-                <button
-                  onClick={handleExportAssetComparisonCsv}
-                  className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
-                >
-                  Watchlist CSV
-                </button>
+                <>
+                  <button
+                    onClick={handleExportAssetComparisonMemo}
+                    disabled={!visibleComparisonRows.length}
+                    className="px-3 py-2 text-xs font-bold rounded-md bg-emerald-700 hover:bg-emerald-600 text-white disabled:cursor-not-allowed disabled:bg-slate-900 disabled:text-slate-600"
+                  >
+                    Memo MD
+                  </button>
+                  <button
+                    onClick={() => void handleCopyAssetComparisonMemo()}
+                    disabled={!visibleComparisonRows.length}
+                    className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 disabled:cursor-not-allowed disabled:bg-slate-900 disabled:text-slate-600"
+                  >
+                    {watchlistMemoCopyStatus === "copied" ? "已複製" : "複製 Memo"}
+                  </button>
+                  <button
+                    onClick={handleExportAssetComparisonCsv}
+                    className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
+                  >
+                    Watchlist CSV
+                  </button>
+                </>
               ) : null}
               <button
                 onClick={handleCompareAssets}
