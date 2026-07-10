@@ -627,6 +627,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
   const [modeComparisonResult, setModeComparisonResult] = useState<ModeComparisonResult | null>(null);
   const [rebalanceRows, setRebalanceRows] = useState<RebalanceRecommendation[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied">("idle");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [isComparingModes, setIsComparingModes] = useState(false);
@@ -1105,6 +1106,22 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
       decisionSummaryText(),
       "text/plain;charset=utf-8",
     );
+  }
+
+  async function handleCopyDecisionSummary() {
+    if (!displayResult || !decisionSignals.length) return;
+
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("瀏覽器不支援剪貼簿 API");
+      }
+
+      await navigator.clipboard.writeText(decisionSummaryText());
+      setCopyStatus("copied");
+      window.setTimeout(() => setCopyStatus("idle"), 2000);
+    } catch (err: unknown) {
+      setError(`摘要複製失敗：${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   function handleExportWealthCsv() {
@@ -1662,6 +1679,14 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
                   className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
                 >
                   摘要 TXT
+                </button>
+              ) : null}
+              {decisionSignals.length ? (
+                <button
+                  onClick={handleCopyDecisionSummary}
+                  className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
+                >
+                  {copyStatus === "copied" ? "已複製" : "複製摘要"}
                 </button>
               ) : null}
               <button
