@@ -74,6 +74,7 @@ type InputCheck = {
 };
 
 type ExportedPortfolioPayload = {
+  exportedAt?: string;
   presetName?: string;
   configuration?: {
     rows?: Array<{
@@ -99,6 +100,13 @@ type ExportedPortfolioPayload = {
   inputChecks?: InputCheck[];
 };
 
+type StoredPortfolioSnapshot = {
+  id: string;
+  name: string;
+  createdAt: string;
+  payload: ExportedPortfolioPayload;
+};
+
 const initialRows: AssetRow[] = [
   { id: "asset-0050", symbol: "0050.TW", weight: 50, currency: "TWD" },
   { id: "asset-spy", symbol: "SPDR S&P500 ETF", weight: 50, currency: "USD" },
@@ -106,6 +114,7 @@ const initialRows: AssetRow[] = [
 
 const assetOptionListId = "bigquery-asset-symbol-options";
 const presetStorageKey = "wealth-dashboard.bigqueryPortfolioPresets";
+const snapshotStorageKey = "wealth-dashboard.bigqueryPortfolioSnapshots";
 const defaultPortfolioValue = 1_000_000;
 const defaultTransactionCostBps = 10;
 const defaultMinTradeAmount = 1_000;
@@ -168,6 +177,12 @@ const metricGroups: Array<{
 ];
 
 const comparisonMetricCards = metricGroups.flatMap((group) => group.cards);
+const snapshotMetricCards: PortfolioMetricCard[] = [
+  { key: "cagr", label: "CAGR", kind: "percent" },
+  { key: "annualVolatility", label: "年化波動", kind: "percent" },
+  { key: "sharpe", label: "Sharpe", kind: "number" },
+  { key: "maxDrawdown", label: "最大回撤", kind: "percent" },
+];
 
 function makeRow(): AssetRow {
   return {
@@ -201,6 +216,33 @@ function loadPresetsFromStorage() {
 function writePresetsToStorage(presets: SavedPortfolioPreset[]) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(presetStorageKey, JSON.stringify(presets));
+}
+
+function loadSnapshotsFromStorage() {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(snapshotStorageKey) || "[]");
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed.filter((item): item is StoredPortfolioSnapshot => {
+      if (!item || typeof item !== "object") return false;
+      const snapshot = item as Partial<StoredPortfolioSnapshot>;
+      return (
+        typeof snapshot.id === "string" &&
+        typeof snapshot.name === "string" &&
+        typeof snapshot.createdAt === "string" &&
+        Boolean(snapshot.payload && typeof snapshot.payload === "object")
+      );
+    });
+  } catch {
+    return [];
+  }
+}
+
+function writeSnapshotsToStorage(snapshots: StoredPortfolioSnapshot[]) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(snapshotStorageKey, JSON.stringify(snapshots));
 }
 
 function csvCell(value: unknown) {
@@ -722,6 +764,8 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
   const [presetName, setPresetName] = useState("核心配置");
   const [selectedPresetId, setSelectedPresetId] = useState("");
   const [savedPresets, setSavedPresets] = useState<SavedPortfolioPreset[]>([]);
+  const [selectedSnapshotId, setSelectedSnapshotId] = useState("");
+  const [savedSnapshots, setSavedSnapshots] = useState<StoredPortfolioSnapshot[]>([]);
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
   const totalWeight = useMemo(
@@ -786,6 +830,10 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
   const isBusy = isAnalyzing || isOptimizing || isComparingModes;
   const canSubmit = hasBigQueryCredentials && rows.some((row) => row.symbol.trim()) && !isBusy;
   const displayResult = optimizationResult ?? result;
+  const selectedSnapshot = useMemo(
+    () => savedSnapshots.find((snapshot) => snapshot.id === selectedSnapshotId) ?? null,
+    [savedSnapshots, selectedSnapshotId],
+  );
   const correlationMatrix = displayResult?.correlationMatrix;
   const efficientFrontier = optimizationResult?.efficientFrontier;
   const riskContributionRows = useMemo(() => {
@@ -835,6 +883,29 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
       };
     });
   }, [modeComparisonResult]);
+  const snapshotComparisonRows = useMemo(() => {
+    const snapshotResult = selectedSnapshot?.payload.result;
+    if (!displayResult || !isPortfolioResult(snapshotResult)) return [];
+
+    return snapshotMetricCards.map((metric) => {
+      const currentValue = displayResult.metrics[metric.key];
+      const snapshotValue = snapshotResult.metrics[metric.key];
+      const delta =
+        currentValue !== null &&
+        snapshotValue !== null &&
+        Number.isFinite(currentValue) &&
+        Number.isFinite(snapshotValue)
+          ? currentValue - snapshotValue
+          : null;
+
+      return {
+        ...metric,
+        currentValue,
+        snapshotValue,
+        delta,
+      };
+    });
+  }, [displayResult, selectedSnapshot]);
   const wealthChartData = useMemo(() => {
     const wealthPath = displayResult?.wealthPath ?? [];
     const step = Math.max(1, Math.floor(wealthPath.length / 360));
@@ -927,8 +998,11 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
   useEffect(() => {
     const timer = window.setTimeout(() => {
       const presets = loadPresetsFromStorage();
+      const snapshots = loadSnapshotsFromStorage();
       setSavedPresets(presets);
+      setSavedSnapshots(snapshots);
       setSelectedPresetId((currentId) => currentId || presets[0]?.id || "");
+      setSelectedSnapshotId((currentId) => currentId || snapshots[0]?.id || "");
     }, 0);
 
     return () => {
@@ -1319,6 +1393,63 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
     });
   }
 
+  function applyPortfolioPayload(payload: ExportedPortfolioPayload, fallbackName: string) {
+    const config = payload.configuration;
+    if (!config?.rows?.length) {
+      throw new Error("匯入檔缺少 configuration.rows。");
+    }
+
+    const importedRows = config.rows
+      .filter((row) => typeof row.symbol === "string" && row.symbol.trim())
+      .map((row) =>
+        makePresetRow({
+          symbol: row.symbol?.trim() ?? "",
+          weight: importedWeightToPercent(row.weight),
+          currency: row.currency?.trim().toUpperCase() || inferSymbolCurrency(row.symbol ?? ""),
+        }),
+      );
+
+    if (!importedRows.length) {
+      throw new Error("匯入檔沒有可用商品。");
+    }
+
+    setRows(importedRows);
+    setBenchmarkSymbol(config.benchmarkSymbol?.trim() || "");
+    setStartDate(config.startDate || "2020-01-01");
+    setEndDate(config.endDate || new Date().toISOString().slice(0, 10));
+    setPriceBasis(config.priceBasis === "raw" ? "raw" : "adjusted");
+    setPricingCurrency(config.pricingCurrency === "original" ? "original" : "TWD");
+    setMode(config.mode === "long_rebuild" ? "long_rebuild" : "overlap");
+    setOptimizationMode(config.optimizationMode ?? "max_sharpe");
+    setTargetVolatility(Number.isFinite(config.targetVolatility) ? Number(config.targetVolatility) : 12);
+    const nextPortfolioValue = normalizePortfolioValue(config.portfolioValue);
+    const nextTransactionCostBps = normalizeTransactionCostBps(config.transactionCostBps);
+    const nextMinTradeAmount = normalizeMinTradeAmount(config.minTradeAmount);
+    setPortfolioValue(nextPortfolioValue);
+    setTransactionCostBps(nextTransactionCostBps);
+    setMinTradeAmount(nextMinTradeAmount);
+    setPresetName(payload.presetName?.trim() || fallbackName);
+    setSelectedPresetId("");
+    setModeComparisonResult(null);
+    setRebalanceRows(
+      normalizeRebalanceRows(payload.rebalancing, nextPortfolioValue, nextTransactionCostBps, nextMinTradeAmount),
+    );
+    setError(null);
+
+    if (isPortfolioResult(payload.result)) {
+      if ("optimizationMode" in payload.result) {
+        setOptimizationResult(payload.result as PortfolioOptimizationResponse);
+        setResult(null);
+      } else {
+        setResult(payload.result as PortfolioAnalysisResponse);
+        setOptimizationResult(null);
+      }
+    } else {
+      setResult(null);
+      setOptimizationResult(null);
+    }
+  }
+
   async function handleImportJson(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -1326,60 +1457,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
 
     try {
       const payload = JSON.parse(await file.text()) as ExportedPortfolioPayload;
-      const config = payload.configuration;
-      if (!config?.rows?.length) {
-        throw new Error("匯入檔缺少 configuration.rows。");
-      }
-
-      const importedRows = config.rows
-        .filter((row) => typeof row.symbol === "string" && row.symbol.trim())
-        .map((row) =>
-          makePresetRow({
-            symbol: row.symbol?.trim() ?? "",
-            weight: importedWeightToPercent(row.weight),
-            currency: row.currency?.trim().toUpperCase() || inferSymbolCurrency(row.symbol ?? ""),
-          }),
-        );
-
-      if (!importedRows.length) {
-        throw new Error("匯入檔沒有可用商品。");
-      }
-
-      setRows(importedRows);
-      setBenchmarkSymbol(config.benchmarkSymbol?.trim() || "");
-      setStartDate(config.startDate || "2020-01-01");
-      setEndDate(config.endDate || new Date().toISOString().slice(0, 10));
-      setPriceBasis(config.priceBasis === "raw" ? "raw" : "adjusted");
-      setPricingCurrency(config.pricingCurrency === "original" ? "original" : "TWD");
-      setMode(config.mode === "long_rebuild" ? "long_rebuild" : "overlap");
-      setOptimizationMode(config.optimizationMode ?? "max_sharpe");
-      setTargetVolatility(Number.isFinite(config.targetVolatility) ? Number(config.targetVolatility) : 12);
-      const nextPortfolioValue = normalizePortfolioValue(config.portfolioValue);
-      const nextTransactionCostBps = normalizeTransactionCostBps(config.transactionCostBps);
-      const nextMinTradeAmount = normalizeMinTradeAmount(config.minTradeAmount);
-      setPortfolioValue(nextPortfolioValue);
-      setTransactionCostBps(nextTransactionCostBps);
-      setMinTradeAmount(nextMinTradeAmount);
-      setPresetName(payload.presetName?.trim() || file.name.replace(/\.json$/i, ""));
-      setSelectedPresetId("");
-      setModeComparisonResult(null);
-      setRebalanceRows(
-        normalizeRebalanceRows(payload.rebalancing, nextPortfolioValue, nextTransactionCostBps, nextMinTradeAmount),
-      );
-      setError(null);
-
-      if (isPortfolioResult(payload.result)) {
-        if ("optimizationMode" in payload.result) {
-          setOptimizationResult(payload.result as PortfolioOptimizationResponse);
-          setResult(null);
-        } else {
-          setResult(payload.result as PortfolioAnalysisResponse);
-          setOptimizationResult(null);
-        }
-      } else {
-        setResult(null);
-        setOptimizationResult(null);
-      }
+      applyPortfolioPayload(payload, file.name.replace(/\.json$/i, ""));
     } catch (err: unknown) {
       setError(`JSON 匯入失敗：${err instanceof Error ? err.message : String(err)}`);
     }
@@ -1490,6 +1568,70 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
       JSON.stringify(payload, null, 2),
       "application/json;charset=utf-8",
     );
+  }
+
+  function handleSaveSnapshot() {
+    const payload = exportPayload();
+    if (!payload) return;
+
+    const now = new Date().toISOString();
+    const snapshot: StoredPortfolioSnapshot = {
+      id: `snapshot-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      name: presetName.trim() || "未命名快照",
+      createdAt: now,
+      payload: {
+        ...payload,
+        exportedAt: payload.exportedAt || now,
+      },
+    };
+
+    setSavedSnapshots((currentSnapshots) => {
+      const nextSnapshots = [snapshot, ...currentSnapshots].slice(0, 10);
+      writeSnapshotsToStorage(nextSnapshots);
+      return nextSnapshots;
+    });
+    setSelectedSnapshotId(snapshot.id);
+    setError(null);
+  }
+
+  function handleLoadSnapshot() {
+    if (!selectedSnapshot) {
+      setError("尚未選擇快照。");
+      return;
+    }
+
+    try {
+      applyPortfolioPayload(selectedSnapshot.payload, selectedSnapshot.name);
+      setSelectedSnapshotId(selectedSnapshot.id);
+    } catch (err: unknown) {
+      setError(`快照載入失敗：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  function handleExportSnapshotJson() {
+    if (!selectedSnapshot) {
+      setError("尚未選擇快照。");
+      return;
+    }
+
+    downloadTextFile(
+      `bigquery-snapshot-${resultStamp()}.json`,
+      JSON.stringify(selectedSnapshot.payload, null, 2),
+      "application/json;charset=utf-8",
+    );
+    setError(null);
+  }
+
+  function handleDeleteSnapshot() {
+    if (!selectedSnapshotId) return;
+
+    setSavedSnapshots((currentSnapshots) => {
+      const nextSnapshots = currentSnapshots.filter((snapshot) => snapshot.id !== selectedSnapshotId);
+      writeSnapshotsToStorage(nextSnapshots);
+      setSelectedSnapshotId(nextSnapshots[0]?.id || "");
+      return nextSnapshots;
+    });
+    setError(null);
   }
 
   function handleExportDecisionSummary() {
@@ -2167,6 +2309,49 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
         </div>
       )}
 
+      {savedSnapshots.length ? (
+        <div className="grid grid-cols-1 xl:grid-cols-[0.7fr_1.3fr] gap-3 bg-slate-950 border border-slate-800 rounded-lg p-3">
+          <div>
+            <p className="text-xs font-bold text-slate-200">分析快照</p>
+            <p className="text-[11px] text-slate-500 mt-0.5">{savedSnapshots.length} 筆本機留存</p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto_auto] gap-2 text-xs">
+            <select
+              value={selectedSnapshotId}
+              onChange={(event) => setSelectedSnapshotId(event.target.value)}
+              className="w-full bg-slate-900 border border-slate-700 rounded-md px-2 py-2 text-slate-100"
+            >
+              {savedSnapshots.map((snapshot) => (
+                <option key={snapshot.id} value={snapshot.id}>
+                  {snapshot.name} · {new Date(snapshot.createdAt).toLocaleString("zh-TW")}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={handleLoadSnapshot}
+              disabled={!selectedSnapshot}
+              className="px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:text-slate-500"
+            >
+              載入
+            </button>
+            <button
+              onClick={handleExportSnapshotJson}
+              disabled={!selectedSnapshot}
+              className="px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:text-slate-500"
+            >
+              JSON
+            </button>
+            <button
+              onClick={handleDeleteSnapshot}
+              disabled={!selectedSnapshot}
+              className="px-3 py-2 rounded-md bg-slate-900 border border-slate-700 hover:border-red-500 text-slate-300 hover:text-red-300 font-bold disabled:cursor-not-allowed disabled:text-slate-600"
+            >
+              刪除
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {displayResult && (
         <div className="space-y-4">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-slate-950 border border-slate-800 rounded-lg p-3">
@@ -2177,6 +2362,12 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
+              <button
+                onClick={handleSaveSnapshot}
+                className="px-3 py-2 text-xs font-bold rounded-md bg-cyan-700 hover:bg-cyan-600 text-white"
+              >
+                存快照
+              </button>
               <button
                 onClick={handleExportJson}
                 className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
@@ -2229,6 +2420,38 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
               ) : null}
             </div>
           </div>
+
+          {snapshotComparisonRows.length ? (
+            <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold text-slate-200">快照比較</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    {selectedSnapshot?.name ?? "--"} · Delta = 目前結果 - 快照
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
+                {snapshotComparisonRows.map((row) => {
+                  const isNegative = typeof row.delta === "number" && row.delta < 0;
+                  return (
+                    <div key={row.key} className="rounded-lg border border-slate-800 bg-slate-900/60 p-3 min-w-0">
+                      <p className="text-[11px] text-slate-500 truncate">{row.label}</p>
+                      <p className="mt-2 font-mono text-xs font-bold text-slate-100">
+                        {formatMetric(row.currentValue, row.kind)}
+                      </p>
+                      <p className="mt-1 font-mono text-[11px] text-slate-500">
+                        快照 {formatMetric(row.snapshotValue, row.kind)}
+                      </p>
+                      <p className={`mt-1 font-mono text-[11px] font-bold ${isNegative ? "text-rose-300" : "text-emerald-300"}`}>
+                        {formatMetricDelta(row.delta, row.kind)}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
 
           {decisionSignals.length ? (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
