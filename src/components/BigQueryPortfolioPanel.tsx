@@ -96,6 +96,7 @@ type ExportedPortfolioPayload = {
   result?: PortfolioResult;
   rebalancing?: RebalanceRecommendation[];
   decisionSignals?: DecisionSignal[];
+  inputChecks?: InputCheck[];
 };
 
 const initialRows: AssetRow[] = [
@@ -1092,6 +1093,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
       result: displayResult,
       rebalancing: rebalanceRows,
       decisionSignals,
+      inputChecks,
     };
   }
 
@@ -1119,6 +1121,12 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
         const weight = Number(row.weight) || 0;
         return `- ${row.symbol.trim()}: ${weight.toFixed(2)}% / ${row.currency.trim().toUpperCase() || "USD"}`;
       }),
+      "",
+      "分析前檢核",
+      ...inputChecks.map(
+        (check) =>
+          `- [${inputCheckStatusLabel(check.status)}] ${check.label}: ${check.value} - ${check.note}`,
+      ),
       "",
       "決策摘要",
       ...decisionSignals.map(
