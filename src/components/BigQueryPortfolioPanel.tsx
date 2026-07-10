@@ -54,6 +54,11 @@ type RebalanceSummary = {
   totalEstimatedCost: number;
 };
 
+type ModeComparisonResult = {
+  overlap: PortfolioAnalysisResponse;
+  longRebuild: PortfolioAnalysisResponse;
+};
+
 type ExportedPortfolioPayload = {
   presetName?: string;
   configuration?: {
@@ -145,6 +150,8 @@ const metricGroups: Array<{
     ],
   },
 ];
+
+const comparisonMetricCards = metricGroups.flatMap((group) => group.cards);
 
 function makeRow(): AssetRow {
   return {
@@ -260,6 +267,20 @@ function formatMetric(value: number | null, kind: "percent" | "number") {
   if (value === null || !Number.isFinite(value)) return "--";
   if (kind === "percent") return `${(value * 100).toFixed(2)}%`;
   return value.toFixed(2);
+}
+
+function formatMetricDelta(value: number | null, kind: "percent" | "number") {
+  if (value === null || !Number.isFinite(value)) return "--";
+  const sign = value > 0 ? "+" : "";
+  if (kind === "percent") return `${sign}${(value * 100).toFixed(2)}%`;
+  return `${sign}${value.toFixed(2)}`;
+}
+
+function metricDeltaClass(value: number | null) {
+  if (value === null || !Number.isFinite(value)) return "text-slate-500";
+  if (value > 0) return "text-emerald-300";
+  if (value < 0) return "text-rose-300";
+  return "text-slate-300";
 }
 
 function formatSignedWeightDelta(value: number) {
@@ -496,10 +517,12 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
   const [minTradeAmount, setMinTradeAmount] = useState(defaultMinTradeAmount);
   const [result, setResult] = useState<PortfolioAnalysisResponse | null>(null);
   const [optimizationResult, setOptimizationResult] = useState<PortfolioOptimizationResponse | null>(null);
+  const [modeComparisonResult, setModeComparisonResult] = useState<ModeComparisonResult | null>(null);
   const [rebalanceRows, setRebalanceRows] = useState<RebalanceRecommendation[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isOptimizing, setIsOptimizing] = useState(false);
+  const [isComparingModes, setIsComparingModes] = useState(false);
   const [assetQuery, setAssetQuery] = useState("");
   const [assetSuggestions, setAssetSuggestions] = useState<BigQueryAsset[]>([]);
   const [assetSearchError, setAssetSearchError] = useState<string | null>(null);
@@ -514,7 +537,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
     [rows],
   );
 
-  const isBusy = isAnalyzing || isOptimizing;
+  const isBusy = isAnalyzing || isOptimizing || isComparingModes;
   const canSubmit = hasBigQueryCredentials && rows.some((row) => row.symbol.trim()) && !isBusy;
   const displayResult = optimizationResult ?? result;
   const correlationMatrix = displayResult?.correlationMatrix;
@@ -540,6 +563,28 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
         })),
     [rebalanceRows],
   );
+  const modeComparisonRows = useMemo(() => {
+    if (!modeComparisonResult) return [];
+
+    return comparisonMetricCards.map((metric) => {
+      const overlapValue = modeComparisonResult.overlap.metrics[metric.key];
+      const longRebuildValue = modeComparisonResult.longRebuild.metrics[metric.key];
+      const delta =
+        overlapValue !== null &&
+        longRebuildValue !== null &&
+        Number.isFinite(overlapValue) &&
+        Number.isFinite(longRebuildValue)
+          ? longRebuildValue - overlapValue
+          : null;
+
+      return {
+        ...metric,
+        overlapValue,
+        longRebuildValue,
+        delta,
+      };
+    });
+  }, [modeComparisonResult]);
   const wealthChartData = useMemo(() => {
     const wealthPath = displayResult?.wealthPath ?? [];
     const step = Math.max(1, Math.floor(wealthPath.length / 360));
@@ -759,6 +804,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
     setPresetName(preset.name);
     setResult(null);
     setOptimizationResult(null);
+    setModeComparisonResult(null);
     setRebalanceRows([]);
     setError(null);
   }
@@ -817,6 +863,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
       setMinTradeAmount(nextMinTradeAmount);
       setPresetName(payload.presetName?.trim() || file.name.replace(/\.json$/i, ""));
       setSelectedPresetId("");
+      setModeComparisonResult(null);
       setRebalanceRows(
         normalizeRebalanceRows(payload.rebalancing, nextPortfolioValue, nextTransactionCostBps, nextMinTradeAmount),
       );
@@ -912,6 +959,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
   async function handleAnalyze() {
     setError(null);
     setResult(null);
+    setModeComparisonResult(null);
     setRebalanceRows([]);
 
     if (!hasBigQueryCredentials) {
@@ -955,6 +1003,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
     setError(null);
     setResult(null);
     setOptimizationResult(null);
+    setModeComparisonResult(null);
     setRebalanceRows([]);
 
     if (!hasBigQueryCredentials) {
@@ -1009,6 +1058,56 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
     }
   }
 
+  async function handleCompareModes() {
+    setError(null);
+    setResult(null);
+    setOptimizationResult(null);
+    setModeComparisonResult(null);
+    setRebalanceRows([]);
+
+    if (!hasBigQueryCredentials) {
+      setError("Vercel 尚未設定 GCP_SERVICE_ACCOUNT_JSON。");
+      return;
+    }
+
+    const activeAssetRows = activeRows();
+    if (!activeAssetRows.length) {
+      setError("至少需要一個商品代號。");
+      return;
+    }
+
+    setIsComparingModes(true);
+    try {
+      const weightsBySymbol = Object.fromEntries(
+        activeAssetRows.map((row) => [row.symbol.trim(), Number(row.weight) / 100]),
+      );
+      const basePayload = {
+        weights_by_symbol: weightsBySymbol,
+        benchmark_symbol: benchmarkSymbol.trim() || null,
+        start_date: startDate || null,
+        end_date: endDate || null,
+        price_basis: priceBasis,
+        pricing_currency: pricingCurrency,
+        currency_by_symbol: currencyBySymbolFor(activeAssetRows),
+      };
+
+      const [overlapResponse, longRebuildResponse] = await Promise.all([
+        analyzePortfolioFromBigQuery({ ...basePayload, mode: "overlap" }),
+        analyzePortfolioFromBigQuery({ ...basePayload, mode: "long_rebuild" }),
+      ]);
+
+      setModeComparisonResult({
+        overlap: overlapResponse,
+        longRebuild: longRebuildResponse,
+      });
+      setResult(mode === "long_rebuild" ? longRebuildResponse : overlapResponse);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsComparingModes(false);
+    }
+  }
+
   return (
     <section className="bg-slate-900 border border-slate-800 p-4 md:p-6 rounded-xl shadow-2xl space-y-5">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
@@ -1030,6 +1129,13 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
             className="px-3 py-2 text-xs font-bold rounded-md bg-cyan-600 hover:bg-cyan-500 text-white transition-colors disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
           >
             {isOptimizing ? "調倉中" : "AI 調倉"}
+          </button>
+          <button
+            onClick={handleCompareModes}
+            disabled={!canSubmit}
+            className="px-3 py-2 text-xs font-bold rounded-md bg-slate-700 hover:bg-slate-600 text-white transition-colors disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
+          >
+            {isComparingModes ? "比較中" : "比較模式"}
           </button>
         </div>
       </div>
@@ -1399,6 +1505,48 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
               </section>
             ))}
           </div>
+
+          {modeComparisonRows.length ? (
+            <div className="bg-slate-950 border border-slate-800 rounded-lg p-3">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 mb-3">
+                <div>
+                  <p className="text-[11px] text-slate-500">模式比較</p>
+                  <p className="text-[11px] text-slate-600 mt-0.5">近期交集法 vs 長線重建法</p>
+                </div>
+                <p className="text-[11px] text-slate-600 font-mono">
+                  Delta = 長線重建法 - 近期交集法
+                </p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[760px] text-xs">
+                  <thead>
+                    <tr className="text-left text-[11px] text-slate-600">
+                      <th className="py-2 pr-3 font-medium">Metric</th>
+                      <th className="py-2 px-3 font-medium text-right">近期交集法</th>
+                      <th className="py-2 px-3 font-medium text-right">長線重建法</th>
+                      <th className="py-2 pl-3 font-medium text-right">Delta</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {modeComparisonRows.map((row) => (
+                      <tr key={row.key} className="border-t border-slate-900">
+                        <td className="py-2 pr-3 text-slate-300">{row.label}</td>
+                        <td className="py-2 px-3 text-right font-mono text-slate-300">
+                          {formatMetric(row.overlapValue, row.kind)}
+                        </td>
+                        <td className="py-2 px-3 text-right font-mono text-cyan-200">
+                          {formatMetric(row.longRebuildValue, row.kind)}
+                        </td>
+                        <td className={`py-2 pl-3 text-right font-mono ${metricDeltaClass(row.delta)}`}>
+                          {formatMetricDelta(row.delta, row.kind)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
 
           {rebalanceRows.length ? (
             <div className="bg-slate-950 border border-slate-800 rounded-lg p-3">
