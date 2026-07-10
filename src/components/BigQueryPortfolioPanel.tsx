@@ -897,6 +897,31 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
     setError(null);
   }
 
+  function handleEqualWeight() {
+    const activeAssetRows = activeRows();
+
+    if (!activeAssetRows.length) {
+      setError("無法等權配置：至少需要一個商品代號。");
+      return;
+    }
+
+    const equalWeight = Number((100 / activeAssetRows.length).toFixed(2));
+    const remainder = Number((100 - equalWeight * activeAssetRows.length).toFixed(2));
+    let firstActiveRowId: string | null = null;
+
+    setRows((currentRows) =>
+      currentRows.map((row) => {
+        if (!row.symbol.trim()) return row;
+        firstActiveRowId = firstActiveRowId ?? row.id;
+        return {
+          ...row,
+          weight: row.id === firstActiveRowId ? Number((equalWeight + remainder).toFixed(2)) : equalWeight,
+        };
+      }),
+    );
+    setError(null);
+  }
+
   function handlePortfolioValueChange(value: number) {
     const nextValue = normalizePortfolioValue(value, 0);
     setPortfolioValue(nextValue);
@@ -1580,6 +1605,12 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
                 className="h-9 px-3 rounded-md bg-slate-950 border border-slate-700 text-[11px] font-bold text-slate-300 hover:border-cyan-600 hover:text-cyan-200"
               >
                 正規化
+              </button>
+              <button
+                onClick={handleEqualWeight}
+                className="h-9 px-3 rounded-md bg-slate-950 border border-slate-700 text-[11px] font-bold text-slate-300 hover:border-cyan-600 hover:text-cyan-200"
+              >
+                等權
               </button>
             </div>
             <div className="text-right">
