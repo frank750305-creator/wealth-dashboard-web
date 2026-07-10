@@ -651,6 +651,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
   const [rebalanceRows, setRebalanceRows] = useState<RebalanceRecommendation[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied">("idle");
+  const [symbolCopyStatus, setSymbolCopyStatus] = useState<"idle" | "copied">("idle");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [isComparingModes, setIsComparingModes] = useState(false);
@@ -1031,6 +1032,28 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
       }),
     );
     setError(null);
+  }
+
+  async function handleCopySymbols() {
+    const symbols = activeRows().map((row) => row.symbol.trim());
+
+    if (!symbols.length) {
+      setError("至少需要一個商品代號才能複製。");
+      return;
+    }
+
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("瀏覽器不支援剪貼簿 API");
+      }
+
+      await navigator.clipboard.writeText(symbols.join("\n"));
+      setSymbolCopyStatus("copied");
+      window.setTimeout(() => setSymbolCopyStatus("idle"), 2000);
+      setError(null);
+    } catch (err: unknown) {
+      setError(`商品代號複製失敗：${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   function handlePortfolioValueChange(value: number) {
@@ -1752,6 +1775,12 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
                 className="h-9 px-3 rounded-md bg-slate-950 border border-slate-700 text-[11px] font-bold text-slate-300 hover:border-cyan-600 hover:text-cyan-200"
               >
                 幣別
+              </button>
+              <button
+                onClick={handleCopySymbols}
+                className="h-9 px-3 rounded-md bg-slate-950 border border-slate-700 text-[11px] font-bold text-slate-300 hover:border-cyan-600 hover:text-cyan-200"
+              >
+                {symbolCopyStatus === "copied" ? "已複製" : "複代號"}
               </button>
             </div>
             <div className="text-right">
