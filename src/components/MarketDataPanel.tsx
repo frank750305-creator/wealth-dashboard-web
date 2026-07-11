@@ -152,6 +152,19 @@ type PlatformExceptionItem = {
   nextAction: string;
 };
 
+type SlaEscalationTier = "critical" | "review" | "routine";
+
+type SlaEscalationItem = {
+  tier: SlaEscalationTier;
+  owner: string;
+  trigger: string;
+  status: ExecutionReviewStatus;
+  priority: ExecutionHandoffPriority;
+  due: string;
+  escalationPath: string;
+  action: string;
+};
+
 const statusMeta: Record<MarketSourceStatus, { label: string; className: string }> = {
   ready: {
     label: "可接 API",
@@ -2058,6 +2071,86 @@ function buildCioOperatingBriefItems({
   ];
 }
 
+function slaEscalationTierLabel(tier: SlaEscalationTier) {
+  if (tier === "critical") return "L1 立即升級";
+  if (tier === "review") return "L2 覆核追蹤";
+  return "L3 例行追蹤";
+}
+
+function buildSlaEscalationItems({
+  platformExceptionItems,
+  cioOperatingDecision,
+  riskOwner,
+  decisionApprover,
+  slaCriticalHours,
+  slaReviewHours,
+}: {
+  platformExceptionItems: PlatformExceptionItem[];
+  cioOperatingDecision: ExecutionReviewStatus;
+  riskOwner: string;
+  decisionApprover: string;
+  slaCriticalHours: number;
+  slaReviewHours: number;
+}): SlaEscalationItem[] {
+  const cleanRiskOwner = riskOwner.trim() || "風控";
+  const cleanApprover = decisionApprover.trim() || "投委會";
+  const cleanCriticalHours = Math.max(1, Math.floor(slaCriticalHours));
+  const cleanReviewHours = Math.max(cleanCriticalHours, Math.floor(slaReviewHours));
+  const escalationItems = platformExceptionItems.map((item) => {
+    const tier: SlaEscalationTier = item.status === "block" ? "critical" : item.priority === "high" ? "critical" : "review";
+    const due = tier === "critical" ? `${cleanCriticalHours}h` : `${cleanReviewHours}h`;
+    const escalationPath = tier === "critical" ? `${item.owner} -> ${cleanApprover}` : `${item.owner} -> ${cleanRiskOwner}`;
+
+    return {
+      tier,
+      owner: item.owner,
+      trigger: `${item.source} / ${item.item}`,
+      status: item.status,
+      priority: item.priority,
+      due,
+      escalationPath,
+      action: item.nextAction,
+    };
+  });
+
+  if (escalationItems.length) {
+    return escalationItems.sort((left, right) => {
+      const tierRank: Record<SlaEscalationTier, number> = { critical: 0, review: 1, routine: 2 };
+      const priorityRank: Record<ExecutionHandoffPriority, number> = { high: 0, medium: 1, low: 2 };
+      return tierRank[left.tier] - tierRank[right.tier] || priorityRank[left.priority] - priorityRank[right.priority];
+    });
+  }
+
+  return [
+    {
+      tier: "routine",
+      owner: cleanRiskOwner,
+      trigger: "CIO 營運總覽",
+      status: cioOperatingDecision,
+      priority: cioOperatingDecision === "pass" ? "low" : "medium",
+      due: `${cleanReviewHours}h`,
+      escalationPath: `${cleanRiskOwner} -> ${cleanApprover}`,
+      action: cioOperatingDecision === "pass" ? "維持例行監控與下一輪配置檢查" : "確認觀察項目是否需要升級",
+    },
+  ];
+}
+
+function slaEscalationCsv(rows: SlaEscalationItem[]) {
+  const header = ["tier", "owner", "trigger", "priority", "due", "status", "escalation_path", "action"];
+  const csvRows = rows.map((row) => [
+    slaEscalationTierLabel(row.tier),
+    row.owner,
+    row.trigger,
+    executionHandoffPriorityLabel(row.priority),
+    row.due,
+    executionReviewLabel(row.status),
+    row.escalationPath,
+    row.action,
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
 function averageComparisonMetric(rows: AssetComparisonRow[], selector: (row: AssetComparisonRow) => number | null) {
   const values = rows.map(selector).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
   if (!values.length) return null;
@@ -2123,6 +2216,9 @@ function assetComparisonMemo(
     platformExceptionItems?: PlatformExceptionItem[];
     exceptionDueDays?: number;
     cioOperatingBriefItems?: ExecutionReviewItem[];
+    slaEscalationItems?: SlaEscalationItem[];
+    slaCriticalHours?: number;
+    slaReviewHours?: number;
   },
 ) {
   const candidateRows = rows.filter((row) => row.signal === "candidate");
@@ -2150,6 +2246,7 @@ function assetComparisonMemo(
   const memoPostTradeAttributionItems = (options.postTradeAttributionItems ?? []).slice(0, 8);
   const memoPlatformExceptionItems = (options.platformExceptionItems ?? []).slice(0, 12);
   const memoCioOperatingBriefItems = (options.cioOperatingBriefItems ?? []).slice(0, 8);
+  const memoSlaEscalationItems = (options.slaEscalationItems ?? []).slice(0, 12);
   const tableHeader = "| 商品 | 分數 | 訊號 | 年化報酬 | 年化波動 | 最大回撤 | 最新日 | 說明 |";
   const tableDivider = "|---|---:|---|---:|---:|---:|---|---|";
   const tableRows = topRows.map((row) =>
@@ -2324,6 +2421,18 @@ function assetComparisonMemo(
       markdownCell(row.note),
     ].join(" | "),
   );
+  const slaEscalationTableRows = memoSlaEscalationItems.map((row) =>
+    [
+      markdownCell(slaEscalationTierLabel(row.tier)),
+      markdownCell(row.owner),
+      markdownCell(row.trigger),
+      markdownCell(executionHandoffPriorityLabel(row.priority)),
+      markdownCell(row.due),
+      markdownCell(executionReviewLabel(row.status)),
+      markdownCell(row.escalationPath),
+      markdownCell(row.action),
+    ].join(" | "),
+  );
 
   return [
     `# ${options.name || "未命名 Watchlist"} 研究摘要`,
@@ -2339,6 +2448,13 @@ function assetComparisonMemo(
     memoCioOperatingBriefItems.length ? "| 項目 | 狀態 | 目前值 | 門檻 | 下一步 |" : "目前沒有可輸出的 CIO 營運總覽。",
     memoCioOperatingBriefItems.length ? "|---|---|---:|---|---|" : "",
     ...cioOperatingBriefTableRows.map((row) => `| ${row} |`),
+    "",
+    "## SLA 升級矩陣",
+    `- L1 時限：${options.slaCriticalHours ?? "--"}h`,
+    `- L2 時限：${options.slaReviewHours ?? "--"}h`,
+    memoSlaEscalationItems.length ? "| 層級 | 負責人 | 觸發項 | 優先級 | 時限 | 狀態 | 升級路徑 | 動作 |" : "目前沒有 SLA 升級項目。",
+    memoSlaEscalationItems.length ? "|---|---|---|---|---|---|---|---|" : "",
+    ...slaEscalationTableRows.map((row) => `| ${row} |`),
     "",
     "## 篩選概況",
     `- 顯示商品：${rows.length} / ${options.totalRows} 檔`,
@@ -2527,6 +2643,8 @@ export function MarketDataPanel() {
   const [postTradeReviewDays, setPostTradeReviewDays] = useState(5);
   const [postTradeBenchmarkMovePercent, setPostTradeBenchmarkMovePercent] = useState(0);
   const [exceptionDueDays, setExceptionDueDays] = useState(2);
+  const [slaCriticalHours, setSlaCriticalHours] = useState(24);
+  const [slaReviewHours, setSlaReviewHours] = useState(72);
   const [watchlistPresetName, setWatchlistPresetName] = useState("核心 ETF");
   const [selectedWatchlistPresetId, setSelectedWatchlistPresetId] = useState("");
   const [savedWatchlistPresets, setSavedWatchlistPresets] = useState<SavedWatchlistPreset[]>([]);
@@ -2791,6 +2909,18 @@ export function MarketDataPanel() {
     totalCashImpactAfterCost,
   });
   const cioOperatingDecision = cioOperatingBriefItems[0]?.status ?? "watch";
+  const slaEscalationItems = buildSlaEscalationItems({
+    platformExceptionItems,
+    cioOperatingDecision,
+    riskOwner,
+    decisionApprover,
+    slaCriticalHours,
+    slaReviewHours,
+  });
+  const slaCriticalCount = slaEscalationItems.filter((item) => item.tier === "critical").length;
+  const slaReviewCount = slaEscalationItems.filter((item) => item.tier === "review").length;
+  const slaEscalationDecision: ExecutionReviewStatus =
+    slaCriticalCount > 0 ? "block" : slaReviewCount > 0 || cioOperatingDecision !== "pass" ? "watch" : "pass";
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -3112,6 +3242,15 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleExportSlaEscalationCsv = () => {
+    if (!slaEscalationItems.length) return;
+
+    downloadTextFile(
+      `bigquery-sla-escalation-${resultStamp()}.csv`,
+      slaEscalationCsv(slaEscalationItems),
+      "text/csv;charset=utf-8",
+    );
+  };
   const buildAssetComparisonMemo = () =>
     assetComparisonMemo(visibleComparisonRows, {
       name: watchlistPresetName.trim() || "未命名 Watchlist",
@@ -3157,6 +3296,9 @@ export function MarketDataPanel() {
       platformExceptionItems,
       exceptionDueDays,
       cioOperatingBriefItems,
+      slaEscalationItems,
+      slaCriticalHours,
+      slaReviewHours,
     });
   const handleExportAssetComparisonMemo = () => {
     if (!visibleComparisonRows.length) return;
@@ -5466,6 +5608,110 @@ export function MarketDataPanel() {
                                       <td className="py-2 px-3 text-right font-mono text-slate-200">{item.value}</td>
                                       <td className="py-2 px-3 text-slate-400">{item.threshold}</td>
                                       <td className="py-2 px-3 text-slate-500">{item.note}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+
+                          <div className="border-t border-slate-800 pt-3 space-y-3">
+                            <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-3">
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <h5 className="text-xs font-bold text-slate-100">SLA 升級矩陣</h5>
+                                  <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(slaEscalationDecision)}`}>
+                                    {executionReviewLabel(slaEscalationDecision)}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-slate-500 mt-0.5">
+                                  將例外事項與 CIO 狀態轉成處理時限、升級路徑與責任人
+                                </p>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-[100px_100px_auto] gap-2 text-xs">
+                                <label className="space-y-1">
+                                  <span className="text-slate-500">L1 小時</span>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    max={168}
+                                    step={1}
+                                    value={slaCriticalHours}
+                                    onChange={(event) => setSlaCriticalHours(Math.min(168, Math.max(1, Math.floor(Number(event.target.value) || 1))))}
+                                    className="w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-right font-mono text-slate-100"
+                                  />
+                                </label>
+                                <label className="space-y-1">
+                                  <span className="text-slate-500">L2 小時</span>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    max={336}
+                                    step={1}
+                                    value={slaReviewHours}
+                                    onChange={(event) => setSlaReviewHours(Math.min(336, Math.max(1, Math.floor(Number(event.target.value) || 1))))}
+                                    className="w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-right font-mono text-slate-100"
+                                  />
+                                </label>
+                                <button
+                                  onClick={handleExportSlaEscalationCsv}
+                                  disabled={!slaEscalationItems.length}
+                                  className="sm:self-end px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+                                >
+                                  SLA CSV
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                              {[
+                                ["升級項目", `${slaEscalationItems.length} 項`],
+                                ["L1 立即", `${slaCriticalCount} 項`],
+                                ["L2 覆核", `${slaReviewCount} 項`],
+                                ["升級狀態", executionReviewLabel(slaEscalationDecision)],
+                              ].map(([label, value]) => (
+                                <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 p-3 min-w-0">
+                                  <p className="text-[11px] text-slate-600 truncate">{label}</p>
+                                  <p className="mt-1 font-mono text-sm font-bold text-slate-100 truncate" title={value}>
+                                    {value}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+
+                            <div className="overflow-x-auto">
+                              <table className="w-full min-w-[1100px] text-xs">
+                                <thead>
+                                  <tr className="text-left text-[11px] text-slate-600">
+                                    <th className="py-2 px-3 font-medium">層級</th>
+                                    <th className="py-2 px-3 font-medium">負責人</th>
+                                    <th className="py-2 px-3 font-medium">觸發項</th>
+                                    <th className="py-2 px-3 font-medium text-right">優先級</th>
+                                    <th className="py-2 px-3 font-medium text-right">時限</th>
+                                    <th className="py-2 px-3 font-medium text-right">狀態</th>
+                                    <th className="py-2 px-3 font-medium">升級路徑</th>
+                                    <th className="py-2 px-3 font-medium">動作</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {slaEscalationItems.map((item) => (
+                                    <tr key={`${item.tier}-${item.trigger}-${item.owner}`} className={`border-t ${executionReviewRowClass(item.status)}`}>
+                                      <td className="py-2 px-3 font-bold text-slate-100">{slaEscalationTierLabel(item.tier)}</td>
+                                      <td className="py-2 px-3 text-slate-300">{item.owner}</td>
+                                      <td className="py-2 px-3 text-slate-200">{item.trigger}</td>
+                                      <td className="py-2 px-3 text-right">
+                                        <span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${executionHandoffPriorityClass(item.priority)}`}>
+                                          {executionHandoffPriorityLabel(item.priority)}
+                                        </span>
+                                      </td>
+                                      <td className="py-2 px-3 text-right font-mono text-slate-300">{item.due}</td>
+                                      <td className="py-2 px-3 text-right">
+                                        <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(item.status)}`}>
+                                          {executionReviewLabel(item.status)}
+                                        </span>
+                                      </td>
+                                      <td className="py-2 px-3 text-slate-400">{item.escalationPath}</td>
+                                      <td className="py-2 px-3 text-slate-500">{item.action}</td>
                                     </tr>
                                   ))}
                                 </tbody>
