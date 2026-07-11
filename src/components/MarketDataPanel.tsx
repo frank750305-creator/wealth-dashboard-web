@@ -234,6 +234,16 @@ type DataContractItem = {
   action: string;
 };
 
+type CoverageUniverseItem = {
+  label: string;
+  status: ExecutionReviewStatus;
+  count: string;
+  target: string;
+  coverage: string;
+  owner: string;
+  action: string;
+};
+
 const statusMeta: Record<MarketSourceStatus, { label: string; className: string }> = {
   ready: {
     label: "可接 API",
@@ -2824,7 +2834,102 @@ function dataContractCsv(rows: DataContractItem[]) {
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
+function buildCoverageUniverseItems({
+  diagnostics,
+  staleSymbols,
+  fxCurrencies,
+  symbolCoverageStatus,
+  priceDepthStatus,
+  fxCurrencyStatus,
+  riskOwner,
+}: {
+  diagnostics?: BigQueryMarketDiagnostics;
+  staleSymbols: BigQueryStaleSymbol[];
+  fxCurrencies: BigQueryFxCurrency[];
+  symbolCoverageStatus: QualityStatus;
+  priceDepthStatus: QualityStatus;
+  fxCurrencyStatus: QualityStatus;
+  riskOwner: string;
+}): CoverageUniverseItem[] {
+  const cleanRiskOwner = riskOwner.trim() || "風控";
+  if (!diagnostics) return [];
+
+  const staleStatus: ExecutionReviewStatus = staleSymbols.length >= 5 ? "block" : staleSymbols.length > 0 ? "watch" : "pass";
+  const staleCoverage = staleSymbols.length
+    ? staleSymbols
+        .slice(0, 5)
+        .map((symbol) => `${symbol.symbol}:${symbol.stale_days ?? daysSinceDate(symbol.latest_date) ?? "--"}d`)
+        .join(", ")
+    : "未偵測到落後商品";
+  const fxCoverage = fxCurrencies.length
+    ? fxCurrencies
+        .slice(0, 8)
+        .map((currency) => currency.currency)
+        .join(", ")
+    : "--";
+
+  return [
+    {
+      label: "可分析商品宇宙",
+      status: qualityToExecutionStatus(symbolCoverageStatus),
+      count: `${formatCount(diagnostics.priceSummary.symbol_count)} 檔`,
+      target: "50 檔以上進入研究池",
+      coverage: `${formatCount(diagnostics.recentSymbols.length)} 檔近期樣本`,
+      owner: cleanRiskOwner,
+      action:
+        symbolCoverageStatus === "risk"
+          ? "先補商品清單與價格匯入，避免研究池過窄"
+          : symbolCoverageStatus === "watch"
+            ? "擴充 ETF / 股票 / 債券商品清單"
+            : "可支援第一版研究宇宙",
+    },
+    {
+      label: "歷史價格深度",
+      status: qualityToExecutionStatus(priceDepthStatus),
+      count: `${formatCount(diagnostics.priceSummary.row_count)} 筆`,
+      target: "50,000 筆以上支援回測",
+      coverage: `${diagnostics.priceSummary.first_date ?? "--"} ~ ${diagnostics.priceSummary.latest_date ?? "--"}`,
+      owner: cleanRiskOwner,
+      action: priceDepthStatus === "risk" ? "重新跑歷史價格 backfill" : "歷史深度可支援目前分析",
+    },
+    {
+      label: "落後商品清理",
+      status: staleStatus,
+      count: `${staleSymbols.length} 檔`,
+      target: "落後商品 0 檔",
+      coverage: staleCoverage,
+      owner: cleanRiskOwner,
+      action: staleSymbols.length ? "優先補跑落後商品，避免模型拿到過期價格" : "維持每日批次監控",
+    },
+    {
+      label: "跨幣別覆蓋",
+      status: qualityToExecutionStatus(fxCurrencyStatus),
+      count: `${fxCurrencies.length} 組`,
+      target: "至少 2 組主要幣別",
+      coverage: fxCoverage,
+      owner: cleanRiskOwner,
+      action: fxCurrencyStatus === "risk" ? "補齊 daily_fx 幣別與歷史資料" : "可支援基本跨幣別換算",
+    },
+  ];
+}
+
+function coverageUniverseCsv(rows: CoverageUniverseItem[]) {
+  const header = ["label", "status", "count", "target", "coverage", "owner", "action"];
+  const csvRows = rows.map((row) => [
+    row.label,
+    executionReviewLabel(row.status),
+    row.count,
+    row.target,
+    row.coverage,
+    row.owner,
+    row.action,
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
 function buildMarketAlertEvents({
+  coverageUniverseItems,
   dataContractItems,
   dataPipelineHealthItems,
   qualityCards,
@@ -2835,6 +2940,7 @@ function buildMarketAlertEvents({
   riskOwner,
   decisionApprover,
 }: {
+  coverageUniverseItems: CoverageUniverseItem[];
   dataContractItems: DataContractItem[];
   dataPipelineHealthItems: DataPipelineHealthItem[];
   qualityCards: Array<{ label: string; value: string; status: QualityStatus; note: string }>;
@@ -2847,6 +2953,17 @@ function buildMarketAlertEvents({
 }): MarketAlertEvent[] {
   const cleanRiskOwner = riskOwner.trim() || "風控";
   const cleanApprover = decisionApprover.trim() || "投委會";
+  const coverageAlerts = coverageUniverseItems
+    .filter((item) => item.status !== "pass")
+    .map((item) => ({
+      source: "可投資宇宙",
+      title: item.label,
+      status: item.status,
+      priority: marketAlertPriorityFromStatus(item.status),
+      owner: item.owner,
+      evidence: `${item.count} / ${item.target}`,
+      action: item.action,
+    }));
   const contractAlerts = dataContractItems
     .filter((item) => item.status !== "pass")
     .map((item) => ({
@@ -2929,7 +3046,7 @@ function buildMarketAlertEvents({
   const priorityRank: Record<ExecutionHandoffPriority, number> = { high: 0, medium: 1, low: 2 };
   const statusRank: Record<ExecutionReviewStatus, number> = { block: 0, watch: 1, pass: 2 };
 
-  return [...contractAlerts, ...pipelineAlerts, ...dataAlerts, ...funnelAlerts, ...kriAlerts, ...slaAlerts, ...exceptionAlerts]
+  return [...coverageAlerts, ...contractAlerts, ...pipelineAlerts, ...dataAlerts, ...funnelAlerts, ...kriAlerts, ...slaAlerts, ...exceptionAlerts]
     .sort(
       (left, right) =>
         priorityRank[left.priority] - priorityRank[right.priority] ||
@@ -3030,6 +3147,7 @@ function assetComparisonMemo(
     dataPipelineTableSnapshots?: DataPipelineTableSnapshot[];
     dataPipelineGeneratedAt?: string;
     dataContractItems?: DataContractItem[];
+    coverageUniverseItems?: CoverageUniverseItem[];
   },
 ) {
   const candidateRows = rows.filter((row) => row.signal === "candidate");
@@ -3064,6 +3182,7 @@ function assetComparisonMemo(
   const memoDataPipelineHealthItems = (options.dataPipelineHealthItems ?? []).slice(0, 12);
   const memoDataPipelineTableSnapshots = (options.dataPipelineTableSnapshots ?? []).slice(0, 6);
   const memoDataContractItems = (options.dataContractItems ?? []).slice(0, 8);
+  const memoCoverageUniverseItems = (options.coverageUniverseItems ?? []).slice(0, 8);
   const tableHeader = "| 商品 | 分數 | 訊號 | 年化報酬 | 年化波動 | 最大回撤 | 最新日 | 說明 |";
   const tableDivider = "|---|---:|---|---:|---:|---:|---|---|";
   const tableRows = topRows.map((row) =>
@@ -3314,6 +3433,17 @@ function assetComparisonMemo(
       markdownCell(row.action),
     ].join(" | "),
   );
+  const coverageUniverseTableRows = memoCoverageUniverseItems.map((row) =>
+    [
+      markdownCell(row.label),
+      markdownCell(executionReviewLabel(row.status)),
+      markdownCell(row.count),
+      markdownCell(row.target),
+      markdownCell(row.coverage),
+      markdownCell(row.owner),
+      markdownCell(row.action),
+    ].join(" | "),
+  );
 
   return [
     `# ${options.name || "未命名 Watchlist"} 研究摘要`,
@@ -3365,6 +3495,11 @@ function assetComparisonMemo(
     memoDataContractItems.length ? "| 資料表 | 層級 | 狀態 | 欄位覆蓋 | 缺欄位 | 新鮮度 | 資料量 | 動作 |" : "目前沒有可輸出的資料合約。",
     memoDataContractItems.length ? "|---|---|---|---:|---|---:|---:|---|" : "",
     ...dataContractTableRows.map((row) => `| ${row} |`),
+    "",
+    "## 可投資宇宙覆蓋",
+    memoCoverageUniverseItems.length ? "| 項目 | 狀態 | 數量 | 目標 | 覆蓋 | 負責人 | 動作 |" : "目前沒有可輸出的可投資宇宙資料。",
+    memoCoverageUniverseItems.length ? "|---|---|---:|---|---|---|---|" : "",
+    ...coverageUniverseTableRows.map((row) => `| ${row} |`),
     "",
     "## 篩選概況",
     `- 顯示商品：${rows.length} / ${options.totalRows} 檔`,
@@ -3859,6 +3994,20 @@ export function MarketDataPanel() {
   const dataContractDecision = dataContractItems.length
     ? combinedExecutionStatus(dataContractItems.map((item) => item.status))
     : "watch";
+  const coverageUniverseItems = buildCoverageUniverseItems({
+    diagnostics: bigQueryDiagnostics ?? undefined,
+    staleSymbols,
+    fxCurrencies,
+    symbolCoverageStatus,
+    priceDepthStatus,
+    fxCurrencyStatus,
+    riskOwner,
+  });
+  const coverageUniverseBlockCount = coverageUniverseItems.filter((item) => item.status === "block").length;
+  const coverageUniverseWatchCount = coverageUniverseItems.filter((item) => item.status === "watch").length;
+  const coverageUniverseDecision = coverageUniverseItems.length
+    ? combinedExecutionStatus(coverageUniverseItems.map((item) => item.status))
+    : "watch";
   const candidateVisibleCount = visibleComparisonRows.filter((row) => row.signal === "candidate").length;
   const cioOperatingBriefItems = buildCioOperatingBriefItems({
     dataStatus: dataReadinessDecision,
@@ -3933,6 +4082,7 @@ export function MarketDataPanel() {
   const decisionFunnelWatchCount = decisionFunnelStages.filter((stage) => stage.status === "watch").length;
   const decisionFunnelDecision = combinedExecutionStatus(decisionFunnelStages.map((stage) => stage.status));
   const marketAlertEvents = buildMarketAlertEvents({
+    coverageUniverseItems,
     dataContractItems,
     dataPipelineHealthItems,
     qualityCards,
@@ -4084,6 +4234,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `bigquery-data-contracts-${resultStamp()}.csv`,
       dataContractCsv(dataContractItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportCoverageUniverseCsv = () => {
+    if (!coverageUniverseItems.length) return;
+
+    downloadTextFile(
+      `bigquery-coverage-universe-${resultStamp()}.csv`,
+      coverageUniverseCsv(coverageUniverseItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -4381,6 +4540,7 @@ export function MarketDataPanel() {
       dataPipelineTableSnapshots,
       dataPipelineGeneratedAt: bigQueryDiagnostics?.generatedAt,
       dataContractItems,
+      coverageUniverseItems,
     });
   const handleExportAssetComparisonMemo = () => {
     if (!visibleComparisonRows.length) return;
@@ -4821,6 +4981,79 @@ export function MarketDataPanel() {
                 ) : (
                   <div className="rounded-md border border-dashed border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-500">
                     讀取 BigQuery 診斷後，這裡會顯示資料表欄位合約。
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-slate-800 pt-3 space-y-3">
+                <div className="flex flex-col md:flex-row md:items-end justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="text-xs font-bold text-slate-100">可投資宇宙覆蓋</h4>
+                      <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(coverageUniverseDecision)}`}>
+                        {executionReviewLabel(coverageUniverseDecision)}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-[11px] text-slate-500">
+                      把商品數、歷史價格深度、落後商品與匯率幣別整理成研究宇宙上線條件
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-end gap-2 text-xs">
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        ["暫停", `${coverageUniverseBlockCount}`],
+                        ["觀察", `${coverageUniverseWatchCount}`],
+                      ].map(([label, value]) => (
+                        <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 px-3 py-2 text-right">
+                          <p className="text-[10px] text-slate-600">{label}</p>
+                          <p className="mt-0.5 font-mono font-bold text-slate-100">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      onClick={handleExportCoverageUniverseCsv}
+                      disabled={!coverageUniverseItems.length}
+                      className="px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+                    >
+                      宇宙 CSV
+                    </button>
+                  </div>
+                </div>
+
+                {coverageUniverseItems.length ? (
+                  <div className="overflow-x-auto rounded-lg border border-slate-800">
+                    <table className="w-full min-w-[1040px] text-xs">
+                      <thead className="bg-slate-900/80">
+                        <tr className="text-left text-[11px] text-slate-600">
+                          <th className="py-2 px-3 font-medium">項目</th>
+                          <th className="py-2 px-3 font-medium text-right">狀態</th>
+                          <th className="py-2 px-3 font-medium text-right">數量</th>
+                          <th className="py-2 px-3 font-medium">目標</th>
+                          <th className="py-2 px-3 font-medium">覆蓋</th>
+                          <th className="py-2 px-3 font-medium">動作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {coverageUniverseItems.map((item) => (
+                          <tr key={item.label} className={`border-t ${executionReviewRowClass(item.status)}`}>
+                            <td className="py-2 px-3 font-bold text-slate-100">{item.label}</td>
+                            <td className="py-2 px-3 text-right">
+                              <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(item.status)}`}>
+                                {executionReviewLabel(item.status)}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-right font-mono text-slate-200">{item.count}</td>
+                            <td className="py-2 px-3 text-slate-400">{item.target}</td>
+                            <td className="py-2 px-3 text-slate-400">{item.coverage}</td>
+                            <td className="py-2 px-3 text-slate-500">{item.action}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-dashed border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-500">
+                    讀取 BigQuery 診斷後，這裡會顯示可投資宇宙覆蓋狀態。
                   </div>
                 )}
               </div>
