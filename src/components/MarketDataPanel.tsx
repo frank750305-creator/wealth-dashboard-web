@@ -1724,6 +1724,104 @@ function executionFillCsv(rows: ExecutionFillRow[]) {
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
+function postTradeAttributionItems({
+  executionFillRows,
+  allocationCapital,
+  postTradeReviewDays,
+  postTradeBenchmarkMovePercent,
+}: {
+  executionFillRows: ExecutionFillRow[];
+  allocationCapital: number;
+  postTradeReviewDays: number;
+  postTradeBenchmarkMovePercent: number;
+}): ExecutionReviewItem[] {
+  const targetNotional = executionFillRows.reduce((sum, row) => sum + row.ticketAmount, 0);
+  const filledNotional = executionFillRows.reduce((sum, row) => sum + row.filledNotional, 0);
+  const unfilledNotional = executionFillRows.reduce((sum, row) => sum + row.unfilledNotional, 0);
+  const totalCost = executionFillRows.reduce((sum, row) => sum + row.totalCost, 0);
+  const cashImpactAfterCost = executionFillRows.reduce((sum, row) => sum + row.cashImpactAfterCost, 0);
+  const completionRate = targetNotional > 0 ? filledNotional / targetNotional : null;
+  const unfilledRatio = targetNotional > 0 ? unfilledNotional / targetNotional : null;
+  const costBps = filledNotional > 0 ? (totalCost / filledNotional) * 10_000 : null;
+  const cashImpactRatio = allocationCapital > 0 ? Math.abs(cashImpactAfterCost) / allocationCapital : null;
+  const benchmarkMove = postTradeBenchmarkMovePercent / 100;
+  const residualMarketImpact = unfilledNotional * benchmarkMove;
+  const residualMarketImpactRatio = allocationCapital > 0 ? Math.abs(residualMarketImpact) / allocationCapital : null;
+  const completionStatus: ExecutionReviewStatus =
+    completionRate === null ? "block" : completionRate < 0.8 ? "block" : completionRate < 1 ? "watch" : "pass";
+  const unfilledStatus: ExecutionReviewStatus =
+    unfilledRatio === null ? "watch" : unfilledRatio > 0.2 ? "block" : unfilledRatio > 0.05 ? "watch" : "pass";
+  const costStatus: ExecutionReviewStatus =
+    costBps === null ? "watch" : costBps > 35 ? "block" : costBps > 20 ? "watch" : "pass";
+  const cashStatus: ExecutionReviewStatus =
+    cashImpactRatio === null ? "watch" : cashImpactRatio > 0.3 ? "block" : cashImpactRatio > 0.15 ? "watch" : "pass";
+  const residualStatus: ExecutionReviewStatus =
+    residualMarketImpactRatio === null ? "watch" : residualMarketImpactRatio > 0.08 ? "block" : residualMarketImpactRatio > 0.03 ? "watch" : "pass";
+
+  return [
+    {
+      label: "成交完成率",
+      status: completionStatus,
+      value: `${formatCurrency(filledNotional)} / ${formatPercent(completionRate)}`,
+      threshold: "100% 通過，80% 以下暫停",
+      note:
+        completionStatus === "block"
+          ? "成交不足，需重新排程或檢討流動性"
+          : completionStatus === "watch"
+            ? "仍有未成交部位，需列入復盤"
+            : "交易清單已完整成交",
+    },
+    {
+      label: "未成交殘單",
+      status: unfilledStatus,
+      value: `${formatCurrency(unfilledNotional)} / ${formatPercent(unfilledRatio)}`,
+      threshold: "殘單低於交易金額 5% 為佳",
+      note:
+        unfilledStatus === "block"
+          ? "殘單比例偏高，可能影響模型配置落地"
+          : unfilledStatus === "watch"
+            ? "有少量殘單，需決定補單或取消"
+            : "沒有明顯殘單",
+    },
+    {
+      label: "交易成本",
+      status: costStatus,
+      value: `${formatCurrency(totalCost)} / ${formatBps(costBps)}`,
+      threshold: "20 bps 內通過，35 bps 以上暫停",
+      note:
+        costStatus === "block"
+          ? "交易成本偏高，需要檢討執行方式"
+          : costStatus === "watch"
+            ? "成本略高，需保留交易理由"
+            : "成本在目前門檻內",
+    },
+    {
+      label: "成交後現金偏差",
+      status: cashStatus,
+      value: `${formatCurrency(cashImpactAfterCost)} / ${formatPercent(cashImpactRatio)}`,
+      threshold: "低於模型本金 15% 為佳",
+      note:
+        cashStatus === "block"
+          ? "成交後現金影響過大，需重新檢查資金安排"
+          : cashStatus === "watch"
+            ? "現金影響需在下次復盤確認"
+            : "成交後現金影響在目前門檻內",
+    },
+    {
+      label: "未成交市場曝險",
+      status: residualStatus,
+      value: `${formatCurrency(residualMarketImpact)} / ${formatPercent(residualMarketImpactRatio)}`,
+      threshold: `T+${Math.max(1, postTradeReviewDays)} 市場變動假設 ${formatPercent(benchmarkMove)}`,
+      note:
+        residualStatus === "block"
+          ? "未成交部位的市場變動影響偏高，需優先檢討"
+          : residualStatus === "watch"
+            ? "未成交曝險需列入復盤紀錄"
+            : "未成交曝險在目前門檻內",
+    },
+  ];
+}
+
 function averageComparisonMetric(rows: AssetComparisonRow[], selector: (row: AssetComparisonRow) => number | null) {
   const values = rows.map(selector).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
   if (!values.length) return null;
@@ -1783,6 +1881,9 @@ function assetComparisonMemo(
     fillCompletionPercent?: number;
     fillSlippageBps?: number;
     fillCommissionBps?: number;
+    postTradeAttributionItems?: ExecutionReviewItem[];
+    postTradeReviewDays?: number;
+    postTradeBenchmarkMovePercent?: number;
   },
 ) {
   const candidateRows = rows.filter((row) => row.signal === "candidate");
@@ -1807,6 +1908,7 @@ function assetComparisonMemo(
   const memoDecisionAuditRecords = (options.decisionAuditRecords ?? []).slice(0, 12);
   const memoExecutionHandoffItems = (options.executionHandoffItems ?? []).slice(0, 8);
   const memoExecutionFillRows = (options.executionFillRows ?? []).slice(0, 8);
+  const memoPostTradeAttributionItems = (options.postTradeAttributionItems ?? []).slice(0, 8);
   const tableHeader = "| 商品 | 分數 | 訊號 | 年化報酬 | 年化波動 | 最大回撤 | 最新日 | 說明 |";
   const tableDivider = "|---|---:|---|---:|---:|---:|---|---|";
   const tableRows = topRows.map((row) =>
@@ -1951,6 +2053,15 @@ function assetComparisonMemo(
       markdownCell(row.fillNote),
     ].join(" | "),
   );
+  const postTradeAttributionTableRows = memoPostTradeAttributionItems.map((row) =>
+    [
+      markdownCell(row.label),
+      markdownCell(executionReviewLabel(row.status)),
+      markdownCell(row.value),
+      markdownCell(row.threshold),
+      markdownCell(row.note),
+    ].join(" | "),
+  );
 
   return [
     `# ${options.name || "未命名 Watchlist"} 研究摘要`,
@@ -2056,6 +2167,13 @@ function assetComparisonMemo(
     memoExecutionFillRows.length ? "|---|---|---:|---:|---:|---:|---:|---|---|" : "",
     ...executionFillTableRows.map((row) => `| ${row} |`),
     "",
+    "## 交易後績效歸因",
+    `- 復盤天數：T+${options.postTradeReviewDays ?? "--"}`,
+    `- 市場變動假設：${options.postTradeBenchmarkMovePercent ?? "--"}%`,
+    memoPostTradeAttributionItems.length ? "| 項目 | 狀態 | 目前值 | 門檻 | 說明 |" : "目前沒有可輸出的交易後績效歸因。",
+    memoPostTradeAttributionItems.length ? "|---|---|---:|---|---|" : "",
+    ...postTradeAttributionTableRows.map((row) => `| ${row} |`),
+    "",
     "## 需要複核的風險",
     reviewRows.length ? "| 商品 | 分數 | 訊號 | 品質 | 最新日 | 距今天 | 說明 |" : "目前篩選結果未偵測到明確風險。",
     reviewRows.length ? "|---|---:|---|---|---|---:|---|" : "",
@@ -2133,6 +2251,8 @@ export function MarketDataPanel() {
   const [fillCompletionPercent, setFillCompletionPercent] = useState(100);
   const [fillSlippageBps, setFillSlippageBps] = useState(8);
   const [fillCommissionBps, setFillCommissionBps] = useState(3);
+  const [postTradeReviewDays, setPostTradeReviewDays] = useState(5);
+  const [postTradeBenchmarkMovePercent, setPostTradeBenchmarkMovePercent] = useState(0);
   const [watchlistPresetName, setWatchlistPresetName] = useState("核心 ETF");
   const [selectedWatchlistPresetId, setSelectedWatchlistPresetId] = useState("");
   const [savedWatchlistPresets, setSavedWatchlistPresets] = useState<SavedWatchlistPreset[]>([]);
@@ -2342,6 +2462,16 @@ export function MarketDataPanel() {
   const totalUnfilledNotional = executionFillRows.reduce((sum, row) => sum + row.unfilledNotional, 0);
   const totalExecutionCost = executionFillRows.reduce((sum, row) => sum + row.totalCost, 0);
   const totalCashImpactAfterCost = executionFillRows.reduce((sum, row) => sum + row.cashImpactAfterCost, 0);
+  const postTradeAttributionRows = postTradeAttributionItems({
+    executionFillRows,
+    allocationCapital,
+    postTradeReviewDays,
+    postTradeBenchmarkMovePercent,
+  });
+  const postTradeBlockCount = postTradeAttributionRows.filter((item) => item.status === "block").length;
+  const postTradeWatchCount = postTradeAttributionRows.filter((item) => item.status === "watch").length;
+  const postTradeDecision: ExecutionReviewStatus = postTradeBlockCount > 0 ? "block" : postTradeWatchCount > 0 ? "watch" : "pass";
+  const postTradeResidualMarketImpact = totalUnfilledNotional * (postTradeBenchmarkMovePercent / 100);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -2636,6 +2766,15 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleExportPostTradeAttributionCsv = () => {
+    if (!postTradeAttributionRows.length) return;
+
+    downloadTextFile(
+      `bigquery-post-trade-attribution-${resultStamp()}.csv`,
+      executionReviewCsv(postTradeAttributionRows),
+      "text/csv;charset=utf-8",
+    );
+  };
   const buildAssetComparisonMemo = () =>
     assetComparisonMemo(visibleComparisonRows, {
       name: watchlistPresetName.trim() || "未命名 Watchlist",
@@ -2675,6 +2814,9 @@ export function MarketDataPanel() {
       fillCompletionPercent,
       fillSlippageBps,
       fillCommissionBps,
+      postTradeAttributionItems: postTradeAttributionRows,
+      postTradeReviewDays,
+      postTradeBenchmarkMovePercent,
     });
   const handleExportAssetComparisonMemo = () => {
     if (!visibleComparisonRows.length) return;
@@ -4721,6 +4863,103 @@ export function MarketDataPanel() {
                                         </span>
                                       </td>
                                       <td className="py-2 px-3 text-slate-500">{row.fillNote}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+
+                          <div className="border-t border-slate-800 pt-3 space-y-3">
+                            <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-3">
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <h5 className="text-xs font-bold text-slate-100">交易後績效歸因</h5>
+                                  <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(postTradeDecision)}`}>
+                                    {executionReviewLabel(postTradeDecision)}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-slate-500 mt-0.5">
+                                  將成交率、殘單、成本、現金偏差與未成交市場曝險整理成復盤指標
+                                </p>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-[120px_140px_auto] gap-2 text-xs">
+                                <label className="space-y-1">
+                                  <span className="text-slate-500">復盤天數</span>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    max={60}
+                                    step={1}
+                                    value={postTradeReviewDays}
+                                    onChange={(event) => setPostTradeReviewDays(Math.min(60, Math.max(1, Math.floor(Number(event.target.value) || 1))))}
+                                    className="w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-right font-mono text-slate-100"
+                                  />
+                                </label>
+                                <label className="space-y-1">
+                                  <span className="text-slate-500">市場變動 %</span>
+                                  <input
+                                    type="number"
+                                    min={-30}
+                                    max={30}
+                                    step={0.5}
+                                    value={postTradeBenchmarkMovePercent}
+                                    onChange={(event) => {
+                                      const nextValue = Number(event.target.value);
+                                      setPostTradeBenchmarkMovePercent(Math.min(30, Math.max(-30, Number.isFinite(nextValue) ? nextValue : 0)));
+                                    }}
+                                    className="w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-right font-mono text-slate-100"
+                                  />
+                                </label>
+                                <button
+                                  onClick={handleExportPostTradeAttributionCsv}
+                                  disabled={!postTradeAttributionRows.length}
+                                  className="sm:self-end px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+                                >
+                                  歸因 CSV
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                              {[
+                                ["復盤狀態", executionReviewLabel(postTradeDecision)],
+                                ["阻擋 / 觀察", `${postTradeBlockCount} / ${postTradeWatchCount}`],
+                                ["殘單曝險", formatCurrency(postTradeResidualMarketImpact)],
+                                ["復盤週期", `T+${postTradeReviewDays}`],
+                              ].map(([label, value]) => (
+                                <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 p-3 min-w-0">
+                                  <p className="text-[11px] text-slate-600 truncate">{label}</p>
+                                  <p className="mt-1 font-mono text-sm font-bold text-slate-100 truncate" title={value}>
+                                    {value}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+
+                            <div className="overflow-x-auto">
+                              <table className="w-full min-w-[980px] text-xs">
+                                <thead>
+                                  <tr className="text-left text-[11px] text-slate-600">
+                                    <th className="py-2 px-3 font-medium">項目</th>
+                                    <th className="py-2 px-3 font-medium text-right">狀態</th>
+                                    <th className="py-2 px-3 font-medium text-right">目前值</th>
+                                    <th className="py-2 px-3 font-medium">門檻</th>
+                                    <th className="py-2 px-3 font-medium">說明</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {postTradeAttributionRows.map((item) => (
+                                    <tr key={item.label} className={`border-t ${executionReviewRowClass(item.status)}`}>
+                                      <td className="py-2 px-3 font-bold text-slate-100">{item.label}</td>
+                                      <td className="py-2 px-3 text-right">
+                                        <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(item.status)}`}>
+                                          {executionReviewLabel(item.status)}
+                                        </span>
+                                      </td>
+                                      <td className="py-2 px-3 text-right font-mono text-slate-200">{item.value}</td>
+                                      <td className="py-2 px-3 text-slate-400">{item.threshold}</td>
+                                      <td className="py-2 px-3 text-slate-500">{item.note}</td>
                                     </tr>
                                   ))}
                                 </tbody>
