@@ -1085,6 +1085,96 @@ function tradeMonitoringRuleItems({
   ];
 }
 
+function investmentPolicyLimitItems({
+  allocationRows,
+  allocationRisk,
+  tradeTickets,
+  allocationCapital,
+  priceFreshnessDays,
+  policyMaxSingleWeightPercent,
+  policyMaxVolatilityPercent,
+  policyMaxDrawdownPercent,
+  policyMinimumScore,
+}: {
+  allocationRows: AllocationDraftRow[];
+  allocationRisk: AllocationRiskSnapshot;
+  tradeTickets: TradeTicketRow[];
+  allocationCapital: number;
+  priceFreshnessDays: number | null;
+  policyMaxSingleWeightPercent: number;
+  policyMaxVolatilityPercent: number;
+  policyMaxDrawdownPercent: number;
+  policyMinimumScore: number;
+}): ExecutionReviewItem[] {
+  const maxSingleWeight = Math.max(0, policyMaxSingleWeightPercent) / 100;
+  const maxVolatility = Math.max(0, policyMaxVolatilityPercent) / 100;
+  const drawdownLimit = -Math.max(0.01, Math.abs(policyMaxDrawdownPercent) / 100);
+  const maxWeight = maximumFiniteValue(allocationRows.map((row) => row.allocationWeight));
+  const maxWeightRow = allocationRows.find((row) => row.allocationWeight === maxWeight);
+  const minScore = minimumFiniteValue(allocationRows.map((row) => row.score));
+  const grossTradeAmount = tradeTickets.reduce((sum, row) => sum + row.ticketAmount, 0);
+  const grossTradeRatio = allocationCapital > 0 ? grossTradeAmount / allocationCapital : null;
+  const volatility = allocationRisk.estimatedAnnualVolatility;
+  const weightedDrawdown = allocationRisk.weightedMaxDrawdown;
+  const weightStatus: ExecutionReviewStatus =
+    maxWeight === null ? "watch" : maxWeight <= maxSingleWeight ? "pass" : maxWeight <= maxSingleWeight * 1.15 ? "watch" : "block";
+  const volatilityStatus: ExecutionReviewStatus =
+    volatility === null ? "watch" : volatility <= maxVolatility ? "pass" : volatility <= maxVolatility * 1.2 ? "watch" : "block";
+  const drawdownStatus: ExecutionReviewStatus =
+    weightedDrawdown === null ? "watch" : weightedDrawdown >= drawdownLimit ? "pass" : weightedDrawdown >= drawdownLimit * 1.15 ? "watch" : "block";
+  const scoreStatus: ExecutionReviewStatus =
+    minScore === null ? "watch" : minScore >= policyMinimumScore ? "pass" : minScore >= policyMinimumScore - 5 ? "watch" : "block";
+  const turnoverStatus: ExecutionReviewStatus =
+    grossTradeRatio === null ? "watch" : grossTradeRatio <= 0.5 ? "pass" : grossTradeRatio <= 0.8 ? "watch" : "block";
+  const freshnessStatusValue: ExecutionReviewStatus =
+    priceFreshnessDays === null ? "watch" : priceFreshnessDays <= 3 ? "pass" : priceFreshnessDays <= 10 ? "watch" : "block";
+
+  return [
+    {
+      label: "單檔權重上限",
+      status: weightStatus,
+      value: `${maxWeightRow?.symbol ?? "--"} / ${formatPercent(maxWeight)}`,
+      threshold: `不得高於 ${formatPercent(maxSingleWeight)}`,
+      note: weightStatus === "block" ? "單檔權重超出政策限制，需重跑配置或降低上限" : "檢查模型配置是否過度集中",
+    },
+    {
+      label: "年化波動上限",
+      status: volatilityStatus,
+      value: formatPercent(volatility),
+      threshold: `不得高於 ${formatPercent(maxVolatility)}`,
+      note: volatilityStatus === "block" ? "預估波動超出政策限制，需降低風險資產比重" : "使用配置草稿的預估年化波動",
+    },
+    {
+      label: "回撤限制",
+      status: drawdownStatus,
+      value: formatPercent(weightedDrawdown),
+      threshold: `不得低於 ${formatPercent(drawdownLimit)}`,
+      note: drawdownStatus === "block" ? "加權回撤超出政策限制，需調整候選資產" : "使用配置草稿的加權最大回撤",
+    },
+    {
+      label: "最低模型分數",
+      status: scoreStatus,
+      value: minScore === null ? "--" : String(minScore),
+      threshold: `不得低於 ${policyMinimumScore}`,
+      note: scoreStatus === "block" ? "低分標的不應納入政策組合" : "確認配置內商品分數符合政策底線",
+    },
+    {
+      label: "換手限制",
+      status: turnoverStatus,
+      value: `${formatCurrency(grossTradeAmount)} / ${formatPercent(grossTradeRatio)}`,
+      threshold: "總交易額低於模型本金 50% 為佳",
+      note: turnoverStatus === "block" ? "交易幅度過大，建議分批或降低調倉強度" : "用總交易額估算本次調倉強度",
+    },
+    {
+      label: "資料新鮮度",
+      status: freshnessStatusValue,
+      value: priceFreshnessDays === null ? "--" : `${priceFreshnessDays} 天`,
+      threshold: "3 天內通過，10 天內觀察",
+      note: freshnessStatusValue === "block" ? "資料過舊，不應作為正式政策簽核依據" : "確認 BigQuery daily_prices 已足夠接近交易日",
+    },
+  ];
+}
+
 function committeeDecisionLabel(decision: CommitteeDecision) {
   if (decision === "approve") return "可執行";
   if (decision === "conditional") return "條件執行";
@@ -1101,13 +1191,16 @@ function committeeDecisionFromItems({
   tradeTickets,
   executionReviewItems,
   monitoringRules,
+  policyLimitItems,
 }: {
   tradeTickets: TradeTicketRow[];
   executionReviewItems: ExecutionReviewItem[];
   monitoringRules: ExecutionReviewItem[];
+  policyLimitItems: ExecutionReviewItem[];
 }): CommitteeDecision {
-  const hasBlock = [...executionReviewItems, ...monitoringRules].some((item) => item.status === "block");
-  const hasWatch = [...executionReviewItems, ...monitoringRules].some((item) => item.status === "watch");
+  const allReviewItems = [...policyLimitItems, ...executionReviewItems, ...monitoringRules];
+  const hasBlock = allReviewItems.some((item) => item.status === "block");
+  const hasWatch = allReviewItems.some((item) => item.status === "watch");
 
   if (!tradeTickets.length || hasBlock) return "hold";
   if (hasWatch) return "conditional";
@@ -1120,6 +1213,7 @@ function committeeApprovalChecklist({
   tradeBatches,
   executionReviewItems,
   monitoringRules,
+  policyLimitItems,
   allocationRisk,
   allocationCapital,
   skippedTradeCount,
@@ -1129,11 +1223,12 @@ function committeeApprovalChecklist({
   tradeBatches: TradeBatchRow[];
   executionReviewItems: ExecutionReviewItem[];
   monitoringRules: ExecutionReviewItem[];
+  policyLimitItems: ExecutionReviewItem[];
   allocationRisk: AllocationRiskSnapshot;
   allocationCapital: number;
   skippedTradeCount: number;
 }): ExecutionReviewItem[] {
-  const allReviewItems = [...executionReviewItems, ...monitoringRules];
+  const allReviewItems = [...policyLimitItems, ...executionReviewItems, ...monitoringRules];
   const blockCount = allReviewItems.filter((item) => item.status === "block").length;
   const watchCount = allReviewItems.filter((item) => item.status === "watch").length;
   const batchCount = tradeBatches.reduce((maxValue, row) => Math.max(maxValue, row.batchNumber), 0);
@@ -1253,6 +1348,11 @@ function assetComparisonMemo(
     monitoringRules?: ExecutionReviewItem[];
     monitoringHorizonDays?: number;
     monitoringDrawdownAlertPercent?: number;
+    policyLimitItems?: ExecutionReviewItem[];
+    policyMaxSingleWeightPercent?: number;
+    policyMaxVolatilityPercent?: number;
+    policyMaxDrawdownPercent?: number;
+    policyMinimumScore?: number;
     committeeDecision?: CommitteeDecision;
     committeeApprovalItems?: ExecutionReviewItem[];
   },
@@ -1274,6 +1374,7 @@ function assetComparisonMemo(
   const memoTradeBatches = (options.tradeBatches ?? []).slice(0, 10);
   const memoExecutionReviewItems = (options.executionReviewItems ?? []).slice(0, 8);
   const memoMonitoringRules = (options.monitoringRules ?? []).slice(0, 8);
+  const memoPolicyLimitItems = (options.policyLimitItems ?? []).slice(0, 8);
   const memoCommitteeApprovalItems = (options.committeeApprovalItems ?? []).slice(0, 8);
   const tableHeader = "| 商品 | 分數 | 訊號 | 年化報酬 | 年化波動 | 最大回撤 | 最新日 | 說明 |";
   const tableDivider = "|---|---:|---|---:|---:|---:|---|---|";
@@ -1370,6 +1471,15 @@ function assetComparisonMemo(
       markdownCell(row.note),
     ].join(" | "),
   );
+  const policyLimitTableRows = memoPolicyLimitItems.map((row) =>
+    [
+      markdownCell(row.label),
+      markdownCell(executionReviewLabel(row.status)),
+      markdownCell(row.value),
+      markdownCell(row.threshold),
+      markdownCell(row.note),
+    ].join(" | "),
+  );
   const committeeApprovalTableRows = memoCommitteeApprovalItems.map((row) =>
     [
       markdownCell(row.label),
@@ -1451,6 +1561,15 @@ function assetComparisonMemo(
     memoMonitoringRules.length ? "|---|---|---:|---|---|" : "",
     ...monitoringRuleTableRows.map((row) => `| ${row} |`),
     "",
+    "## 投資政策限制檢查",
+    `- 單檔權重上限：${options.policyMaxSingleWeightPercent ?? "--"}%`,
+    `- 年化波動上限：${options.policyMaxVolatilityPercent ?? "--"}%`,
+    `- 回撤限制：${options.policyMaxDrawdownPercent ?? "--"}%`,
+    `- 最低模型分數：${options.policyMinimumScore ?? "--"}`,
+    memoPolicyLimitItems.length ? "| 項目 | 狀態 | 目前值 | 限制 | 說明 |" : "目前沒有可輸出的政策限制檢查。",
+    memoPolicyLimitItems.length ? "|---|---|---:|---|---|" : "",
+    ...policyLimitTableRows.map((row) => `| ${row} |`),
+    "",
     "## 投委會簽核摘要",
     `- 簽核建議：${options.committeeDecision ? committeeDecisionLabel(options.committeeDecision) : "--"}`,
     memoCommitteeApprovalItems.length ? "| 項目 | 狀態 | 目前值 | 門檻 | 說明 |" : "目前沒有可輸出的簽核摘要。",
@@ -1520,6 +1639,10 @@ export function MarketDataPanel() {
   const [maximumTicketsPerBatch, setMaximumTicketsPerBatch] = useState(4);
   const [monitoringHorizonDays, setMonitoringHorizonDays] = useState(10);
   const [monitoringDrawdownAlertPercent, setMonitoringDrawdownAlertPercent] = useState(-8);
+  const [policyMaxSingleWeightPercent, setPolicyMaxSingleWeightPercent] = useState(35);
+  const [policyMaxVolatilityPercent, setPolicyMaxVolatilityPercent] = useState(25);
+  const [policyMaxDrawdownPercent, setPolicyMaxDrawdownPercent] = useState(-25);
+  const [policyMinimumScore, setPolicyMinimumScore] = useState(55);
   const [watchlistPresetName, setWatchlistPresetName] = useState("核心 ETF");
   const [selectedWatchlistPresetId, setSelectedWatchlistPresetId] = useState("");
   const [savedWatchlistPresets, setSavedWatchlistPresets] = useState<SavedWatchlistPreset[]>([]);
@@ -1644,10 +1767,25 @@ export function MarketDataPanel() {
   const monitoringAlertCount = monitoringRules.filter((item) => item.status === "block").length;
   const monitoringWatchCount = monitoringRules.filter((item) => item.status === "watch").length;
   const monitoringDecision: ExecutionReviewStatus = monitoringAlertCount > 0 ? "block" : monitoringWatchCount > 0 ? "watch" : "pass";
+  const policyLimitItems = investmentPolicyLimitItems({
+    allocationRows: activeAllocationRows,
+    allocationRisk,
+    tradeTickets,
+    allocationCapital,
+    priceFreshnessDays,
+    policyMaxSingleWeightPercent,
+    policyMaxVolatilityPercent,
+    policyMaxDrawdownPercent,
+    policyMinimumScore,
+  });
+  const policyBlockCount = policyLimitItems.filter((item) => item.status === "block").length;
+  const policyWatchCount = policyLimitItems.filter((item) => item.status === "watch").length;
+  const policyDecision: ExecutionReviewStatus = policyBlockCount > 0 ? "block" : policyWatchCount > 0 ? "watch" : "pass";
   const committeeDecision = committeeDecisionFromItems({
     tradeTickets,
     executionReviewItems,
     monitoringRules,
+    policyLimitItems,
   });
   const committeeApprovalItems = committeeApprovalChecklist({
     decision: committeeDecision,
@@ -1655,6 +1793,7 @@ export function MarketDataPanel() {
     tradeBatches,
     executionReviewItems,
     monitoringRules,
+    policyLimitItems,
     allocationRisk,
     allocationCapital,
     skippedTradeCount,
@@ -1910,6 +2049,15 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleExportPolicyLimitCsv = () => {
+    if (!policyLimitItems.length) return;
+
+    downloadTextFile(
+      `bigquery-policy-limits-${resultStamp()}.csv`,
+      executionReviewCsv(policyLimitItems),
+      "text/csv;charset=utf-8",
+    );
+  };
   const handleExportCommitteeApprovalCsv = () => {
     if (!committeeApprovalItems.length) return;
 
@@ -1945,6 +2093,11 @@ export function MarketDataPanel() {
       monitoringRules,
       monitoringHorizonDays,
       monitoringDrawdownAlertPercent,
+      policyLimitItems,
+      policyMaxSingleWeightPercent,
+      policyMaxVolatilityPercent,
+      policyMaxDrawdownPercent,
+      policyMinimumScore,
       committeeDecision,
       committeeApprovalItems,
     });
@@ -3397,6 +3550,127 @@ export function MarketDataPanel() {
                                 ))}
                               </tbody>
                             </table>
+                          </div>
+
+                          <div className="border-t border-slate-800 pt-3 space-y-3">
+                            <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-3">
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <h5 className="text-xs font-bold text-slate-100">投資政策限制檢查</h5>
+                                  <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(policyDecision)}`}>
+                                    {executionReviewLabel(policyDecision)}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-slate-500 mt-0.5">
+                                  用政策上限檢查模型配置、交易幅度與資料新鮮度，作為送簽前的硬性控管
+                                </p>
+                              </div>
+                              <div className="grid grid-cols-2 xl:grid-cols-[120px_120px_120px_110px_auto] gap-2 text-xs">
+                                <label className="space-y-1">
+                                  <span className="text-slate-500">單檔上限 %</span>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    max={100}
+                                    step={1}
+                                    value={policyMaxSingleWeightPercent}
+                                    onChange={(event) => setPolicyMaxSingleWeightPercent(Math.min(100, Math.max(1, Number(event.target.value) || 1)))}
+                                    className="w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-right font-mono text-slate-100"
+                                  />
+                                </label>
+                                <label className="space-y-1">
+                                  <span className="text-slate-500">波動上限 %</span>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    max={100}
+                                    step={1}
+                                    value={policyMaxVolatilityPercent}
+                                    onChange={(event) => setPolicyMaxVolatilityPercent(Math.min(100, Math.max(1, Number(event.target.value) || 1)))}
+                                    className="w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-right font-mono text-slate-100"
+                                  />
+                                </label>
+                                <label className="space-y-1">
+                                  <span className="text-slate-500">回撤限制 %</span>
+                                  <input
+                                    type="number"
+                                    min={-90}
+                                    max={0}
+                                    step={1}
+                                    value={policyMaxDrawdownPercent}
+                                    onChange={(event) => {
+                                      const nextValue = Number(event.target.value);
+                                      setPolicyMaxDrawdownPercent(Math.min(0, Math.max(-90, Number.isFinite(nextValue) ? nextValue : -25)));
+                                    }}
+                                    className="w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-right font-mono text-slate-100"
+                                  />
+                                </label>
+                                <label className="space-y-1">
+                                  <span className="text-slate-500">最低分數</span>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={100}
+                                    step={1}
+                                    value={policyMinimumScore}
+                                    onChange={(event) => setPolicyMinimumScore(Math.min(100, Math.max(0, Math.floor(Number(event.target.value) || 0))))}
+                                    className="w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-right font-mono text-slate-100"
+                                  />
+                                </label>
+                                <button
+                                  onClick={handleExportPolicyLimitCsv}
+                                  disabled={!rebalanceRows.length}
+                                  className="col-span-2 xl:col-span-1 xl:self-end px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+                                >
+                                  政策 CSV
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                              {[
+                                ["政策狀態", executionReviewLabel(policyDecision)],
+                                ["暫停項目", `${policyBlockCount} 項`],
+                                ["觀察項目", `${policyWatchCount} 項`],
+                                ["政策下限", `${policyMinimumScore} 分`],
+                              ].map(([label, value]) => (
+                                <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 p-3 min-w-0">
+                                  <p className="text-[11px] text-slate-600 truncate">{label}</p>
+                                  <p className="mt-1 font-mono text-sm font-bold text-slate-100 truncate" title={value}>
+                                    {value}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+
+                            <div className="overflow-x-auto">
+                              <table className="w-full min-w-[920px] text-xs">
+                                <thead>
+                                  <tr className="text-left text-[11px] text-slate-600">
+                                    <th className="py-2 px-3 font-medium">項目</th>
+                                    <th className="py-2 px-3 font-medium text-right">狀態</th>
+                                    <th className="py-2 px-3 font-medium text-right">目前值</th>
+                                    <th className="py-2 px-3 font-medium">政策限制</th>
+                                    <th className="py-2 px-3 font-medium">說明</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {policyLimitItems.map((item) => (
+                                    <tr key={item.label} className={`border-t ${executionReviewRowClass(item.status)}`}>
+                                      <td className="py-2 px-3 font-bold text-slate-100">{item.label}</td>
+                                      <td className="py-2 px-3 text-right">
+                                        <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(item.status)}`}>
+                                          {executionReviewLabel(item.status)}
+                                        </span>
+                                      </td>
+                                      <td className="py-2 px-3 text-right font-mono text-slate-200">{item.value}</td>
+                                      <td className="py-2 px-3 text-slate-400">{item.threshold}</td>
+                                      <td className="py-2 px-3 text-slate-500">{item.note}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
                           </div>
 
                           <div className="border-t border-slate-800 pt-3 space-y-3">
