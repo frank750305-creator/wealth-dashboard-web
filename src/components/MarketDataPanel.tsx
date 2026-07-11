@@ -1,7 +1,14 @@
 import { useEffect, useState } from "react";
 import { useMarketSources } from "@/hooks/useMarketSources";
 import { fetchBigQueryAssetProfile, fetchBigQueryAssets } from "@/lib/marketApi";
-import type { BigQueryAsset, BigQueryAssetProfileResponse, MarketSourceStatus } from "@/types/market";
+import type {
+  BigQueryAsset,
+  BigQueryAssetProfileResponse,
+  BigQueryFxCurrency,
+  BigQueryMarketDiagnostics,
+  BigQueryStaleSymbol,
+  MarketSourceStatus,
+} from "@/types/market";
 import { BigQueryPortfolioPanel } from "./BigQueryPortfolioPanel";
 
 type QualityStatus = "strong" | "watch" | "risk" | "neutral";
@@ -190,6 +197,26 @@ type MarketAlertEvent = {
   priority: ExecutionHandoffPriority;
   owner: string;
   evidence: string;
+  action: string;
+};
+
+type DataPipelineHealthItem = {
+  label: string;
+  status: ExecutionReviewStatus;
+  value: string;
+  target: string;
+  owner: string;
+  action: string;
+};
+
+type DataPipelineTableSnapshot = {
+  table: string;
+  status: ExecutionReviewStatus;
+  latestDate: string;
+  rowCount: string;
+  coverage: string;
+  freshness: string;
+  owner: string;
   action: string;
 };
 
@@ -2456,7 +2483,243 @@ function marketAlertPriorityFromStatus(status: ExecutionReviewStatus): Execution
   return "low";
 }
 
+function pipelineSchemaAction(check: { isReady: boolean; missingColumns: string[] }, tableLabel: string) {
+  if (check.isReady) return `${tableLabel} schema 已符合最低需求`;
+  return `補齊缺少欄位：${check.missingColumns.join(", ") || "--"}`;
+}
+
+function staleSymbolExecutionStatus(staleDays: number | null): ExecutionReviewStatus {
+  if (staleDays === null) return "watch";
+  return staleDays >= 10 ? "block" : "watch";
+}
+
+function buildDataPipelineHealthItems({
+  hasBigQueryCredentials,
+  diagnostics,
+  schemaStatus,
+  priceFreshnessStatus,
+  fxFreshnessStatus,
+  symbolCoverageStatus,
+  priceDepthStatus,
+  staleSymbolStatus,
+  fxCurrencyStatus,
+  staleSymbols,
+  fxCurrencies,
+  riskOwner,
+}: {
+  hasBigQueryCredentials: boolean;
+  diagnostics?: BigQueryMarketDiagnostics;
+  schemaStatus: QualityStatus;
+  priceFreshnessStatus: QualityStatus;
+  fxFreshnessStatus: QualityStatus;
+  symbolCoverageStatus: QualityStatus;
+  priceDepthStatus: QualityStatus;
+  staleSymbolStatus: QualityStatus;
+  fxCurrencyStatus: QualityStatus;
+  staleSymbols: BigQueryStaleSymbol[];
+  fxCurrencies: BigQueryFxCurrency[];
+  riskOwner: string;
+}): DataPipelineHealthItem[] {
+  const cleanRiskOwner = riskOwner.trim() || "風控";
+
+  return [
+    {
+      label: "BigQuery 憑證",
+      status: hasBigQueryCredentials ? "pass" : "block",
+      value: hasBigQueryCredentials ? "已設定" : "未設定",
+      target: "Vercel Production 需有 GCP_SERVICE_ACCOUNT_JSON",
+      owner: cleanRiskOwner,
+      action: hasBigQueryCredentials ? "維持憑證輪替紀錄" : "先設定 service account JSON 並重新部署",
+    },
+    {
+      label: "Schema 完整度",
+      status: qualityToExecutionStatus(schemaStatus),
+      value: diagnostics ? (schemaStatus === "strong" ? "Ready" : "Missing") : "--",
+      target: "daily_prices / daily_fx 必要欄位完整",
+      owner: cleanRiskOwner,
+      action: diagnostics
+        ? [
+            pipelineSchemaAction(diagnostics.schemaChecks.priceTable, "daily_prices"),
+            pipelineSchemaAction(diagnostics.schemaChecks.fxTable, "daily_fx"),
+          ].join("；")
+        : "讀取 BigQuery 診斷後確認 schema",
+    },
+    {
+      label: "價格更新",
+      status: qualityToExecutionStatus(priceFreshnessStatus),
+      value: diagnostics?.priceSummary.latest_date ?? "--",
+      target: "3 天內通過，10 天以上暫停",
+      owner: cleanRiskOwner,
+      action: priceFreshnessStatus === "risk" ? "重新跑 daily_prices 更新流程" : priceFreshnessStatus === "watch" ? "確認今日批次是否完成" : "價格資料可支援分析",
+    },
+    {
+      label: "匯率更新",
+      status: qualityToExecutionStatus(fxFreshnessStatus),
+      value: diagnostics?.fxSummary.latest_date ?? "--",
+      target: "3 天內通過，10 天以上暫停",
+      owner: cleanRiskOwner,
+      action: fxFreshnessStatus === "risk" ? "重新跑 daily_fx 更新流程" : fxFreshnessStatus === "watch" ? "確認匯率批次是否完成" : "匯率資料可支援換算",
+    },
+    {
+      label: "商品覆蓋",
+      status: qualityToExecutionStatus(symbolCoverageStatus),
+      value: `${formatCount(diagnostics?.priceSummary.symbol_count)} 檔`,
+      target: "50 檔以上通過，10 檔以下暫停",
+      owner: cleanRiskOwner,
+      action: symbolCoverageStatus === "risk" ? "補齊商品清單或檢查匯入程式" : "覆蓋率可用，持續追蹤新增商品",
+    },
+    {
+      label: "價格深度",
+      status: qualityToExecutionStatus(priceDepthStatus),
+      value: `${formatCount(diagnostics?.priceSummary.row_count)} 筆`,
+      target: "50,000 筆以上通過，5,000 筆以下暫停",
+      owner: cleanRiskOwner,
+      action: priceDepthStatus === "risk" ? "重新跑歷史價格 backfill" : "歷史深度可支援目前分析",
+    },
+    {
+      label: "落後商品",
+      status: diagnostics ? qualityToExecutionStatus(staleSymbolStatus) : "watch",
+      value: `${staleSymbols.length} 檔`,
+      target: "應為 0；5 檔以上暫停",
+      owner: cleanRiskOwner,
+      action: staleSymbols.length ? "優先補跑落後商品，再確認最新交易日" : "未偵測到落後商品",
+    },
+    {
+      label: "匯率幣別",
+      status: diagnostics ? qualityToExecutionStatus(fxCurrencyStatus) : "watch",
+      value: `${fxCurrencies.length} 組`,
+      target: "至少 2 組主要幣別",
+      owner: cleanRiskOwner,
+      action: fxCurrencies.length ? "確認主要交易幣別已覆蓋" : "補齊 daily_fx 幣別資料",
+    },
+  ];
+}
+
+function buildDataPipelineTableSnapshots({
+  diagnostics,
+  priceFreshnessDays,
+  fxFreshnessDays,
+  priceStatus,
+  fxStatus,
+  riskOwner,
+}: {
+  diagnostics?: BigQueryMarketDiagnostics;
+  priceFreshnessDays: number | null;
+  fxFreshnessDays: number | null;
+  priceStatus: ExecutionReviewStatus;
+  fxStatus: ExecutionReviewStatus;
+  riskOwner: string;
+}): DataPipelineTableSnapshot[] {
+  const cleanRiskOwner = riskOwner.trim() || "風控";
+
+  if (!diagnostics) {
+    return [
+      {
+        table: "daily_prices",
+        status: "watch",
+        latestDate: "--",
+        rowCount: "--",
+        coverage: "--",
+        freshness: "--",
+        owner: cleanRiskOwner,
+        action: "等待 BigQuery 診斷資料",
+      },
+      {
+        table: "daily_fx",
+        status: "watch",
+        latestDate: "--",
+        rowCount: "--",
+        coverage: "--",
+        freshness: "--",
+        owner: cleanRiskOwner,
+        action: "等待 BigQuery 診斷資料",
+      },
+    ];
+  }
+
+  return [
+    {
+      table: "daily_prices",
+      status: priceStatus,
+      latestDate: diagnostics.priceSummary.latest_date ?? "--",
+      rowCount: `${formatCount(diagnostics.priceSummary.row_count)} 筆`,
+      coverage: `${formatCount(diagnostics.priceSummary.symbol_count)} 檔`,
+      freshness: priceFreshnessDays === null ? "--" : `${priceFreshnessDays} 天`,
+      owner: cleanRiskOwner,
+      action: priceStatus === "block" ? "暫停正式分析，先補價格資料" : priceStatus === "watch" ? "確認當日批次與落後商品" : "可支援目前分析",
+    },
+    {
+      table: "daily_fx",
+      status: fxStatus,
+      latestDate: diagnostics.fxSummary.latest_date ?? "--",
+      rowCount: `${formatCount(diagnostics.fxSummary.row_count)} 筆`,
+      coverage: `${formatCount(diagnostics.fxSummary.currency_count)} 組`,
+      freshness: fxFreshnessDays === null ? "--" : `${fxFreshnessDays} 天`,
+      owner: cleanRiskOwner,
+      action: fxStatus === "block" ? "暫停跨幣別換算，先補匯率資料" : fxStatus === "watch" ? "確認匯率批次是否完成" : "可支援目前換算",
+    },
+  ];
+}
+
+function dataPipelineCsv({
+  healthItems,
+  tableSnapshots,
+  staleSymbols,
+  fxCurrencies,
+}: {
+  healthItems: DataPipelineHealthItem[];
+  tableSnapshots: DataPipelineTableSnapshot[];
+  staleSymbols: BigQueryStaleSymbol[];
+  fxCurrencies: BigQueryFxCurrency[];
+}) {
+  const header = ["section", "name", "status", "value", "target", "owner", "action"];
+  const healthRows = healthItems.map((item) => [
+    "health",
+    item.label,
+    executionReviewLabel(item.status),
+    item.value,
+    item.target,
+    item.owner,
+    item.action,
+  ]);
+  const snapshotRows = tableSnapshots.map((item) => [
+    "table",
+    item.table,
+    executionReviewLabel(item.status),
+    `${item.latestDate} / ${item.rowCount} / ${item.coverage}`,
+    item.freshness,
+    item.owner,
+    item.action,
+  ]);
+  const staleRows = staleSymbols.map((symbol) => {
+    const staleDays = symbol.stale_days ?? daysSinceDate(symbol.latest_date);
+    return [
+      "stale_symbol",
+      symbol.symbol,
+      executionReviewLabel(staleSymbolExecutionStatus(staleDays)),
+      symbol.latest_date ?? "--",
+      staleDays === null ? "--" : `${staleDays} days`,
+      "",
+      `${formatCount(symbol.row_count)} rows`,
+    ];
+  });
+  const fxRows = fxCurrencies.map((currency) => [
+    "fx_currency",
+    currency.currency,
+    qualityLabel(freshnessStatus(daysSinceDate(currency.latest_date))),
+    currency.latest_date ?? "--",
+    `${formatCount(currency.row_count)} rows`,
+    "",
+    "",
+  ]);
+
+  return [header, ...healthRows, ...snapshotRows, ...staleRows, ...fxRows]
+    .map((row) => row.map(csvCell).join(","))
+    .join("\n");
+}
+
 function buildMarketAlertEvents({
+  dataPipelineHealthItems,
   qualityCards,
   decisionFunnelStages,
   operatingKriItems,
@@ -2465,6 +2728,7 @@ function buildMarketAlertEvents({
   riskOwner,
   decisionApprover,
 }: {
+  dataPipelineHealthItems: DataPipelineHealthItem[];
   qualityCards: Array<{ label: string; value: string; status: QualityStatus; note: string }>;
   decisionFunnelStages: DecisionFunnelStage[];
   operatingKriItems: OperatingKriItem[];
@@ -2475,6 +2739,17 @@ function buildMarketAlertEvents({
 }): MarketAlertEvent[] {
   const cleanRiskOwner = riskOwner.trim() || "風控";
   const cleanApprover = decisionApprover.trim() || "投委會";
+  const pipelineAlerts = dataPipelineHealthItems
+    .filter((item) => item.status !== "pass")
+    .map((item) => ({
+      source: "資料管線",
+      title: item.label,
+      status: item.status,
+      priority: marketAlertPriorityFromStatus(item.status),
+      owner: item.owner,
+      evidence: item.value,
+      action: item.action,
+    }));
   const dataAlerts = qualityCards
     .filter((card) => card.status !== "strong" && card.status !== "neutral")
     .map((card) => {
@@ -2535,7 +2810,7 @@ function buildMarketAlertEvents({
   const priorityRank: Record<ExecutionHandoffPriority, number> = { high: 0, medium: 1, low: 2 };
   const statusRank: Record<ExecutionReviewStatus, number> = { block: 0, watch: 1, pass: 2 };
 
-  return [...dataAlerts, ...funnelAlerts, ...kriAlerts, ...slaAlerts, ...exceptionAlerts]
+  return [...pipelineAlerts, ...dataAlerts, ...funnelAlerts, ...kriAlerts, ...slaAlerts, ...exceptionAlerts]
     .sort(
       (left, right) =>
         priorityRank[left.priority] - priorityRank[right.priority] ||
@@ -2632,6 +2907,9 @@ function assetComparisonMemo(
     operatingKriItems?: OperatingKriItem[];
     decisionFunnelStages?: DecisionFunnelStage[];
     marketAlertEvents?: MarketAlertEvent[];
+    dataPipelineHealthItems?: DataPipelineHealthItem[];
+    dataPipelineTableSnapshots?: DataPipelineTableSnapshot[];
+    dataPipelineGeneratedAt?: string;
   },
 ) {
   const candidateRows = rows.filter((row) => row.signal === "candidate");
@@ -2663,6 +2941,8 @@ function assetComparisonMemo(
   const memoOperatingKriItems = (options.operatingKriItems ?? []).slice(0, 12);
   const memoDecisionFunnelStages = (options.decisionFunnelStages ?? []).slice(0, 12);
   const memoMarketAlertEvents = (options.marketAlertEvents ?? []).slice(0, 16);
+  const memoDataPipelineHealthItems = (options.dataPipelineHealthItems ?? []).slice(0, 12);
+  const memoDataPipelineTableSnapshots = (options.dataPipelineTableSnapshots ?? []).slice(0, 6);
   const tableHeader = "| 商品 | 分數 | 訊號 | 年化報酬 | 年化波動 | 最大回撤 | 最新日 | 說明 |";
   const tableDivider = "|---|---:|---|---:|---:|---:|---|---|";
   const tableRows = topRows.map((row) =>
@@ -2880,6 +3160,27 @@ function assetComparisonMemo(
       markdownCell(row.action),
     ].join(" | "),
   );
+  const dataPipelineHealthTableRows = memoDataPipelineHealthItems.map((row) =>
+    [
+      markdownCell(row.label),
+      markdownCell(executionReviewLabel(row.status)),
+      markdownCell(row.value),
+      markdownCell(row.target),
+      markdownCell(row.owner),
+      markdownCell(row.action),
+    ].join(" | "),
+  );
+  const dataPipelineTableRows = memoDataPipelineTableSnapshots.map((row) =>
+    [
+      markdownCell(row.table),
+      markdownCell(executionReviewLabel(row.status)),
+      markdownCell(row.latestDate),
+      markdownCell(row.rowCount),
+      markdownCell(row.coverage),
+      markdownCell(row.freshness),
+      markdownCell(row.action),
+    ].join(" | "),
+  );
 
   return [
     `# ${options.name || "未命名 Watchlist"} 研究摘要`,
@@ -2917,6 +3218,15 @@ function assetComparisonMemo(
     memoMarketAlertEvents.length ? "| 來源 | 事件 | 優先級 | 狀態 | 負責人 | 依據 | 動作 |" : "目前沒有需要處理的市場警示。",
     memoMarketAlertEvents.length ? "|---|---|---|---|---|---|---|" : "",
     ...marketAlertTableRows.map((row) => `| ${row} |`),
+    "",
+    "## 資料管線監控台",
+    `- 診斷時間：${options.dataPipelineGeneratedAt ?? "--"}`,
+    memoDataPipelineHealthItems.length ? "| 檢查項 | 狀態 | 目前值 | 目標 | 負責人 | 動作 |" : "目前沒有可輸出的資料管線健康檢查。",
+    memoDataPipelineHealthItems.length ? "|---|---|---:|---|---|---|" : "",
+    ...dataPipelineHealthTableRows.map((row) => `| ${row} |`),
+    memoDataPipelineTableSnapshots.length ? "| 資料表 | 狀態 | 最新日 | 筆數 | 覆蓋 | 新鮮度 | 動作 |" : "",
+    memoDataPipelineTableSnapshots.length ? "|---|---|---|---:|---:|---:|---|" : "",
+    ...dataPipelineTableRows.map((row) => `| ${row} |`),
     "",
     "## 篩選概況",
     `- 顯示商品：${rows.length} / ${options.totalRows} 檔`,
@@ -3129,6 +3439,16 @@ export function MarketDataPanel() {
   const fxCurrencyStatus: QualityStatus = coverageStatus(fxCurrencies.length, 2, 1);
   const schemaStatus: QualityStatus = bigQueryDiagnostics
     ? bigQueryDiagnostics.schemaChecks.priceTable.isReady && bigQueryDiagnostics.schemaChecks.fxTable.isReady
+      ? "strong"
+      : "risk"
+    : "neutral";
+  const priceSchemaStatus: QualityStatus = bigQueryDiagnostics
+    ? bigQueryDiagnostics.schemaChecks.priceTable.isReady
+      ? "strong"
+      : "risk"
+    : "neutral";
+  const fxSchemaStatus: QualityStatus = bigQueryDiagnostics
+    ? bigQueryDiagnostics.schemaChecks.fxTable.isReady
       ? "strong"
       : "risk"
     : "neutral";
@@ -3351,6 +3671,43 @@ export function MarketDataPanel() {
     qualityToExecutionStatus(symbolCoverageStatus),
     qualityToExecutionStatus(priceDepthStatus),
   ]);
+  const pricePipelineDecision = combinedExecutionStatus([
+    qualityToExecutionStatus(priceSchemaStatus),
+    qualityToExecutionStatus(priceFreshnessStatus),
+    qualityToExecutionStatus(symbolCoverageStatus),
+    qualityToExecutionStatus(priceDepthStatus),
+    qualityToExecutionStatus(staleSymbolStatus),
+  ]);
+  const fxPipelineDecision = combinedExecutionStatus([
+    qualityToExecutionStatus(fxSchemaStatus),
+    qualityToExecutionStatus(fxFreshnessStatus),
+    qualityToExecutionStatus(fxCurrencyStatus),
+  ]);
+  const dataPipelineHealthItems = buildDataPipelineHealthItems({
+    hasBigQueryCredentials,
+    diagnostics: bigQueryDiagnostics ?? undefined,
+    schemaStatus,
+    priceFreshnessStatus,
+    fxFreshnessStatus,
+    symbolCoverageStatus,
+    priceDepthStatus,
+    staleSymbolStatus,
+    fxCurrencyStatus,
+    staleSymbols,
+    fxCurrencies,
+    riskOwner,
+  });
+  const dataPipelineTableSnapshots = buildDataPipelineTableSnapshots({
+    diagnostics: bigQueryDiagnostics ?? undefined,
+    priceFreshnessDays,
+    fxFreshnessDays,
+    priceStatus: pricePipelineDecision,
+    fxStatus: fxPipelineDecision,
+    riskOwner,
+  });
+  const dataPipelineBlockCount = dataPipelineHealthItems.filter((item) => item.status === "block").length;
+  const dataPipelineWatchCount = dataPipelineHealthItems.filter((item) => item.status === "watch").length;
+  const dataPipelineDecision = combinedExecutionStatus(dataPipelineHealthItems.map((item) => item.status));
   const candidateVisibleCount = visibleComparisonRows.filter((row) => row.signal === "candidate").length;
   const cioOperatingBriefItems = buildCioOperatingBriefItems({
     dataStatus: dataReadinessDecision,
@@ -3425,6 +3782,7 @@ export function MarketDataPanel() {
   const decisionFunnelWatchCount = decisionFunnelStages.filter((stage) => stage.status === "watch").length;
   const decisionFunnelDecision = combinedExecutionStatus(decisionFunnelStages.map((stage) => stage.status));
   const marketAlertEvents = buildMarketAlertEvents({
+    dataPipelineHealthItems,
     qualityCards,
     decisionFunnelStages,
     operatingKriItems,
@@ -3553,6 +3911,18 @@ export function MarketDataPanel() {
     downloadTextFile(
       `bigquery-data-quality-${resultStamp()}.csv`,
       rows.map((row) => row.map(csvCell).join(",")).join("\n"),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportDataPipelineCsv = () => {
+    downloadTextFile(
+      `bigquery-data-pipeline-${resultStamp()}.csv`,
+      dataPipelineCsv({
+        healthItems: dataPipelineHealthItems,
+        tableSnapshots: dataPipelineTableSnapshots,
+        staleSymbols,
+        fxCurrencies,
+      }),
       "text/csv;charset=utf-8",
     );
   };
@@ -3846,6 +4216,9 @@ export function MarketDataPanel() {
       operatingKriItems,
       decisionFunnelStages,
       marketAlertEvents,
+      dataPipelineHealthItems,
+      dataPipelineTableSnapshots,
+      dataPipelineGeneratedAt: bigQueryDiagnostics?.generatedAt,
     });
   const handleExportAssetComparisonMemo = () => {
     if (!visibleComparisonRows.length) return;
@@ -4061,6 +4434,12 @@ export function MarketDataPanel() {
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
+              <button
+                onClick={handleExportDataPipelineCsv}
+                className="px-3 py-2 text-xs font-bold rounded-md bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-100"
+              >
+                管線 CSV
+              </button>
               {bigQueryDiagnostics ? (
                 <button
                   onClick={handleExportDiagnosticsCsv}
@@ -4113,6 +4492,94 @@ export function MarketDataPanel() {
                     <p className="mt-1 text-[11px] text-slate-500 leading-relaxed">{card.note}</p>
                   </div>
                 ))}
+              </div>
+
+              <div className="border-t border-slate-800 pt-3 space-y-3">
+                <div className="flex flex-col md:flex-row md:items-end justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="text-xs font-bold text-slate-100">資料管線監控台</h4>
+                      <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(dataPipelineDecision)}`}>
+                        {executionReviewLabel(dataPipelineDecision)}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-[11px] text-slate-500">
+                      追蹤 BigQuery 憑證、schema、最新日期、row count、覆蓋率、落後商品與匯率幣別
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-xs">
+                    {[
+                      ["暫停", `${dataPipelineBlockCount}`],
+                      ["觀察", `${dataPipelineWatchCount}`],
+                      ["診斷", bigQueryDiagnostics?.generatedAt ? "已更新" : "待讀取"],
+                    ].map(([label, value]) => (
+                      <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 px-3 py-2 text-right">
+                        <p className="text-[10px] text-slate-600">{label}</p>
+                        <p className="mt-0.5 font-mono font-bold text-slate-100">{value}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                  <div className="overflow-x-auto rounded-lg border border-slate-800">
+                    <table className="w-full min-w-[760px] text-xs">
+                      <thead className="bg-slate-900/80">
+                        <tr className="text-left text-[11px] text-slate-600">
+                          <th className="py-2 px-3 font-medium">檢查項</th>
+                          <th className="py-2 px-3 font-medium text-right">狀態</th>
+                          <th className="py-2 px-3 font-medium text-right">目前值</th>
+                          <th className="py-2 px-3 font-medium">目標</th>
+                          <th className="py-2 px-3 font-medium">動作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dataPipelineHealthItems.map((item) => (
+                          <tr key={item.label} className={`border-t ${executionReviewRowClass(item.status)}`}>
+                            <td className="py-2 px-3 font-bold text-slate-100">{item.label}</td>
+                            <td className="py-2 px-3 text-right">
+                              <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(item.status)}`}>
+                                {executionReviewLabel(item.status)}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-right font-mono text-slate-200">{item.value}</td>
+                            <td className="py-2 px-3 text-slate-400">{item.target}</td>
+                            <td className="py-2 px-3 text-slate-500">{item.action}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="space-y-2">
+                    {dataPipelineTableSnapshots.map((item) => (
+                      <div key={item.table} className={`rounded-lg border p-3 text-xs ${executionReviewRowClass(item.status)}`}>
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="font-bold text-slate-100">{item.table}</p>
+                            <p className="mt-0.5 text-[11px] text-slate-500">{item.action}</p>
+                          </div>
+                          <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(item.status)}`}>
+                            {executionReviewLabel(item.status)}
+                          </span>
+                        </div>
+                        <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2">
+                          {[
+                            ["最新日", item.latestDate],
+                            ["筆數", item.rowCount],
+                            ["覆蓋", item.coverage],
+                            ["新鮮度", item.freshness],
+                          ].map(([label, value]) => (
+                            <div key={label} className="rounded-md border border-slate-800 bg-slate-950/60 p-2 min-w-0">
+                              <p className="text-[10px] text-slate-600 truncate">{label}</p>
+                              <p className="mt-0.5 font-mono text-slate-100 truncate" title={value}>{value}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 text-xs">
