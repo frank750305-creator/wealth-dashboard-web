@@ -127,6 +127,20 @@ type ExecutionHandoffItem = {
   note: string;
 };
 
+type ExecutionFillRow = TradeTicketRow & {
+  filledNotional: number;
+  unfilledNotional: number;
+  fillCompletionRate: number;
+  slippageBps: number;
+  commissionBps: number;
+  slippageCost: number;
+  commissionCost: number;
+  totalCost: number;
+  cashImpactAfterCost: number;
+  fillStatus: ExecutionReviewStatus;
+  fillNote: string;
+};
+
 const statusMeta: Record<MarketSourceStatus, { label: string; className: string }> = {
   ready: {
     label: "可接 API",
@@ -1619,6 +1633,97 @@ function executionHandoffCsv(rows: ExecutionHandoffItem[]) {
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
+function formatBps(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "--";
+  return `${value.toFixed(1)} bps`;
+}
+
+function buildExecutionFillRows({
+  tradeTickets,
+  fillCompletionPercent,
+  fillSlippageBps,
+  fillCommissionBps,
+}: {
+  tradeTickets: TradeTicketRow[];
+  fillCompletionPercent: number;
+  fillSlippageBps: number;
+  fillCommissionBps: number;
+}): ExecutionFillRow[] {
+  const completionRate = Math.min(1, Math.max(0, fillCompletionPercent / 100));
+  const cleanSlippageBps = Math.max(0, fillSlippageBps);
+  const cleanCommissionBps = Math.max(0, fillCommissionBps);
+  const allInCostBps = cleanSlippageBps + cleanCommissionBps;
+
+  return tradeTickets.map((row) => {
+    const filledNotional = row.ticketAmount * completionRate;
+    const unfilledNotional = Math.max(0, row.ticketAmount - filledNotional);
+    const slippageCost = filledNotional * (cleanSlippageBps / 10_000);
+    const commissionCost = filledNotional * (cleanCommissionBps / 10_000);
+    const totalCost = slippageCost + commissionCost;
+    const cashImpactAfterCost = row.direction === "buy" ? -(filledNotional + totalCost) : filledNotional - totalCost;
+    const fillStatus: ExecutionReviewStatus =
+      completionRate < 0.8 ? "block" : completionRate < 1 || allInCostBps > 20 ? "watch" : "pass";
+    const fillNote =
+      fillStatus === "block"
+        ? "成交率偏低，需要重新排程或取消殘單"
+        : fillStatus === "watch"
+          ? "存在未成交或成本偏高，需要執行後覆核"
+          : "成交率與成本在目前門檻內";
+
+    return {
+      ...row,
+      filledNotional,
+      unfilledNotional,
+      fillCompletionRate: completionRate,
+      slippageBps: cleanSlippageBps,
+      commissionBps: cleanCommissionBps,
+      slippageCost,
+      commissionCost,
+      totalCost,
+      cashImpactAfterCost,
+      fillStatus,
+      fillNote,
+    };
+  });
+}
+
+function executionFillCsv(rows: ExecutionFillRow[]) {
+  const header = [
+    "symbol",
+    "direction",
+    "target_notional",
+    "filled_notional",
+    "unfilled_notional",
+    "fill_completion_rate",
+    "slippage_bps",
+    "commission_bps",
+    "slippage_cost",
+    "commission_cost",
+    "total_cost",
+    "cash_impact_after_cost",
+    "status",
+    "note",
+  ];
+  const csvRows = rows.map((row) => [
+    row.symbol,
+    row.direction,
+    row.ticketAmount,
+    row.filledNotional,
+    row.unfilledNotional,
+    row.fillCompletionRate,
+    row.slippageBps,
+    row.commissionBps,
+    row.slippageCost,
+    row.commissionCost,
+    row.totalCost,
+    row.cashImpactAfterCost,
+    executionReviewLabel(row.fillStatus),
+    row.fillNote,
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
 function averageComparisonMetric(rows: AssetComparisonRow[], selector: (row: AssetComparisonRow) => number | null) {
   const values = rows.map(selector).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
   if (!values.length) return null;
@@ -1674,6 +1779,10 @@ function assetComparisonMemo(
     committeeApprovalItems?: ExecutionReviewItem[];
     decisionAuditRecords?: DecisionAuditRecord[];
     executionHandoffItems?: ExecutionHandoffItem[];
+    executionFillRows?: ExecutionFillRow[];
+    fillCompletionPercent?: number;
+    fillSlippageBps?: number;
+    fillCommissionBps?: number;
   },
 ) {
   const candidateRows = rows.filter((row) => row.signal === "candidate");
@@ -1697,6 +1806,7 @@ function assetComparisonMemo(
   const memoCommitteeApprovalItems = (options.committeeApprovalItems ?? []).slice(0, 8);
   const memoDecisionAuditRecords = (options.decisionAuditRecords ?? []).slice(0, 12);
   const memoExecutionHandoffItems = (options.executionHandoffItems ?? []).slice(0, 8);
+  const memoExecutionFillRows = (options.executionFillRows ?? []).slice(0, 8);
   const tableHeader = "| 商品 | 分數 | 訊號 | 年化報酬 | 年化波動 | 最大回撤 | 最新日 | 說明 |";
   const tableDivider = "|---|---:|---|---:|---:|---:|---|---|";
   const tableRows = topRows.map((row) =>
@@ -1828,6 +1938,19 @@ function assetComparisonMemo(
       markdownCell(row.note),
     ].join(" | "),
   );
+  const executionFillTableRows = memoExecutionFillRows.map((row) =>
+    [
+      markdownCell(row.symbol),
+      markdownCell(rebalanceDirectionLabel(row.direction)),
+      markdownCell(formatCurrency(row.ticketAmount)),
+      markdownCell(formatCurrency(row.filledNotional)),
+      markdownCell(formatCurrency(row.unfilledNotional)),
+      markdownCell(formatCurrency(row.totalCost)),
+      markdownCell(formatCurrency(row.cashImpactAfterCost)),
+      markdownCell(executionReviewLabel(row.fillStatus)),
+      markdownCell(row.fillNote),
+    ].join(" | "),
+  );
 
   return [
     `# ${options.name || "未命名 Watchlist"} 研究摘要`,
@@ -1925,6 +2048,14 @@ function assetComparisonMemo(
     memoExecutionHandoffItems.length ? "|---|---|---|---|---|---|---|" : "",
     ...executionHandoffTableRows.map((row) => `| ${row} |`),
     "",
+    "## 成交回報與滑價分析",
+    `- 成交率：${options.fillCompletionPercent ?? "--"}%`,
+    `- 滑價：${formatBps(options.fillSlippageBps)}`,
+    `- 手續費：${formatBps(options.fillCommissionBps)}`,
+    memoExecutionFillRows.length ? "| 商品 | 動作 | 目標金額 | 成交金額 | 未成交 | 成本 | 成交後現金 | 狀態 | 說明 |" : "目前沒有可輸出的成交回報。",
+    memoExecutionFillRows.length ? "|---|---|---:|---:|---:|---:|---:|---|---|" : "",
+    ...executionFillTableRows.map((row) => `| ${row} |`),
+    "",
     "## 需要複核的風險",
     reviewRows.length ? "| 商品 | 分數 | 訊號 | 品質 | 最新日 | 距今天 | 說明 |" : "目前篩選結果未偵測到明確風險。",
     reviewRows.length ? "|---|---:|---|---|---|---:|---|" : "",
@@ -1999,6 +2130,9 @@ export function MarketDataPanel() {
   const [riskOwner, setRiskOwner] = useState("風控");
   const [settlementOwner, setSettlementOwner] = useState("中台");
   const [handoffDueDays, setHandoffDueDays] = useState(3);
+  const [fillCompletionPercent, setFillCompletionPercent] = useState(100);
+  const [fillSlippageBps, setFillSlippageBps] = useState(8);
+  const [fillCommissionBps, setFillCommissionBps] = useState(3);
   const [watchlistPresetName, setWatchlistPresetName] = useState("核心 ETF");
   const [selectedWatchlistPresetId, setSelectedWatchlistPresetId] = useState("");
   const [savedWatchlistPresets, setSavedWatchlistPresets] = useState<SavedWatchlistPreset[]>([]);
@@ -2195,6 +2329,19 @@ export function MarketDataPanel() {
   const handoffBlockCount = executionHandoffItems.filter((item) => item.status === "block").length;
   const handoffWatchCount = executionHandoffItems.filter((item) => item.status === "watch").length;
   const handoffHighPriorityCount = executionHandoffItems.filter((item) => item.priority === "high").length;
+  const executionFillRows = buildExecutionFillRows({
+    tradeTickets,
+    fillCompletionPercent,
+    fillSlippageBps,
+    fillCommissionBps,
+  });
+  const fillBlockCount = executionFillRows.filter((item) => item.fillStatus === "block").length;
+  const fillWatchCount = executionFillRows.filter((item) => item.fillStatus === "watch").length;
+  const executionFillDecision: ExecutionReviewStatus = fillBlockCount > 0 ? "block" : fillWatchCount > 0 ? "watch" : "pass";
+  const totalFilledNotional = executionFillRows.reduce((sum, row) => sum + row.filledNotional, 0);
+  const totalUnfilledNotional = executionFillRows.reduce((sum, row) => sum + row.unfilledNotional, 0);
+  const totalExecutionCost = executionFillRows.reduce((sum, row) => sum + row.totalCost, 0);
+  const totalCashImpactAfterCost = executionFillRows.reduce((sum, row) => sum + row.cashImpactAfterCost, 0);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -2480,6 +2627,15 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleExportExecutionFillCsv = () => {
+    if (!executionFillRows.length) return;
+
+    downloadTextFile(
+      `bigquery-execution-fills-${resultStamp()}.csv`,
+      executionFillCsv(executionFillRows),
+      "text/csv;charset=utf-8",
+    );
+  };
   const buildAssetComparisonMemo = () =>
     assetComparisonMemo(visibleComparisonRows, {
       name: watchlistPresetName.trim() || "未命名 Watchlist",
@@ -2515,6 +2671,10 @@ export function MarketDataPanel() {
       committeeApprovalItems,
       decisionAuditRecords,
       executionHandoffItems,
+      executionFillRows,
+      fillCompletionPercent,
+      fillSlippageBps,
+      fillCommissionBps,
     });
   const handleExportAssetComparisonMemo = () => {
     if (!visibleComparisonRows.length) return;
@@ -4447,6 +4607,120 @@ export function MarketDataPanel() {
                                       </td>
                                       <td className="py-2 px-3 font-mono text-slate-400">{item.evidence}</td>
                                       <td className="py-2 px-3 text-slate-500">{item.note}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+
+                          <div className="border-t border-slate-800 pt-3 space-y-3">
+                            <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-3">
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <h5 className="text-xs font-bold text-slate-100">成交回報與滑價分析</h5>
+                                  <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(executionFillDecision)}`}>
+                                    {executionReviewLabel(executionFillDecision)}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-slate-500 mt-0.5">
+                                  以交易清單估算成交金額、未成交金額、滑價成本、手續費與成交後現金影響
+                                </p>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-[110px_110px_110px_auto] gap-2 text-xs">
+                                <label className="space-y-1">
+                                  <span className="text-slate-500">成交率 %</span>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={100}
+                                    step={1}
+                                    value={fillCompletionPercent}
+                                    onChange={(event) => setFillCompletionPercent(Math.min(100, Math.max(0, Math.floor(Number(event.target.value) || 0))))}
+                                    className="w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-right font-mono text-slate-100"
+                                  />
+                                </label>
+                                <label className="space-y-1">
+                                  <span className="text-slate-500">滑價 bps</span>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={200}
+                                    step={0.5}
+                                    value={fillSlippageBps}
+                                    onChange={(event) => setFillSlippageBps(Math.min(200, Math.max(0, Number(event.target.value) || 0)))}
+                                    className="w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-right font-mono text-slate-100"
+                                  />
+                                </label>
+                                <label className="space-y-1">
+                                  <span className="text-slate-500">手續費 bps</span>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={200}
+                                    step={0.5}
+                                    value={fillCommissionBps}
+                                    onChange={(event) => setFillCommissionBps(Math.min(200, Math.max(0, Number(event.target.value) || 0)))}
+                                    className="w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-right font-mono text-slate-100"
+                                  />
+                                </label>
+                                <button
+                                  onClick={handleExportExecutionFillCsv}
+                                  disabled={!executionFillRows.length}
+                                  className="sm:col-span-2 xl:col-span-1 xl:self-end px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+                                >
+                                  成交 CSV
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                              {[
+                                ["成交金額", formatCurrency(totalFilledNotional)],
+                                ["未成交", formatCurrency(totalUnfilledNotional)],
+                                ["總成本", formatCurrency(totalExecutionCost)],
+                                ["成交後現金", formatCurrency(totalCashImpactAfterCost)],
+                              ].map(([label, value]) => (
+                                <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 p-3 min-w-0">
+                                  <p className="text-[11px] text-slate-600 truncate">{label}</p>
+                                  <p className="mt-1 font-mono text-sm font-bold text-slate-100 truncate" title={value}>
+                                    {value}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+
+                            <div className="overflow-x-auto">
+                              <table className="w-full min-w-[1080px] text-xs">
+                                <thead>
+                                  <tr className="text-left text-[11px] text-slate-600">
+                                    <th className="py-2 px-3 font-medium">商品</th>
+                                    <th className="py-2 px-3 font-medium">動作</th>
+                                    <th className="py-2 px-3 font-medium text-right">目標金額</th>
+                                    <th className="py-2 px-3 font-medium text-right">成交金額</th>
+                                    <th className="py-2 px-3 font-medium text-right">未成交</th>
+                                    <th className="py-2 px-3 font-medium text-right">成本</th>
+                                    <th className="py-2 px-3 font-medium text-right">成交後現金</th>
+                                    <th className="py-2 px-3 font-medium text-right">狀態</th>
+                                    <th className="py-2 px-3 font-medium">說明</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {executionFillRows.map((row) => (
+                                    <tr key={`${row.symbol}-${row.direction}-fill`} className={`border-t ${executionReviewRowClass(row.fillStatus)}`}>
+                                      <td className="py-2 px-3 font-bold text-slate-100">{row.symbol}</td>
+                                      <td className="py-2 px-3 text-slate-300">{rebalanceDirectionLabel(row.direction)}</td>
+                                      <td className="py-2 px-3 text-right font-mono text-slate-300">{formatCurrency(row.ticketAmount)}</td>
+                                      <td className="py-2 px-3 text-right font-mono text-slate-100">{formatCurrency(row.filledNotional)}</td>
+                                      <td className="py-2 px-3 text-right font-mono text-amber-200">{formatCurrency(row.unfilledNotional)}</td>
+                                      <td className="py-2 px-3 text-right font-mono text-rose-200">{formatCurrency(row.totalCost)}</td>
+                                      <td className="py-2 px-3 text-right font-mono text-slate-200">{formatCurrency(row.cashImpactAfterCost)}</td>
+                                      <td className="py-2 px-3 text-right">
+                                        <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(row.fillStatus)}`}>
+                                          {executionReviewLabel(row.fillStatus)}
+                                        </span>
+                                      </td>
+                                      <td className="py-2 px-3 text-slate-500">{row.fillNote}</td>
                                     </tr>
                                   ))}
                                 </tbody>
