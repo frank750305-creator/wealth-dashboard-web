@@ -47,6 +47,7 @@ type AllocationDraftRow = AssetComparisonRow & {
   allocationWeight: number;
   allocationAmount: number;
   allocationBasis: number;
+  allocationCapApplied: boolean;
   allocationNote: string;
 };
 
@@ -381,40 +382,96 @@ function allocationBasisForRow(row: AssetComparisonRow, mode: AllocationMode) {
   return Math.max(0, row.score - 35) / volatility / drawdownPenalty;
 }
 
-function allocationNoteForRow(row: AssetComparisonRow, mode: AllocationMode) {
+function allocationNoteForRow(row: AssetComparisonRow, mode: AllocationMode, capApplied: boolean) {
   if (row.signal === "risk" || row.qualityStatus === "risk") return "排除：資料品質或風險訊號偏弱";
   if (row.score < 40) return "排除：分數低於配置門檻";
+  if (capApplied) return "納入：達單檔上限，超額權重已重新分配";
   if (mode === "risk") return "納入：分數經波動與回撤調整";
   if (mode === "score") return "納入：依 Watchlist 分數配置";
   return "納入：符合門檻後等權配置";
 }
 
-function allocationDraftRows(rows: AssetComparisonRow[], mode: AllocationMode, capital: number): AllocationDraftRow[] {
+function cappedAllocationWeights(basisValues: number[], maximumWeight: number) {
+  const activeIndexes = basisValues
+    .map((basis, index) => ({ basis, index }))
+    .filter((item) => item.basis > 0)
+    .map((item) => item.index);
+  const weights = basisValues.map(() => 0);
+  if (!activeIndexes.length) return weights;
+
+  const effectiveCap = Math.max(Math.min(Math.max(maximumWeight, 0.01), 1), 1 / activeIndexes.length);
+  let remainingIndexes = [...activeIndexes];
+  let remainingWeight = 1;
+
+  while (remainingIndexes.length && remainingWeight > 0.000001) {
+    const totalBasis = remainingIndexes.reduce((sum, index) => sum + basisValues[index], 0);
+    if (totalBasis <= 0) {
+      const equalWeight = remainingWeight / remainingIndexes.length;
+      remainingIndexes.forEach((index) => {
+        weights[index] = Math.min(effectiveCap, equalWeight);
+      });
+      break;
+    }
+
+    const cappedIndexes = remainingIndexes.filter((index) => {
+      const proposedWeight = (remainingWeight * basisValues[index]) / totalBasis;
+      return proposedWeight >= effectiveCap;
+    });
+
+    if (!cappedIndexes.length) {
+      remainingIndexes.forEach((index) => {
+        weights[index] = (remainingWeight * basisValues[index]) / totalBasis;
+      });
+      break;
+    }
+
+    cappedIndexes.forEach((index) => {
+      weights[index] = effectiveCap;
+      remainingWeight -= effectiveCap;
+    });
+    remainingIndexes = remainingIndexes.filter((index) => !cappedIndexes.includes(index));
+  }
+
+  return weights;
+}
+
+function allocationDraftRows(rows: AssetComparisonRow[], mode: AllocationMode, capital: number, maximumWeight: number): AllocationDraftRow[] {
   const positiveRows = rows.map((row) => ({ row, basis: allocationBasisForRow(row, mode) }));
-  const totalBasis = positiveRows.reduce((sum, item) => sum + item.basis, 0);
+  const allocationWeights = cappedAllocationWeights(
+    positiveRows.map((item) => item.basis),
+    maximumWeight,
+  );
+  const effectiveCap = Math.max(
+    Math.min(Math.max(maximumWeight, 0.01), 1),
+    positiveRows.filter((item) => item.basis > 0).length ? 1 / positiveRows.filter((item) => item.basis > 0).length : 0,
+  );
 
   return positiveRows
-    .map(({ row, basis }) => {
-      const allocationWeight = totalBasis > 0 && basis > 0 ? basis / totalBasis : 0;
+    .map(({ row, basis }, index) => {
+      const allocationWeight = allocationWeights[index] ?? 0;
+      const allocationCapApplied = allocationWeight > 0 && allocationWeight >= effectiveCap - 0.000001;
       return {
         ...row,
         allocationWeight,
         allocationAmount: allocationWeight * Math.max(0, capital),
         allocationBasis: basis,
-        allocationNote: allocationNoteForRow(row, mode),
+        allocationCapApplied,
+        allocationNote: allocationNoteForRow(row, mode, allocationCapApplied),
       };
     })
     .sort((left, right) => right.allocationWeight - left.allocationWeight || right.score - left.score);
 }
 
-function allocationDraftCsv(rows: AllocationDraftRow[], mode: AllocationMode, capital: number, priceBasis: "adjusted" | "raw") {
+function allocationDraftCsv(rows: AllocationDraftRow[], mode: AllocationMode, capital: number, priceBasis: "adjusted" | "raw", maximumWeight: number) {
   const header = [
     "symbol",
     "price_basis",
     "allocation_mode",
     "model_capital",
+    "maximum_weight",
     "allocation_weight",
     "allocation_amount",
+    "allocation_cap_applied",
     "score",
     "signal",
     "quality_status",
@@ -430,8 +487,10 @@ function allocationDraftCsv(rows: AllocationDraftRow[], mode: AllocationMode, ca
     priceBasis,
     mode,
     capital,
+    maximumWeight,
     row.allocationWeight,
     row.allocationAmount,
+    row.allocationCapApplied,
     row.score,
     row.signal,
     row.qualityStatus,
@@ -554,6 +613,7 @@ function assetComparisonMemo(
     allocationRows?: AllocationDraftRow[];
     allocationMode?: AllocationMode;
     allocationCapital?: number;
+    maximumAllocationWeight?: number;
     allocationRisk?: AllocationRiskSnapshot;
     stressShockPercent?: number;
   },
@@ -602,6 +662,7 @@ function assetComparisonMemo(
       markdownCell(formatCurrency(row.allocationAmount)),
       row.score,
       markdownCell(decisionSignalLabel(row.signal)),
+      markdownCell(row.allocationCapApplied ? "達上限" : "--"),
       markdownCell(row.allocationNote),
     ].join(" | "),
   );
@@ -640,8 +701,9 @@ function assetComparisonMemo(
     "## 模型配置草稿",
     `- 配置模式：${options.allocationMode ? allocationModeLabel(options.allocationMode) : "--"}`,
     `- 模型本金：${formatCurrency(options.allocationCapital)}`,
-    memoAllocationRows.length ? "| 商品 | 權重 | 金額 | 分數 | 訊號 | 說明 |" : "目前篩選條件下沒有可納入配置的商品。",
-    memoAllocationRows.length ? "|---|---:|---:|---:|---|---|" : "",
+    `- 單檔權重上限：${formatPercent(options.maximumAllocationWeight)}`,
+    memoAllocationRows.length ? "| 商品 | 權重 | 金額 | 分數 | 訊號 | 上限 | 說明 |" : "目前篩選條件下沒有可納入配置的商品。",
+    memoAllocationRows.length ? "|---|---:|---:|---:|---|---|---|" : "",
     ...allocationTableRows.map((row) => `| ${row} |`),
     "",
     "## 配置風險壓力測試",
@@ -708,6 +770,7 @@ export function MarketDataPanel() {
   const [minimumComparisonScore, setMinimumComparisonScore] = useState(0);
   const [allocationMode, setAllocationMode] = useState<AllocationMode>("risk");
   const [allocationCapital, setAllocationCapital] = useState(1_000_000);
+  const [maximumAllocationWeight, setMaximumAllocationWeight] = useState(0.35);
   const [stressShockPercent, setStressShockPercent] = useState(-20);
   const [watchlistPresetName, setWatchlistPresetName] = useState("核心 ETF");
   const [selectedWatchlistPresetId, setSelectedWatchlistPresetId] = useState("");
@@ -789,8 +852,12 @@ export function MarketDataPanel() {
     }),
     comparisonSortKey,
   );
-  const modelAllocationRows = allocationDraftRows(visibleComparisonRows, allocationMode, allocationCapital);
+  const modelAllocationRows = allocationDraftRows(visibleComparisonRows, allocationMode, allocationCapital, maximumAllocationWeight);
   const activeAllocationRows = modelAllocationRows.filter((row) => row.allocationWeight > 0);
+  const effectiveMaximumAllocationWeight = Math.max(
+    maximumAllocationWeight,
+    activeAllocationRows.length ? 1 / activeAllocationRows.length : maximumAllocationWeight,
+  );
   const allocationRisk = allocationRiskSnapshot(activeAllocationRows, stressShockPercent);
 
   useEffect(() => {
@@ -983,7 +1050,7 @@ export function MarketDataPanel() {
 
     downloadTextFile(
       `bigquery-allocation-draft-${resultStamp()}.csv`,
-      allocationDraftCsv(modelAllocationRows, allocationMode, allocationCapital, assetPriceBasis),
+      allocationDraftCsv(modelAllocationRows, allocationMode, allocationCapital, assetPriceBasis, maximumAllocationWeight),
       "text/csv;charset=utf-8",
     );
   };
@@ -1008,6 +1075,7 @@ export function MarketDataPanel() {
       allocationRows: modelAllocationRows,
       allocationMode,
       allocationCapital,
+      maximumAllocationWeight,
       allocationRisk,
       stressShockPercent,
     });
@@ -1842,7 +1910,7 @@ export function MarketDataPanel() {
                       依目前 Watchlist 篩選結果產生研究用權重；風險訊號與低分商品會自動排除
                     </p>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-[150px_160px_150px_auto_auto] gap-2 text-xs">
+                  <div className="grid grid-cols-1 sm:grid-cols-[150px_160px_140px_150px_auto_auto] gap-2 text-xs">
                     <label className="space-y-1">
                       <span className="text-slate-500">配置模式</span>
                       <select
@@ -1863,6 +1931,18 @@ export function MarketDataPanel() {
                         step={10000}
                         value={allocationCapital}
                         onChange={(event) => setAllocationCapital(Math.max(0, Number(event.target.value) || 0))}
+                        className="w-full rounded-md border border-slate-800 bg-slate-950 px-3 py-2 text-right font-mono text-slate-100"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-slate-500">單檔上限</span>
+                      <input
+                        type="number"
+                        min={5}
+                        max={100}
+                        step={5}
+                        value={Math.round(maximumAllocationWeight * 100)}
+                        onChange={(event) => setMaximumAllocationWeight(Math.min(1, Math.max(0.05, (Number(event.target.value) || 0) / 100)))}
                         className="w-full rounded-md border border-slate-800 bg-slate-950 px-3 py-2 text-right font-mono text-slate-100"
                       />
                     </label>
@@ -1906,6 +1986,8 @@ export function MarketDataPanel() {
                         ? `${activeAllocationRows[0].symbol} · ${formatPercent(activeAllocationRows[0].allocationWeight)}`
                         : "--",
                     ],
+                    ["權重上限", formatPercent(effectiveMaximumAllocationWeight)],
+                    ["達上限", `${activeAllocationRows.filter((row) => row.allocationCapApplied).length} 檔`],
                     ["預估年化報酬", formatPercent(allocationRisk.expectedAnnualReturn)],
                     ["預估年化波動", formatPercent(allocationRisk.estimatedAnnualVolatility)],
                     ["壓力損益", formatCurrency(allocationRisk.stressLoss)],
@@ -1926,11 +2008,12 @@ export function MarketDataPanel() {
                 </div>
 
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[900px] text-xs">
+                  <table className="w-full min-w-[960px] text-xs">
                     <thead>
                       <tr className="text-left text-[11px] text-slate-600">
                         <th className="py-2 pr-3 font-medium">Symbol</th>
                         <th className="py-2 px-3 font-medium text-right">Weight</th>
+                        <th className="py-2 px-3 font-medium text-right">Cap</th>
                         <th className="py-2 px-3 font-medium text-right">Amount</th>
                         <th className="py-2 px-3 font-medium text-right">Score</th>
                         <th className="py-2 px-3 font-medium text-right">Vol</th>
@@ -1945,6 +2028,15 @@ export function MarketDataPanel() {
                           <td className="py-2 pr-3 font-bold text-cyan-200">{row.symbol}</td>
                           <td className="py-2 px-3 text-right font-mono text-slate-100">
                             {formatPercent(row.allocationWeight)}
+                          </td>
+                          <td className="py-2 px-3 text-right">
+                            <span
+                              className={`rounded px-2 py-0.5 text-[10px] font-bold ${
+                                row.allocationCapApplied ? "bg-amber-500/15 text-amber-200" : "bg-slate-800 text-slate-400"
+                              }`}
+                            >
+                              {row.allocationCapApplied ? "Hit" : "--"}
+                            </span>
                           </td>
                           <td className="py-2 px-3 text-right font-mono text-slate-300">
                             {formatCurrency(row.allocationAmount)}
