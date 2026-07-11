@@ -1936,6 +1936,128 @@ function platformExceptionCsv(rows: PlatformExceptionItem[]) {
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
+function qualityToExecutionStatus(status: QualityStatus): ExecutionReviewStatus {
+  if (status === "risk") return "block";
+  if (status === "watch" || status === "neutral") return "watch";
+  return "pass";
+}
+
+function combinedExecutionStatus(statuses: ExecutionReviewStatus[]): ExecutionReviewStatus {
+  if (statuses.some((status) => status === "block")) return "block";
+  if (statuses.some((status) => status === "watch")) return "watch";
+  return "pass";
+}
+
+function buildCioOperatingBriefItems({
+  dataStatus,
+  visibleRows,
+  candidateCount,
+  activeAllocationCount,
+  allocationRisk,
+  tradeTickets,
+  tradeBatchCount,
+  committeeDecision,
+  executionFillDecision,
+  postTradeDecision,
+  platformExceptionDecision,
+  platformExceptionBlockCount,
+  platformExceptionWatchCount,
+  totalExecutionCost,
+  totalUnfilledNotional,
+  totalCashImpactAfterCost,
+}: {
+  dataStatus: ExecutionReviewStatus;
+  visibleRows: number;
+  candidateCount: number;
+  activeAllocationCount: number;
+  allocationRisk: AllocationRiskSnapshot;
+  tradeTickets: TradeTicketRow[];
+  tradeBatchCount: number;
+  committeeDecision: CommitteeDecision;
+  executionFillDecision: ExecutionReviewStatus;
+  postTradeDecision: ExecutionReviewStatus;
+  platformExceptionDecision: ExecutionReviewStatus;
+  platformExceptionBlockCount: number;
+  platformExceptionWatchCount: number;
+  totalExecutionCost: number;
+  totalUnfilledNotional: number;
+  totalCashImpactAfterCost: number;
+}): ExecutionReviewItem[] {
+  const researchStatus: ExecutionReviewStatus = candidateCount > 0 ? "pass" : visibleRows > 0 ? "watch" : "block";
+  const allocationStatus: ExecutionReviewStatus = activeAllocationCount > 0 ? "pass" : visibleRows > 0 ? "watch" : "block";
+  const tradeStatus = committeeDecisionStatus(committeeDecision);
+  const exceptionStatus = platformExceptionDecision;
+  const baseItems: ExecutionReviewItem[] = [
+    {
+      label: "資料可用性",
+      status: dataStatus,
+      value: executionReviewLabel(dataStatus),
+      threshold: "資料表結構、價格新鮮度與覆蓋率需可用",
+      note: dataStatus === "block" ? "資料層仍有阻擋項，不應進入正式決策" : dataStatus === "watch" ? "資料可用但需保留觀察" : "資料層可支撐目前工作流",
+    },
+    {
+      label: "研究池",
+      status: researchStatus,
+      value: `${candidateCount} 候選 / ${visibleRows} 顯示`,
+      threshold: "至少一檔候選標的",
+      note: researchStatus === "block" ? "目前沒有可用研究標的" : researchStatus === "watch" ? "有標的但沒有候選，需要調整篩選條件" : "研究池已有候選標的",
+    },
+    {
+      label: "模型配置",
+      status: allocationStatus,
+      value: `${activeAllocationCount} 檔 / ${formatCurrency(allocationRisk.investedAmount)}`,
+      threshold: "至少一檔進入模型配置",
+      note: allocationStatus === "block" ? "尚未形成配置草稿" : allocationStatus === "watch" ? "配置草稿不足，需檢查篩選條件" : "配置草稿已可進入交易流程",
+    },
+    {
+      label: "交易管線",
+      status: tradeStatus,
+      value: `${tradeTickets.length} 檔 / ${tradeBatchCount} 批`,
+      threshold: "投委會簽核建議需可執行",
+      note: tradeStatus === "block" ? "交易管線暫緩" : tradeStatus === "watch" ? "交易可條件執行" : "交易管線可執行",
+    },
+    {
+      label: "成交與成本",
+      status: executionFillDecision,
+      value: `${formatCurrency(totalExecutionCost)} / 未成交 ${formatCurrency(totalUnfilledNotional)}`,
+      threshold: "成交率與交易成本需在門檻內",
+      note: executionFillDecision === "block" ? "成交或成本存在阻擋項" : executionFillDecision === "watch" ? "成交或成本需觀察" : "成交回報在目前門檻內",
+    },
+    {
+      label: "復盤狀態",
+      status: postTradeDecision,
+      value: `${formatCurrency(totalCashImpactAfterCost)} 現金影響`,
+      threshold: "成交後現金偏差、殘單與成本需可解釋",
+      note: postTradeDecision === "block" ? "復盤仍有阻擋項" : postTradeDecision === "watch" ? "復盤仍有觀察項" : "復盤狀態可接受",
+    },
+    {
+      label: "例外事項",
+      status: exceptionStatus,
+      value: `暫停 ${platformExceptionBlockCount} / 觀察 ${platformExceptionWatchCount}`,
+      threshold: "高優先例外需先處理",
+      note: exceptionStatus === "block" ? "先清除暫停項目" : exceptionStatus === "watch" ? "保留觀察項目並追蹤" : "目前沒有待處理例外事項",
+    },
+  ];
+  const overallStatus = combinedExecutionStatus(baseItems.map((item) => item.status));
+  const nextAction =
+    overallStatus === "block"
+      ? "暫停正式推進，先處理阻擋項與高優先例外"
+      : overallStatus === "watch"
+        ? "可進入條件執行或觀察，但需保留追蹤紀錄"
+        : "可進入下一輪配置、交易或回報週期";
+
+  return [
+    {
+      label: "CIO 總覽",
+      status: overallStatus,
+      value: executionReviewLabel(overallStatus),
+      threshold: "資料、研究、配置、交易、成交、復盤與例外事項共同判斷",
+      note: nextAction,
+    },
+    ...baseItems,
+  ];
+}
+
 function averageComparisonMetric(rows: AssetComparisonRow[], selector: (row: AssetComparisonRow) => number | null) {
   const values = rows.map(selector).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
   if (!values.length) return null;
@@ -2000,6 +2122,7 @@ function assetComparisonMemo(
     postTradeBenchmarkMovePercent?: number;
     platformExceptionItems?: PlatformExceptionItem[];
     exceptionDueDays?: number;
+    cioOperatingBriefItems?: ExecutionReviewItem[];
   },
 ) {
   const candidateRows = rows.filter((row) => row.signal === "candidate");
@@ -2026,6 +2149,7 @@ function assetComparisonMemo(
   const memoExecutionFillRows = (options.executionFillRows ?? []).slice(0, 8);
   const memoPostTradeAttributionItems = (options.postTradeAttributionItems ?? []).slice(0, 8);
   const memoPlatformExceptionItems = (options.platformExceptionItems ?? []).slice(0, 12);
+  const memoCioOperatingBriefItems = (options.cioOperatingBriefItems ?? []).slice(0, 8);
   const tableHeader = "| 商品 | 分數 | 訊號 | 年化報酬 | 年化波動 | 最大回撤 | 最新日 | 說明 |";
   const tableDivider = "|---|---:|---|---:|---:|---:|---|---|";
   const tableRows = topRows.map((row) =>
@@ -2191,6 +2315,15 @@ function assetComparisonMemo(
       markdownCell(row.nextAction),
     ].join(" | "),
   );
+  const cioOperatingBriefTableRows = memoCioOperatingBriefItems.map((row) =>
+    [
+      markdownCell(row.label),
+      markdownCell(executionReviewLabel(row.status)),
+      markdownCell(row.value),
+      markdownCell(row.threshold),
+      markdownCell(row.note),
+    ].join(" | "),
+  );
 
   return [
     `# ${options.name || "未命名 Watchlist"} 研究摘要`,
@@ -2201,6 +2334,11 @@ function assetComparisonMemo(
     `- 排序：${comparisonSortLabel(options.sortKey)}`,
     `- 訊號篩選：${comparisonSignalFilterLabel(options.signalFilter)}`,
     `- 最低分數：${options.minimumScore}`,
+    "",
+    "## CIO 營運總覽",
+    memoCioOperatingBriefItems.length ? "| 項目 | 狀態 | 目前值 | 門檻 | 下一步 |" : "目前沒有可輸出的 CIO 營運總覽。",
+    memoCioOperatingBriefItems.length ? "|---|---|---:|---|---|" : "",
+    ...cioOperatingBriefTableRows.map((row) => `| ${row} |`),
     "",
     "## 篩選概況",
     `- 顯示商品：${rows.length} / ${options.totalRows} 檔`,
@@ -2627,6 +2765,32 @@ export function MarketDataPanel() {
   const platformExceptionHighPriorityCount = platformExceptionItems.filter((item) => item.priority === "high").length;
   const platformExceptionDecision: ExecutionReviewStatus =
     platformExceptionBlockCount > 0 ? "block" : platformExceptionWatchCount > 0 ? "watch" : "pass";
+  const dataReadinessDecision = combinedExecutionStatus([
+    qualityToExecutionStatus(schemaStatus),
+    qualityToExecutionStatus(priceFreshnessStatus),
+    qualityToExecutionStatus(symbolCoverageStatus),
+    qualityToExecutionStatus(priceDepthStatus),
+  ]);
+  const candidateVisibleCount = visibleComparisonRows.filter((row) => row.signal === "candidate").length;
+  const cioOperatingBriefItems = buildCioOperatingBriefItems({
+    dataStatus: dataReadinessDecision,
+    visibleRows: visibleComparisonRows.length,
+    candidateCount: candidateVisibleCount,
+    activeAllocationCount: activeAllocationRows.length,
+    allocationRisk,
+    tradeTickets,
+    tradeBatchCount,
+    committeeDecision,
+    executionFillDecision,
+    postTradeDecision,
+    platformExceptionDecision,
+    platformExceptionBlockCount,
+    platformExceptionWatchCount,
+    totalExecutionCost,
+    totalUnfilledNotional,
+    totalCashImpactAfterCost,
+  });
+  const cioOperatingDecision = cioOperatingBriefItems[0]?.status ?? "watch";
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -2939,6 +3103,15 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleExportCioOperatingBriefCsv = () => {
+    if (!cioOperatingBriefItems.length) return;
+
+    downloadTextFile(
+      `bigquery-cio-operating-brief-${resultStamp()}.csv`,
+      executionReviewCsv(cioOperatingBriefItems),
+      "text/csv;charset=utf-8",
+    );
+  };
   const buildAssetComparisonMemo = () =>
     assetComparisonMemo(visibleComparisonRows, {
       name: watchlistPresetName.trim() || "未命名 Watchlist",
@@ -2983,6 +3156,7 @@ export function MarketDataPanel() {
       postTradeBenchmarkMovePercent,
       platformExceptionItems,
       exceptionDueDays,
+      cioOperatingBriefItems,
     });
   const handleExportAssetComparisonMemo = () => {
     if (!visibleComparisonRows.length) return;
@@ -5229,6 +5403,74 @@ export function MarketDataPanel() {
                                 目前沒有待處理例外事項。
                               </div>
                             )}
+                          </div>
+
+                          <div className="border-t border-slate-800 pt-3 space-y-3">
+                            <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-3">
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <h5 className="text-xs font-bold text-slate-100">CIO 營運總覽</h5>
+                                  <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(cioOperatingDecision)}`}>
+                                    {executionReviewLabel(cioOperatingDecision)}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-slate-500 mt-0.5">
+                                  將資料、研究、配置、交易、成交、復盤與例外事項整合成高層決策摘要
+                                </p>
+                              </div>
+                              <button
+                                onClick={handleExportCioOperatingBriefCsv}
+                                disabled={!cioOperatingBriefItems.length}
+                                className="px-3 py-2 rounded-md bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-100 text-xs font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+                              >
+                                CIO CSV
+                              </button>
+                            </div>
+
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                              {[
+                                ["總覽狀態", executionReviewLabel(cioOperatingDecision)],
+                                ["候選標的", `${candidateVisibleCount} 檔`],
+                                ["送簽交易", `${tradeTickets.length} 檔`],
+                                ["待處理例外", `${platformExceptionItems.length} 項`],
+                              ].map(([label, value]) => (
+                                <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 p-3 min-w-0">
+                                  <p className="text-[11px] text-slate-600 truncate">{label}</p>
+                                  <p className="mt-1 font-mono text-sm font-bold text-slate-100 truncate" title={value}>
+                                    {value}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+
+                            <div className="overflow-x-auto">
+                              <table className="w-full min-w-[980px] text-xs">
+                                <thead>
+                                  <tr className="text-left text-[11px] text-slate-600">
+                                    <th className="py-2 px-3 font-medium">項目</th>
+                                    <th className="py-2 px-3 font-medium text-right">狀態</th>
+                                    <th className="py-2 px-3 font-medium text-right">目前值</th>
+                                    <th className="py-2 px-3 font-medium">門檻</th>
+                                    <th className="py-2 px-3 font-medium">下一步</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {cioOperatingBriefItems.map((item) => (
+                                    <tr key={item.label} className={`border-t ${executionReviewRowClass(item.status)}`}>
+                                      <td className="py-2 px-3 font-bold text-slate-100">{item.label}</td>
+                                      <td className="py-2 px-3 text-right">
+                                        <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(item.status)}`}>
+                                          {executionReviewLabel(item.status)}
+                                        </span>
+                                      </td>
+                                      <td className="py-2 px-3 text-right font-mono text-slate-200">{item.value}</td>
+                                      <td className="py-2 px-3 text-slate-400">{item.threshold}</td>
+                                      <td className="py-2 px-3 text-slate-500">{item.note}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
                           </div>
                         </div>
                       </section>
