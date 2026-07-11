@@ -67,6 +67,22 @@ type AllocationRiskSnapshot = {
   riskRows: AllocationRiskRow[];
 };
 
+type RebalanceDirection = "buy" | "sell" | "hold";
+
+type RebalanceDraftRow = {
+  symbol: string;
+  currentAmount: number;
+  currentWeight: number;
+  targetAmount: number;
+  targetWeight: number;
+  tradeAmount: number;
+  tradeWeight: number;
+  direction: RebalanceDirection;
+  score: number | null;
+  signal: AssetDecisionSignal | null;
+  note: string;
+};
+
 const statusMeta: Record<MarketSourceStatus, { label: string; className: string }> = {
   ready: {
     label: "可接 API",
@@ -581,6 +597,116 @@ function allocationRiskCsv(snapshot: AllocationRiskSnapshot, stressShockPercent:
     .join("\n");
 }
 
+function parseCurrentHoldings(value: string) {
+  const holdings = new Map<string, number>();
+
+  value.split(/\n+/).forEach((line) => {
+    const cleanLine = line.trim();
+    if (!cleanLine) return;
+
+    const match = cleanLine.match(/^([^\s,，]+)[\s,，]+(.+)$/);
+    if (!match) return;
+
+    const symbol = match[1].trim().toUpperCase();
+    const amount = Number(match[2].replace(/[,\s，]/g, ""));
+    if (!symbol || !Number.isFinite(amount)) return;
+
+    holdings.set(symbol, (holdings.get(symbol) ?? 0) + amount);
+  });
+
+  return holdings;
+}
+
+function rebalanceDirectionLabel(direction: RebalanceDirection) {
+  if (direction === "buy") return "買入";
+  if (direction === "sell") return "賣出";
+  return "不動";
+}
+
+function rebalanceDirectionClass(direction: RebalanceDirection) {
+  if (direction === "buy") return "bg-emerald-500/15 text-emerald-200";
+  if (direction === "sell") return "bg-rose-500/15 text-rose-200";
+  return "bg-slate-800 text-slate-300";
+}
+
+function rebalanceDraftRows(
+  allocationRows: AllocationDraftRow[],
+  currentHoldingsText: string,
+  driftThreshold: number,
+): RebalanceDraftRow[] {
+  const currentHoldings = parseCurrentHoldings(currentHoldingsText);
+  if (!currentHoldings.size) return [];
+
+  const allocationBySymbol = new Map(allocationRows.map((row) => [row.symbol.toUpperCase(), row]));
+  const symbols = Array.from(new Set([...allocationRows.map((row) => row.symbol.toUpperCase()), ...currentHoldings.keys()]));
+  const currentTotal = Array.from(currentHoldings.values()).reduce((sum, amount) => sum + amount, 0);
+  const targetTotal = allocationRows.reduce((sum, row) => sum + row.allocationAmount, 0);
+
+  return symbols
+    .map((symbol) => {
+      const allocation = allocationBySymbol.get(symbol);
+      const currentAmount = currentHoldings.get(symbol) ?? 0;
+      const targetAmount = allocation?.allocationAmount ?? 0;
+      const currentWeight = currentTotal > 0 ? currentAmount / currentTotal : 0;
+      const targetWeight = allocation?.allocationWeight ?? 0;
+      const tradeAmount = targetAmount - currentAmount;
+      const tradeWeight = targetWeight - currentWeight;
+      const direction: RebalanceDirection =
+        Math.abs(tradeWeight) < driftThreshold ? "hold" : tradeAmount > 0 ? "buy" : "sell";
+
+      return {
+        symbol,
+        currentAmount,
+        currentWeight,
+        targetAmount,
+        targetWeight,
+        tradeAmount,
+        tradeWeight,
+        direction,
+        score: allocation?.score ?? null,
+        signal: allocation?.signal ?? null,
+        note:
+          allocation && allocation.allocationWeight > 0
+            ? "依模型目標權重再平衡"
+            : "不在模型配置內，目標權重為 0",
+      };
+    })
+    .sort((left, right) => Math.abs(right.tradeAmount) - Math.abs(left.tradeAmount));
+}
+
+function rebalanceDraftCsv(rows: RebalanceDraftRow[], driftThreshold: number) {
+  const header = [
+    "symbol",
+    "current_amount",
+    "current_weight",
+    "target_amount",
+    "target_weight",
+    "trade_amount",
+    "trade_weight",
+    "direction",
+    "drift_threshold",
+    "score",
+    "signal",
+    "note",
+  ];
+  const csvRows = rows.map((row) => [
+    row.symbol,
+    row.currentAmount,
+    row.currentWeight,
+    row.targetAmount,
+    row.targetWeight,
+    row.tradeAmount,
+    row.tradeWeight,
+    row.direction,
+    driftThreshold,
+    row.score ?? "",
+    row.signal ?? "",
+    row.note,
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
 function averageComparisonMetric(rows: AssetComparisonRow[], selector: (row: AssetComparisonRow) => number | null) {
   const values = rows.map(selector).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
   if (!values.length) return null;
@@ -616,6 +742,8 @@ function assetComparisonMemo(
     maximumAllocationWeight?: number;
     allocationRisk?: AllocationRiskSnapshot;
     stressShockPercent?: number;
+    rebalanceRows?: RebalanceDraftRow[];
+    rebalanceThreshold?: number;
   },
 ) {
   const candidateRows = rows.filter((row) => row.signal === "candidate");
@@ -630,6 +758,7 @@ function assetComparisonMemo(
   const reviewRows = [...riskRows, ...qualityRows.filter((row) => !riskRows.some((riskRow) => riskRow.symbol === row.symbol))].slice(0, 8);
   const memoAllocationRows = (options.allocationRows ?? []).filter((row) => row.allocationWeight > 0).slice(0, 8);
   const memoRiskRows = (options.allocationRisk?.riskRows ?? []).slice(0, 5);
+  const memoRebalanceRows = (options.rebalanceRows ?? []).slice(0, 8);
   const tableHeader = "| 商品 | 分數 | 訊號 | 年化報酬 | 年化波動 | 最大回撤 | 最新日 | 說明 |";
   const tableDivider = "|---|---:|---|---:|---:|---:|---|---|";
   const tableRows = topRows.map((row) =>
@@ -675,6 +804,16 @@ function assetComparisonMemo(
       markdownCell(formatPercent(row.maxDrawdown)),
     ].join(" | "),
   );
+  const rebalanceTableRows = memoRebalanceRows.map((row) =>
+    [
+      markdownCell(row.symbol),
+      markdownCell(formatCurrency(row.currentAmount)),
+      markdownCell(formatCurrency(row.targetAmount)),
+      markdownCell(formatCurrency(row.tradeAmount)),
+      markdownCell(formatPercent(row.tradeWeight)),
+      markdownCell(rebalanceDirectionLabel(row.direction)),
+    ].join(" | "),
+  );
 
   return [
     `# ${options.name || "未命名 Watchlist"} 研究摘要`,
@@ -715,6 +854,12 @@ function assetComparisonMemo(
     memoRiskRows.length ? "| 商品 | 權重 | 風險貢獻 | 年化波動 | 最大回撤 |" : "目前沒有可計算風險貢獻的配置商品。",
     memoRiskRows.length ? "|---|---:|---:|---:|---:|" : "",
     ...riskBudgetTableRows.map((row) => `| ${row} |`),
+    "",
+    "## 再平衡交易草稿",
+    `- 偏離門檻：${formatPercent(options.rebalanceThreshold)}`,
+    memoRebalanceRows.length ? "| 商品 | 現有金額 | 目標金額 | 交易差額 | 權重偏離 | 動作 |" : "尚未輸入現有持倉，無法產生再平衡草稿。",
+    memoRebalanceRows.length ? "|---|---:|---:|---:|---:|---|" : "",
+    ...rebalanceTableRows.map((row) => `| ${row} |`),
     "",
     "## 需要複核的風險",
     reviewRows.length ? "| 商品 | 分數 | 訊號 | 品質 | 最新日 | 距今天 | 說明 |" : "目前篩選結果未偵測到明確風險。",
@@ -772,6 +917,8 @@ export function MarketDataPanel() {
   const [allocationCapital, setAllocationCapital] = useState(1_000_000);
   const [maximumAllocationWeight, setMaximumAllocationWeight] = useState(0.35);
   const [stressShockPercent, setStressShockPercent] = useState(-20);
+  const [currentHoldingsText, setCurrentHoldingsText] = useState("");
+  const [rebalanceThreshold, setRebalanceThreshold] = useState(0.02);
   const [watchlistPresetName, setWatchlistPresetName] = useState("核心 ETF");
   const [selectedWatchlistPresetId, setSelectedWatchlistPresetId] = useState("");
   const [savedWatchlistPresets, setSavedWatchlistPresets] = useState<SavedWatchlistPreset[]>([]);
@@ -859,6 +1006,8 @@ export function MarketDataPanel() {
     activeAllocationRows.length ? 1 / activeAllocationRows.length : maximumAllocationWeight,
   );
   const allocationRisk = allocationRiskSnapshot(activeAllocationRows, stressShockPercent);
+  const rebalanceRows = rebalanceDraftRows(activeAllocationRows, currentHoldingsText, rebalanceThreshold);
+  const activeRebalanceRows = rebalanceRows.filter((row) => row.direction !== "hold");
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1063,6 +1212,15 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleExportRebalanceDraftCsv = () => {
+    if (!rebalanceRows.length) return;
+
+    downloadTextFile(
+      `bigquery-rebalance-draft-${resultStamp()}.csv`,
+      rebalanceDraftCsv(rebalanceRows, rebalanceThreshold),
+      "text/csv;charset=utf-8",
+    );
+  };
   const buildAssetComparisonMemo = () =>
     assetComparisonMemo(visibleComparisonRows, {
       name: watchlistPresetName.trim() || "未命名 Watchlist",
@@ -1078,6 +1236,8 @@ export function MarketDataPanel() {
       maximumAllocationWeight,
       allocationRisk,
       stressShockPercent,
+      rebalanceRows,
+      rebalanceThreshold,
     });
   const handleExportAssetComparisonMemo = () => {
     if (!visibleComparisonRows.length) return;
@@ -2126,6 +2286,146 @@ export function MarketDataPanel() {
                       </tbody>
                     </table>
                   </div>
+                </div>
+
+                <div className="border-t border-slate-800 pt-3 space-y-3">
+                  <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-3">
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-100">再平衡交易草稿</h4>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        輸入現有持倉金額後，依模型目標權重估算買賣差額
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-[150px_auto] gap-2 text-xs">
+                      <label className="space-y-1">
+                        <span className="text-slate-500">偏離門檻</span>
+                        <input
+                          type="number"
+                          min={0}
+                          max={20}
+                          step={0.5}
+                          value={Number((rebalanceThreshold * 100).toFixed(2))}
+                          onChange={(event) => setRebalanceThreshold(Math.min(0.2, Math.max(0, (Number(event.target.value) || 0) / 100)))}
+                          className="w-full rounded-md border border-slate-800 bg-slate-950 px-3 py-2 text-right font-mono text-slate-100"
+                        />
+                      </label>
+                      <button
+                        onClick={handleExportRebalanceDraftCsv}
+                        disabled={!rebalanceRows.length}
+                        className="sm:self-end px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+                      >
+                        再平衡 CSV
+                      </button>
+                    </div>
+                  </div>
+
+                  <textarea
+                    value={currentHoldingsText}
+                    onChange={(event) => setCurrentHoldingsText(event.target.value)}
+                    rows={4}
+                    placeholder={"0050.TW 300000\nSPY 250000\nQQQ 200000"}
+                    className="w-full resize-y rounded-md border border-slate-800 bg-slate-950 px-3 py-2 font-mono text-xs text-slate-100 outline-none placeholder:text-slate-700 focus:border-cyan-600"
+                  />
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
+                    <span>每行一檔：商品代號 金額；也可用逗號分隔</span>
+                    <span className="font-mono">
+                      {rebalanceRows.length} rows · {formatPercent(rebalanceThreshold)}
+                    </span>
+                  </div>
+
+                  {rebalanceRows.length ? (
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                        {[
+                          ["需交易", `${activeRebalanceRows.length} 檔`],
+                          [
+                            "買入金額",
+                            formatCurrency(
+                              activeRebalanceRows
+                                .filter((row) => row.direction === "buy")
+                                .reduce((sum, row) => sum + row.tradeAmount, 0),
+                            ),
+                          ],
+                          [
+                            "賣出金額",
+                            formatCurrency(
+                              activeRebalanceRows
+                                .filter((row) => row.direction === "sell")
+                                .reduce((sum, row) => sum + Math.abs(row.tradeAmount), 0),
+                            ),
+                          ],
+                          [
+                            "最大偏離",
+                            rebalanceRows.length
+                              ? `${rebalanceRows[0].symbol} · ${formatPercent(rebalanceRows[0].tradeWeight)}`
+                              : "--",
+                          ],
+                        ].map(([label, value]) => (
+                          <div key={label} className="rounded-md border border-slate-800 bg-slate-950/70 p-3 min-w-0">
+                            <p className="text-[11px] text-slate-600 truncate">{label}</p>
+                            <p className="mt-1 font-mono text-sm font-bold text-slate-100 truncate" title={value}>
+                              {value}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="overflow-x-auto rounded-md border border-slate-800 bg-slate-950/70">
+                        <table className="w-full min-w-[920px] text-xs">
+                          <thead>
+                            <tr className="text-left text-[11px] text-slate-600">
+                              <th className="py-2 px-3 font-medium">Symbol</th>
+                              <th className="py-2 px-3 font-medium text-right">Current</th>
+                              <th className="py-2 px-3 font-medium text-right">Target</th>
+                              <th className="py-2 px-3 font-medium text-right">Trade</th>
+                              <th className="py-2 px-3 font-medium text-right">Current W</th>
+                              <th className="py-2 px-3 font-medium text-right">Target W</th>
+                              <th className="py-2 px-3 font-medium text-right">Drift</th>
+                              <th className="py-2 px-3 font-medium text-right">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {rebalanceRows.slice(0, 12).map((row) => (
+                              <tr key={row.symbol} className="border-t border-slate-800/80">
+                                <td className="py-2 px-3 font-bold text-cyan-200">{row.symbol}</td>
+                                <td className="py-2 px-3 text-right font-mono text-slate-300">
+                                  {formatCurrency(row.currentAmount)}
+                                </td>
+                                <td className="py-2 px-3 text-right font-mono text-slate-300">
+                                  {formatCurrency(row.targetAmount)}
+                                </td>
+                                <td
+                                  className={`py-2 px-3 text-right font-mono ${
+                                    row.tradeAmount < 0 ? "text-rose-300" : row.tradeAmount > 0 ? "text-emerald-300" : "text-slate-400"
+                                  }`}
+                                >
+                                  {formatCurrency(row.tradeAmount)}
+                                </td>
+                                <td className="py-2 px-3 text-right font-mono text-slate-400">
+                                  {formatPercent(row.currentWeight)}
+                                </td>
+                                <td className="py-2 px-3 text-right font-mono text-slate-400">
+                                  {formatPercent(row.targetWeight)}
+                                </td>
+                                <td className="py-2 px-3 text-right font-mono text-slate-300">
+                                  {formatPercent(row.tradeWeight)}
+                                </td>
+                                <td className="py-2 px-3 text-right">
+                                  <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${rebalanceDirectionClass(row.direction)}`}>
+                                    {rebalanceDirectionLabel(row.direction)}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-md border border-dashed border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-500">
+                      輸入現有持倉後，這裡會顯示目標金額、買賣差額與偏離門檻判斷。
+                    </div>
+                  )}
                 </div>
               </section>
 
