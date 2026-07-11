@@ -89,6 +89,14 @@ type TradeTicketRow = RebalanceDraftRow & {
   ticketNote: string;
 };
 
+type TradeBatchRow = TradeTicketRow & {
+  batchNumber: number;
+  batchGrossAmount: number;
+  batchCashImpact: number;
+  sequenceInBatch: number;
+  batchNote: string;
+};
+
 type ExecutionReviewStatus = "pass" | "watch" | "block";
 
 type ExecutionReviewItem = {
@@ -771,6 +779,86 @@ function tradeTicketCsv(rows: TradeTicketRow[], minimumTradeAmount: number) {
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
+function tradeBatchRows(
+  tickets: TradeTicketRow[],
+  maximumBatchAmount: number,
+  maximumTicketsPerBatch: number,
+): TradeBatchRow[] {
+  const cleanMaximumBatchAmount = Math.max(0, maximumBatchAmount);
+  const cleanMaximumTicketsPerBatch = Math.max(1, Math.floor(maximumTicketsPerBatch));
+  const batches: TradeTicketRow[][] = [];
+
+  tickets.forEach((ticket) => {
+    const currentBatch = batches[batches.length - 1];
+    const currentGrossAmount = currentBatch?.reduce((sum, row) => sum + row.ticketAmount, 0) ?? 0;
+    const shouldStartNewBatch = Boolean(
+      currentBatch?.length &&
+        (currentBatch.length >= cleanMaximumTicketsPerBatch ||
+          (cleanMaximumBatchAmount > 0 && currentGrossAmount + ticket.ticketAmount > cleanMaximumBatchAmount)),
+    );
+
+    if (!currentBatch || shouldStartNewBatch) {
+      batches.push([ticket]);
+      return;
+    }
+
+    currentBatch.push(ticket);
+  });
+
+  return batches.flatMap((batch, batchIndex) => {
+    const batchGrossAmount = batch.reduce((sum, row) => sum + row.ticketAmount, 0);
+    const batchCashImpact = batch.reduce((sum, row) => sum + row.cashImpact, 0);
+    const batchNote =
+      cleanMaximumBatchAmount > 0 && batchGrossAmount > cleanMaximumBatchAmount
+        ? "單筆交易已超過批次金額上限，需人工確認流動性"
+        : "依交易金額與筆數上限分批";
+
+    return batch.map((row, rowIndex) => ({
+      ...row,
+      batchNumber: batchIndex + 1,
+      batchGrossAmount,
+      batchCashImpact,
+      sequenceInBatch: rowIndex + 1,
+      batchNote,
+    }));
+  });
+}
+
+function tradeBatchCsv(rows: TradeBatchRow[], maximumBatchAmount: number, maximumTicketsPerBatch: number) {
+  const header = [
+    "batch_number",
+    "sequence_in_batch",
+    "symbol",
+    "direction",
+    "ticket_amount",
+    "cash_impact",
+    "batch_gross_amount",
+    "batch_cash_impact",
+    "maximum_batch_amount",
+    "maximum_tickets_per_batch",
+    "trade_weight",
+    "score",
+    "note",
+  ];
+  const csvRows = rows.map((row) => [
+    row.batchNumber,
+    row.sequenceInBatch,
+    row.symbol,
+    row.direction,
+    row.ticketAmount,
+    row.cashImpact,
+    row.batchGrossAmount,
+    row.batchCashImpact,
+    maximumBatchAmount,
+    maximumTicketsPerBatch,
+    row.tradeWeight,
+    row.score ?? "",
+    row.batchNote,
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
 function executionReviewLabel(status: ExecutionReviewStatus) {
   if (status === "pass") return "通過";
   if (status === "watch") return "觀察";
@@ -938,6 +1026,9 @@ function assetComparisonMemo(
     rebalanceThreshold?: number;
     tradeTickets?: TradeTicketRow[];
     minimumTradeAmount?: number;
+    tradeBatches?: TradeBatchRow[];
+    maximumBatchAmount?: number;
+    maximumTicketsPerBatch?: number;
     executionReviewItems?: ExecutionReviewItem[];
   },
 ) {
@@ -955,6 +1046,7 @@ function assetComparisonMemo(
   const memoRiskRows = (options.allocationRisk?.riskRows ?? []).slice(0, 5);
   const memoRebalanceRows = (options.rebalanceRows ?? []).slice(0, 8);
   const memoTradeTickets = (options.tradeTickets ?? []).slice(0, 8);
+  const memoTradeBatches = (options.tradeBatches ?? []).slice(0, 10);
   const memoExecutionReviewItems = (options.executionReviewItems ?? []).slice(0, 8);
   const tableHeader = "| 商品 | 分數 | 訊號 | 年化報酬 | 年化波動 | 最大回撤 | 最新日 | 說明 |";
   const tableDivider = "|---|---:|---|---:|---:|---:|---|---|";
@@ -1021,6 +1113,18 @@ function assetComparisonMemo(
       markdownCell(row.ticketNote),
     ].join(" | "),
   );
+  const tradeBatchTableRows = memoTradeBatches.map((row) =>
+    [
+      row.batchNumber,
+      row.sequenceInBatch,
+      markdownCell(row.symbol),
+      markdownCell(rebalanceDirectionLabel(row.direction)),
+      markdownCell(formatCurrency(row.ticketAmount)),
+      markdownCell(formatCurrency(row.batchGrossAmount)),
+      markdownCell(formatCurrency(row.batchCashImpact)),
+      markdownCell(row.batchNote),
+    ].join(" | "),
+  );
   const executionReviewTableRows = memoExecutionReviewItems.map((row) =>
     [
       markdownCell(row.label),
@@ -1082,6 +1186,13 @@ function assetComparisonMemo(
     memoTradeTickets.length ? "| 商品 | 動作 | 交易金額 | 現金影響 | 權重偏離 | 說明 |" : "目前沒有達最小交易金額的可執行交易。",
     memoTradeTickets.length ? "|---|---|---:|---:|---:|---|" : "",
     ...tradeTicketTableRows.map((row) => `| ${row} |`),
+    "",
+    "## 分批交易計畫",
+    `- 單批金額上限：${formatCurrency(options.maximumBatchAmount)}`,
+    `- 每批筆數上限：${options.maximumTicketsPerBatch ?? "--"}`,
+    memoTradeBatches.length ? "| 批次 | 順序 | 商品 | 動作 | 交易金額 | 批次總額 | 批次現金 | 說明 |" : "目前沒有可分批的交易。",
+    memoTradeBatches.length ? "|---:|---:|---|---|---:|---:|---:|---|" : "",
+    ...tradeBatchTableRows.map((row) => `| ${row} |`),
     "",
     "## 交易前檢核",
     memoExecutionReviewItems.length ? "| 項目 | 狀態 | 目前值 | 門檻 | 說明 |" : "目前沒有可輸出的交易前檢核。",
@@ -1147,6 +1258,8 @@ export function MarketDataPanel() {
   const [currentHoldingsText, setCurrentHoldingsText] = useState("");
   const [rebalanceThreshold, setRebalanceThreshold] = useState(0.02);
   const [minimumTradeAmount, setMinimumTradeAmount] = useState(10_000);
+  const [maximumBatchAmount, setMaximumBatchAmount] = useState(300_000);
+  const [maximumTicketsPerBatch, setMaximumTicketsPerBatch] = useState(4);
   const [watchlistPresetName, setWatchlistPresetName] = useState("核心 ETF");
   const [selectedWatchlistPresetId, setSelectedWatchlistPresetId] = useState("");
   const [savedWatchlistPresets, setSavedWatchlistPresets] = useState<SavedWatchlistPreset[]>([]);
@@ -1238,6 +1351,14 @@ export function MarketDataPanel() {
   const activeRebalanceRows = rebalanceRows.filter((row) => row.direction !== "hold");
   const tradeTickets = tradeTicketRows(rebalanceRows, minimumTradeAmount);
   const skippedTradeCount = activeRebalanceRows.length - tradeTickets.length;
+  const tradeBatches = tradeBatchRows(tradeTickets, maximumBatchAmount, maximumTicketsPerBatch);
+  const tradeBatchCount = tradeBatches.reduce((maxValue, row) => Math.max(maxValue, row.batchNumber), 0);
+  const firstTradeBatch = tradeBatches.find((row) => row.batchNumber === 1);
+  const maximumTradeBatchGross = tradeBatches.reduce((maxValue, row) => Math.max(maxValue, row.batchGrossAmount), 0);
+  const averageTradeBatchGross = tradeBatchCount > 0 ? tradeBatches.reduce((sum, row) => {
+    if (row.sequenceInBatch !== 1) return sum;
+    return sum + row.batchGrossAmount;
+  }, 0) / tradeBatchCount : null;
   const executionReviewItems = tradeExecutionReviewItems({
     tradeTickets,
     activeTrades: activeRebalanceRows,
@@ -1471,6 +1592,15 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleExportTradeBatchCsv = () => {
+    if (!tradeBatches.length) return;
+
+    downloadTextFile(
+      `bigquery-trade-batches-${resultStamp()}.csv`,
+      tradeBatchCsv(tradeBatches, maximumBatchAmount, maximumTicketsPerBatch),
+      "text/csv;charset=utf-8",
+    );
+  };
   const handleExportExecutionReviewCsv = () => {
     if (!executionReviewItems.length) return;
 
@@ -1499,6 +1629,9 @@ export function MarketDataPanel() {
       rebalanceThreshold,
       tradeTickets,
       minimumTradeAmount,
+      tradeBatches,
+      maximumBatchAmount,
+      maximumTicketsPerBatch,
       executionReviewItems,
     });
   const handleExportAssetComparisonMemo = () => {
@@ -2791,6 +2924,112 @@ export function MarketDataPanel() {
                         )}
 
                         <div className="border-t border-slate-800 pt-3 space-y-3">
+                          <div className="space-y-3">
+                            <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-3">
+                              <div>
+                                <h5 className="text-xs font-bold text-slate-100">分批交易計畫</h5>
+                                <p className="text-[11px] text-slate-500 mt-0.5">
+                                  依單批金額與筆數限制，把交易清單拆成較容易執行與覆核的批次
+                                </p>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-[170px_140px_auto] gap-2 text-xs">
+                                <label className="space-y-1">
+                                  <span className="text-slate-500">單批金額上限</span>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    step={10000}
+                                    value={maximumBatchAmount}
+                                    onChange={(event) => setMaximumBatchAmount(Math.max(0, Number(event.target.value) || 0))}
+                                    className="w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-right font-mono text-slate-100"
+                                  />
+                                </label>
+                                <label className="space-y-1">
+                                  <span className="text-slate-500">每批筆數</span>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    max={20}
+                                    step={1}
+                                    value={maximumTicketsPerBatch}
+                                    onChange={(event) => setMaximumTicketsPerBatch(Math.max(1, Math.floor(Number(event.target.value) || 1)))}
+                                    className="w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-right font-mono text-slate-100"
+                                  />
+                                </label>
+                                <button
+                                  onClick={handleExportTradeBatchCsv}
+                                  disabled={!tradeBatches.length}
+                                  className="sm:self-end px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+                                >
+                                  批次 CSV
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                              {[
+                                ["批次數", `${tradeBatchCount} 批`],
+                                ["最大單批", formatCurrency(maximumTradeBatchGross)],
+                                ["首批現金", formatCurrency(firstTradeBatch?.batchCashImpact)],
+                                ["平均單批", formatCurrency(averageTradeBatchGross)],
+                              ].map(([label, value]) => (
+                                <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 p-3 min-w-0">
+                                  <p className="text-[11px] text-slate-600 truncate">{label}</p>
+                                  <p className="mt-1 font-mono text-sm font-bold text-slate-100 truncate" title={value}>
+                                    {value}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+
+                            {tradeBatches.length ? (
+                              <div className="overflow-x-auto rounded-md border border-slate-800">
+                                <table className="w-full min-w-[980px] text-xs">
+                                  <thead>
+                                    <tr className="text-left text-[11px] text-slate-600">
+                                      <th className="py-2 px-3 font-medium text-right">Batch</th>
+                                      <th className="py-2 px-3 font-medium text-right">Seq</th>
+                                      <th className="py-2 px-3 font-medium">Symbol</th>
+                                      <th className="py-2 px-3 font-medium text-right">Action</th>
+                                      <th className="py-2 px-3 font-medium text-right">Amount</th>
+                                      <th className="py-2 px-3 font-medium text-right">Batch Gross</th>
+                                      <th className="py-2 px-3 font-medium text-right">Batch Cash</th>
+                                      <th className="py-2 px-3 font-medium">Note</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {tradeBatches.slice(0, 16).map((row) => (
+                                      <tr key={`${row.batchNumber}-${row.symbol}`} className="border-t border-slate-800/80">
+                                        <td className="py-2 px-3 text-right font-mono text-cyan-200">{row.batchNumber}</td>
+                                        <td className="py-2 px-3 text-right font-mono text-slate-500">{row.sequenceInBatch}</td>
+                                        <td className="py-2 px-3 font-bold text-cyan-200">{row.symbol}</td>
+                                        <td className="py-2 px-3 text-right">
+                                          <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${rebalanceDirectionClass(row.direction)}`}>
+                                            {rebalanceDirectionLabel(row.direction)}
+                                          </span>
+                                        </td>
+                                        <td className="py-2 px-3 text-right font-mono text-slate-100">{formatCurrency(row.ticketAmount)}</td>
+                                        <td className="py-2 px-3 text-right font-mono text-slate-300">{formatCurrency(row.batchGrossAmount)}</td>
+                                        <td
+                                          className={`py-2 px-3 text-right font-mono ${
+                                            row.batchCashImpact < 0 ? "text-rose-300" : "text-emerald-300"
+                                          }`}
+                                        >
+                                          {formatCurrency(row.batchCashImpact)}
+                                        </td>
+                                        <td className="py-2 px-3 text-slate-500">{row.batchNote}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            ) : (
+                              <div className="rounded-md border border-dashed border-slate-800 bg-slate-900/60 p-3 text-xs text-slate-500">
+                                交易清單建立後，這裡會依批次限制產生執行順序。
+                              </div>
+                            )}
+                          </div>
+
                           <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-3">
                             <div>
                               <div className="flex flex-wrap items-center gap-2">
