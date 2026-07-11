@@ -115,6 +115,18 @@ type DecisionAuditRecord = {
   note: string;
 };
 
+type ExecutionHandoffPriority = "high" | "medium" | "low";
+
+type ExecutionHandoffItem = {
+  owner: string;
+  task: string;
+  priority: ExecutionHandoffPriority;
+  due: string;
+  status: ExecutionReviewStatus;
+  evidence: string;
+  note: string;
+};
+
 const statusMeta: Record<MarketSourceStatus, { label: string; className: string }> = {
   ready: {
     label: "可接 API",
@@ -1444,6 +1456,169 @@ function decisionAuditCsv(rows: DecisionAuditRecord[]) {
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
+function executionHandoffPriorityLabel(priority: ExecutionHandoffPriority) {
+  if (priority === "high") return "高";
+  if (priority === "medium") return "中";
+  return "低";
+}
+
+function executionHandoffPriorityClass(priority: ExecutionHandoffPriority) {
+  if (priority === "high") return "bg-rose-500/15 text-rose-200 border-rose-500/30";
+  if (priority === "medium") return "bg-amber-500/15 text-amber-200 border-amber-500/30";
+  return "bg-emerald-500/15 text-emerald-200 border-emerald-500/30";
+}
+
+function handoffPriorityFromStatus(status: ExecutionReviewStatus): ExecutionHandoffPriority {
+  if (status === "block") return "high";
+  if (status === "watch") return "medium";
+  return "low";
+}
+
+function buildExecutionHandoffItems({
+  auditId,
+  executionOwner,
+  riskOwner,
+  settlementOwner,
+  handoffDueDays,
+  committeeDecision,
+  policyDecision,
+  monitoringDecision,
+  tradeTickets,
+  tradeBatches,
+  allocationCapital,
+  policyBlockCount,
+  policyWatchCount,
+  committeeBlockCount,
+  committeeWatchCount,
+}: {
+  auditId: string;
+  executionOwner: string;
+  riskOwner: string;
+  settlementOwner: string;
+  handoffDueDays: number;
+  committeeDecision: CommitteeDecision;
+  policyDecision: ExecutionReviewStatus;
+  monitoringDecision: ExecutionReviewStatus;
+  tradeTickets: TradeTicketRow[];
+  tradeBatches: TradeBatchRow[];
+  allocationCapital: number;
+  policyBlockCount: number;
+  policyWatchCount: number;
+  committeeBlockCount: number;
+  committeeWatchCount: number;
+}): ExecutionHandoffItem[] {
+  const batchCount = tradeBatches.reduce((maxValue, row) => Math.max(maxValue, row.batchNumber), 0);
+  const grossTradeAmount = tradeTickets.reduce((sum, row) => sum + row.ticketAmount, 0);
+  const netCashImpact = tradeTickets.reduce((sum, row) => sum + row.cashImpact, 0);
+  const grossTradeRatio = allocationCapital > 0 ? grossTradeAmount / allocationCapital : null;
+  const netCashRatio = allocationCapital > 0 ? Math.abs(netCashImpact) / allocationCapital : null;
+  const tradeReadiness: ExecutionReviewStatus =
+    committeeDecision === "hold" || !tradeTickets.length ? "block" : committeeDecision === "conditional" ? "watch" : "pass";
+  const batchReadiness: ExecutionReviewStatus =
+    !tradeBatches.length ? "block" : batchCount > 3 || (grossTradeRatio !== null && grossTradeRatio > 0.5) ? "watch" : "pass";
+  const cashReadiness: ExecutionReviewStatus =
+    netCashRatio === null ? "watch" : netCashRatio > 0.3 ? "block" : netCashRatio > 0.15 ? "watch" : "pass";
+  const policyReadiness: ExecutionReviewStatus =
+    policyDecision === "block" ? "block" : policyDecision === "watch" || committeeWatchCount > 0 ? "watch" : "pass";
+
+  return [
+    {
+      owner: executionOwner.trim() || "交易員",
+      task: "確認決策包版本",
+      priority: "low",
+      due: "T+0",
+      status: "pass",
+      evidence: auditId,
+      note: "交易前先核對目前畫面、CSV 與 memo 是否為同一個決策包版本",
+    },
+    {
+      owner: executionOwner.trim() || "交易員",
+      task: "執行第一批交易",
+      priority: handoffPriorityFromStatus(tradeReadiness),
+      due: "T+0",
+      status: tradeReadiness,
+      evidence: `${tradeTickets.length} 檔 / ${batchCount} 批`,
+      note:
+        tradeReadiness === "block"
+          ? "簽核結果暫緩或尚無可執行交易，不應送出交易"
+          : tradeReadiness === "watch"
+            ? "條件執行，需先確認觀察項目已被接受"
+            : "可依第一批交易計畫進入執行",
+    },
+    {
+      owner: executionOwner.trim() || "交易員",
+      task: "拆批與交易金額控管",
+      priority: handoffPriorityFromStatus(batchReadiness),
+      due: "T+0",
+      status: batchReadiness,
+      evidence: `${formatCurrency(grossTradeAmount)} / ${formatPercent(grossTradeRatio)}`,
+      note:
+        batchReadiness === "block"
+          ? "尚無分批計畫"
+          : batchReadiness === "watch"
+            ? "交易幅度或批次偏大，執行時需分段回報"
+            : "批次與交易金額在目前規則內",
+    },
+    {
+      owner: riskOwner.trim() || "風控",
+      task: "覆核政策例外",
+      priority: handoffPriorityFromStatus(policyReadiness),
+      due: "T+0",
+      status: policyReadiness,
+      evidence: `政策暫停 ${policyBlockCount} / 觀察 ${policyWatchCount}`,
+      note:
+        policyReadiness === "block"
+          ? "政策暫停項目解除前不得執行"
+          : policyReadiness === "watch"
+            ? "觀察項目需留下接受原因"
+            : "政策檢查未發現阻擋項",
+    },
+    {
+      owner: riskOwner.trim() || "風控",
+      task: "建立交易後監控",
+      priority: handoffPriorityFromStatus(monitoringDecision),
+      due: `T+${Math.max(1, handoffDueDays)}`,
+      status: monitoringDecision,
+      evidence: `簽核暫停 ${committeeBlockCount} / 觀察 ${committeeWatchCount}`,
+      note:
+        monitoringDecision === "block"
+          ? "監控警戒項目需要先定義處置方式"
+          : monitoringDecision === "watch"
+            ? "需要設定觀察條件與回報節點"
+            : "監控規則可直接列入後續追蹤",
+    },
+    {
+      owner: settlementOwner.trim() || "中台",
+      task: "確認現金與結算影響",
+      priority: handoffPriorityFromStatus(cashReadiness),
+      due: "T+0",
+      status: cashReadiness,
+      evidence: `${formatCurrency(netCashImpact)} / ${formatPercent(netCashRatio)}`,
+      note:
+        cashReadiness === "block"
+          ? "淨現金影響偏高，需確認現金來源或拆分交易"
+          : cashReadiness === "watch"
+            ? "現金影響需在執行前覆核"
+            : "現金影響在目前門檻內",
+    },
+  ];
+}
+
+function executionHandoffCsv(rows: ExecutionHandoffItem[]) {
+  const header = ["owner", "task", "priority", "due", "status", "evidence", "note"];
+  const csvRows = rows.map((row) => [
+    row.owner,
+    row.task,
+    executionHandoffPriorityLabel(row.priority),
+    row.due,
+    executionReviewLabel(row.status),
+    row.evidence,
+    row.note,
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
 function averageComparisonMetric(rows: AssetComparisonRow[], selector: (row: AssetComparisonRow) => number | null) {
   const values = rows.map(selector).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
   if (!values.length) return null;
@@ -1498,6 +1673,7 @@ function assetComparisonMemo(
     committeeDecision?: CommitteeDecision;
     committeeApprovalItems?: ExecutionReviewItem[];
     decisionAuditRecords?: DecisionAuditRecord[];
+    executionHandoffItems?: ExecutionHandoffItem[];
   },
 ) {
   const candidateRows = rows.filter((row) => row.signal === "candidate");
@@ -1520,6 +1696,7 @@ function assetComparisonMemo(
   const memoPolicyLimitItems = (options.policyLimitItems ?? []).slice(0, 8);
   const memoCommitteeApprovalItems = (options.committeeApprovalItems ?? []).slice(0, 8);
   const memoDecisionAuditRecords = (options.decisionAuditRecords ?? []).slice(0, 12);
+  const memoExecutionHandoffItems = (options.executionHandoffItems ?? []).slice(0, 8);
   const tableHeader = "| 商品 | 分數 | 訊號 | 年化報酬 | 年化波動 | 最大回撤 | 最新日 | 說明 |";
   const tableDivider = "|---|---:|---|---:|---:|---:|---|---|";
   const tableRows = topRows.map((row) =>
@@ -1640,6 +1817,17 @@ function assetComparisonMemo(
       markdownCell(row.note),
     ].join(" | "),
   );
+  const executionHandoffTableRows = memoExecutionHandoffItems.map((row) =>
+    [
+      markdownCell(row.owner),
+      markdownCell(row.task),
+      markdownCell(executionHandoffPriorityLabel(row.priority)),
+      markdownCell(row.due),
+      markdownCell(executionReviewLabel(row.status)),
+      markdownCell(row.evidence),
+      markdownCell(row.note),
+    ].join(" | "),
+  );
 
   return [
     `# ${options.name || "未命名 Watchlist"} 研究摘要`,
@@ -1732,6 +1920,11 @@ function assetComparisonMemo(
     memoDecisionAuditRecords.length ? "|---|---|---|" : "",
     ...decisionAuditTableRows.map((row) => `| ${row} |`),
     "",
+    "## 執行交接清單",
+    memoExecutionHandoffItems.length ? "| 負責人 | 任務 | 優先級 | 期限 | 狀態 | 依據 | 說明 |" : "目前沒有可輸出的執行交接清單。",
+    memoExecutionHandoffItems.length ? "|---|---|---|---|---|---|---|" : "",
+    ...executionHandoffTableRows.map((row) => `| ${row} |`),
+    "",
     "## 需要複核的風險",
     reviewRows.length ? "| 商品 | 分數 | 訊號 | 品質 | 最新日 | 距今天 | 說明 |" : "目前篩選結果未偵測到明確風險。",
     reviewRows.length ? "|---|---:|---|---|---|---:|---|" : "",
@@ -1802,6 +1995,10 @@ export function MarketDataPanel() {
   const [decisionOwner, setDecisionOwner] = useState("Frank");
   const [decisionApprover, setDecisionApprover] = useState("投委會");
   const [decisionGeneratedAt, setDecisionGeneratedAt] = useState(() => new Date().toISOString());
+  const [executionOwner, setExecutionOwner] = useState("交易員");
+  const [riskOwner, setRiskOwner] = useState("風控");
+  const [settlementOwner, setSettlementOwner] = useState("中台");
+  const [handoffDueDays, setHandoffDueDays] = useState(3);
   const [watchlistPresetName, setWatchlistPresetName] = useState("核心 ETF");
   const [selectedWatchlistPresetId, setSelectedWatchlistPresetId] = useState("");
   const [savedWatchlistPresets, setSavedWatchlistPresets] = useState<SavedWatchlistPreset[]>([]);
@@ -1978,6 +2175,26 @@ export function MarketDataPanel() {
     tradeBatches,
     allocationCapital,
   });
+  const executionHandoffItems = buildExecutionHandoffItems({
+    auditId: decisionAuditId,
+    executionOwner,
+    riskOwner,
+    settlementOwner,
+    handoffDueDays,
+    committeeDecision,
+    policyDecision,
+    monitoringDecision,
+    tradeTickets,
+    tradeBatches,
+    allocationCapital,
+    policyBlockCount,
+    policyWatchCount,
+    committeeBlockCount,
+    committeeWatchCount,
+  });
+  const handoffBlockCount = executionHandoffItems.filter((item) => item.status === "block").length;
+  const handoffWatchCount = executionHandoffItems.filter((item) => item.status === "watch").length;
+  const handoffHighPriorityCount = executionHandoffItems.filter((item) => item.priority === "high").length;
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -2254,6 +2471,15 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleExportExecutionHandoffCsv = () => {
+    if (!executionHandoffItems.length) return;
+
+    downloadTextFile(
+      `bigquery-execution-handoff-${resultStamp()}.csv`,
+      executionHandoffCsv(executionHandoffItems),
+      "text/csv;charset=utf-8",
+    );
+  };
   const buildAssetComparisonMemo = () =>
     assetComparisonMemo(visibleComparisonRows, {
       name: watchlistPresetName.trim() || "未命名 Watchlist",
@@ -2288,6 +2514,7 @@ export function MarketDataPanel() {
       committeeDecision,
       committeeApprovalItems,
       decisionAuditRecords,
+      executionHandoffItems,
     });
   const handleExportAssetComparisonMemo = () => {
     if (!visibleComparisonRows.length) return;
@@ -4103,6 +4330,122 @@ export function MarketDataPanel() {
                                     <tr key={item.label} className="border-t border-slate-900">
                                       <td className="py-2 px-3 font-bold text-slate-100">{item.label}</td>
                                       <td className="py-2 px-3 font-mono text-slate-200">{item.value}</td>
+                                      <td className="py-2 px-3 text-slate-500">{item.note}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+
+                          <div className="border-t border-slate-800 pt-3 space-y-3">
+                            <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-3">
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <h5 className="text-xs font-bold text-slate-100">執行交接清單</h5>
+                                  <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(handoffBlockCount > 0 ? "block" : handoffWatchCount > 0 ? "watch" : "pass")}`}>
+                                    暫停 {handoffBlockCount} / 觀察 {handoffWatchCount}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-slate-500 mt-0.5">
+                                  將簽核後的交易、風控與結算事項轉成可交接的任務清單
+                                </p>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-[120px_120px_120px_100px_auto] gap-2 text-xs">
+                                <label className="space-y-1">
+                                  <span className="text-slate-500">交易負責人</span>
+                                  <input
+                                    type="text"
+                                    value={executionOwner}
+                                    onChange={(event) => setExecutionOwner(event.target.value)}
+                                    className="w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-slate-100"
+                                  />
+                                </label>
+                                <label className="space-y-1">
+                                  <span className="text-slate-500">風控負責人</span>
+                                  <input
+                                    type="text"
+                                    value={riskOwner}
+                                    onChange={(event) => setRiskOwner(event.target.value)}
+                                    className="w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-slate-100"
+                                  />
+                                </label>
+                                <label className="space-y-1">
+                                  <span className="text-slate-500">中台負責人</span>
+                                  <input
+                                    type="text"
+                                    value={settlementOwner}
+                                    onChange={(event) => setSettlementOwner(event.target.value)}
+                                    className="w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-slate-100"
+                                  />
+                                </label>
+                                <label className="space-y-1">
+                                  <span className="text-slate-500">追蹤天數</span>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    max={30}
+                                    step={1}
+                                    value={handoffDueDays}
+                                    onChange={(event) => setHandoffDueDays(Math.min(30, Math.max(1, Math.floor(Number(event.target.value) || 1))))}
+                                    className="w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-right font-mono text-slate-100"
+                                  />
+                                </label>
+                                <button
+                                  onClick={handleExportExecutionHandoffCsv}
+                                  className="sm:col-span-2 xl:col-span-1 xl:self-end px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold"
+                                >
+                                  交接 CSV
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                              {[
+                                ["任務數", `${executionHandoffItems.length} 項`],
+                                ["高優先", `${handoffHighPriorityCount} 項`],
+                                ["交易負責", executionOwner.trim() || "--"],
+                                ["追蹤期限", `T+${handoffDueDays}`],
+                              ].map(([label, value]) => (
+                                <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 p-3 min-w-0">
+                                  <p className="text-[11px] text-slate-600 truncate">{label}</p>
+                                  <p className="mt-1 font-mono text-sm font-bold text-slate-100 truncate" title={value}>
+                                    {value}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+
+                            <div className="overflow-x-auto">
+                              <table className="w-full min-w-[1040px] text-xs">
+                                <thead>
+                                  <tr className="text-left text-[11px] text-slate-600">
+                                    <th className="py-2 px-3 font-medium">負責人</th>
+                                    <th className="py-2 px-3 font-medium">任務</th>
+                                    <th className="py-2 px-3 font-medium text-right">優先級</th>
+                                    <th className="py-2 px-3 font-medium text-right">期限</th>
+                                    <th className="py-2 px-3 font-medium text-right">狀態</th>
+                                    <th className="py-2 px-3 font-medium">依據</th>
+                                    <th className="py-2 px-3 font-medium">說明</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {executionHandoffItems.map((item) => (
+                                    <tr key={`${item.owner}-${item.task}`} className={`border-t ${executionReviewRowClass(item.status)}`}>
+                                      <td className="py-2 px-3 font-bold text-slate-100">{item.owner}</td>
+                                      <td className="py-2 px-3 text-slate-200">{item.task}</td>
+                                      <td className="py-2 px-3 text-right">
+                                        <span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${executionHandoffPriorityClass(item.priority)}`}>
+                                          {executionHandoffPriorityLabel(item.priority)}
+                                        </span>
+                                      </td>
+                                      <td className="py-2 px-3 text-right font-mono text-slate-300">{item.due}</td>
+                                      <td className="py-2 px-3 text-right">
+                                        <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(item.status)}`}>
+                                          {executionReviewLabel(item.status)}
+                                        </span>
+                                      </td>
+                                      <td className="py-2 px-3 font-mono text-slate-400">{item.evidence}</td>
                                       <td className="py-2 px-3 text-slate-500">{item.note}</td>
                                     </tr>
                                   ))}
