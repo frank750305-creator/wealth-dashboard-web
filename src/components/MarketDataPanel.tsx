@@ -141,6 +141,17 @@ type ExecutionFillRow = TradeTicketRow & {
   fillNote: string;
 };
 
+type PlatformExceptionItem = {
+  source: string;
+  owner: string;
+  item: string;
+  status: ExecutionReviewStatus;
+  priority: ExecutionHandoffPriority;
+  due: string;
+  evidence: string;
+  nextAction: string;
+};
+
 const statusMeta: Record<MarketSourceStatus, { label: string; className: string }> = {
   ready: {
     label: "可接 API",
@@ -1822,6 +1833,109 @@ function postTradeAttributionItems({
   ];
 }
 
+function platformExceptionQueueItems({
+  policyLimitItems,
+  executionReviewItems,
+  monitoringRules,
+  committeeApprovalItems,
+  executionHandoffItems,
+  executionFillRows,
+  postTradeAttributionRows,
+  executionOwner,
+  riskOwner,
+  settlementOwner,
+  decisionApprover,
+  exceptionDueDays,
+}: {
+  policyLimitItems: ExecutionReviewItem[];
+  executionReviewItems: ExecutionReviewItem[];
+  monitoringRules: ExecutionReviewItem[];
+  committeeApprovalItems: ExecutionReviewItem[];
+  executionHandoffItems: ExecutionHandoffItem[];
+  executionFillRows: ExecutionFillRow[];
+  postTradeAttributionRows: ExecutionReviewItem[];
+  executionOwner: string;
+  riskOwner: string;
+  settlementOwner: string;
+  decisionApprover: string;
+  exceptionDueDays: number;
+}): PlatformExceptionItem[] {
+  const cleanExecutionOwner = executionOwner.trim() || "交易員";
+  const cleanRiskOwner = riskOwner.trim() || "風控";
+  const cleanSettlementOwner = settlementOwner.trim() || "中台";
+  const cleanApprover = decisionApprover.trim() || "投委會";
+  const due = `T+${Math.max(1, exceptionDueDays)}`;
+  const fromReviewItems = (
+    source: string,
+    owner: string,
+    rows: ExecutionReviewItem[],
+    nextAction: string,
+  ): PlatformExceptionItem[] =>
+    rows
+      .filter((row) => row.status !== "pass")
+      .map((row) => ({
+        source,
+        owner,
+        item: row.label,
+        status: row.status,
+        priority: handoffPriorityFromStatus(row.status),
+        due,
+        evidence: row.value,
+        nextAction,
+      }));
+
+  return [
+    ...fromReviewItems("投資政策", cleanRiskOwner, policyLimitItems, "確認政策例外是否可接受，必要時退回模型配置"),
+    ...fromReviewItems("交易前檢核", cleanExecutionOwner, executionReviewItems, "交易前解除阻擋項或保留條件執行理由"),
+    ...fromReviewItems("交易後監控", cleanRiskOwner, monitoringRules, "建立監控條件與處置節點"),
+    ...fromReviewItems("投委會簽核", cleanApprover, committeeApprovalItems, "確認簽核結論與觀察項目是否已被接受"),
+    ...executionHandoffItems
+      .filter((row) => row.status !== "pass")
+      .map((row) => ({
+        source: "執行交接",
+        owner: row.owner,
+        item: row.task,
+        status: row.status,
+        priority: row.priority,
+        due: row.due,
+        evidence: row.evidence,
+        nextAction: row.note,
+      })),
+    ...executionFillRows
+      .filter((row) => row.fillStatus !== "pass")
+      .map((row) => ({
+        source: "成交回報",
+        owner: cleanExecutionOwner,
+        item: row.symbol,
+        status: row.fillStatus,
+        priority: handoffPriorityFromStatus(row.fillStatus),
+        due,
+        evidence: `${formatCurrency(row.unfilledNotional)} / ${formatCurrency(row.totalCost)}`,
+        nextAction: row.fillNote,
+      })),
+    ...fromReviewItems("交易後歸因", cleanRiskOwner || cleanSettlementOwner, postTradeAttributionRows, "納入復盤紀錄並決定是否調整下次交易規則"),
+  ].sort((left, right) => {
+    const priorityRank: Record<ExecutionHandoffPriority, number> = { high: 0, medium: 1, low: 2 };
+    return priorityRank[left.priority] - priorityRank[right.priority];
+  });
+}
+
+function platformExceptionCsv(rows: PlatformExceptionItem[]) {
+  const header = ["source", "owner", "item", "priority", "due", "status", "evidence", "next_action"];
+  const csvRows = rows.map((row) => [
+    row.source,
+    row.owner,
+    row.item,
+    executionHandoffPriorityLabel(row.priority),
+    row.due,
+    executionReviewLabel(row.status),
+    row.evidence,
+    row.nextAction,
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
 function averageComparisonMetric(rows: AssetComparisonRow[], selector: (row: AssetComparisonRow) => number | null) {
   const values = rows.map(selector).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
   if (!values.length) return null;
@@ -1884,6 +1998,8 @@ function assetComparisonMemo(
     postTradeAttributionItems?: ExecutionReviewItem[];
     postTradeReviewDays?: number;
     postTradeBenchmarkMovePercent?: number;
+    platformExceptionItems?: PlatformExceptionItem[];
+    exceptionDueDays?: number;
   },
 ) {
   const candidateRows = rows.filter((row) => row.signal === "candidate");
@@ -1909,6 +2025,7 @@ function assetComparisonMemo(
   const memoExecutionHandoffItems = (options.executionHandoffItems ?? []).slice(0, 8);
   const memoExecutionFillRows = (options.executionFillRows ?? []).slice(0, 8);
   const memoPostTradeAttributionItems = (options.postTradeAttributionItems ?? []).slice(0, 8);
+  const memoPlatformExceptionItems = (options.platformExceptionItems ?? []).slice(0, 12);
   const tableHeader = "| 商品 | 分數 | 訊號 | 年化報酬 | 年化波動 | 最大回撤 | 最新日 | 說明 |";
   const tableDivider = "|---|---:|---|---:|---:|---:|---|---|";
   const tableRows = topRows.map((row) =>
@@ -2062,6 +2179,18 @@ function assetComparisonMemo(
       markdownCell(row.note),
     ].join(" | "),
   );
+  const platformExceptionTableRows = memoPlatformExceptionItems.map((row) =>
+    [
+      markdownCell(row.source),
+      markdownCell(row.owner),
+      markdownCell(row.item),
+      markdownCell(executionHandoffPriorityLabel(row.priority)),
+      markdownCell(row.due),
+      markdownCell(executionReviewLabel(row.status)),
+      markdownCell(row.evidence),
+      markdownCell(row.nextAction),
+    ].join(" | "),
+  );
 
   return [
     `# ${options.name || "未命名 Watchlist"} 研究摘要`,
@@ -2174,6 +2303,12 @@ function assetComparisonMemo(
     memoPostTradeAttributionItems.length ? "|---|---|---:|---|---|" : "",
     ...postTradeAttributionTableRows.map((row) => `| ${row} |`),
     "",
+    "## 例外事項總控台",
+    `- 處理期限：T+${options.exceptionDueDays ?? "--"}`,
+    memoPlatformExceptionItems.length ? "| 來源 | 負責人 | 項目 | 優先級 | 期限 | 狀態 | 依據 | 下一步 |" : "目前沒有待處理例外事項。",
+    memoPlatformExceptionItems.length ? "|---|---|---|---|---|---|---|---|" : "",
+    ...platformExceptionTableRows.map((row) => `| ${row} |`),
+    "",
     "## 需要複核的風險",
     reviewRows.length ? "| 商品 | 分數 | 訊號 | 品質 | 最新日 | 距今天 | 說明 |" : "目前篩選結果未偵測到明確風險。",
     reviewRows.length ? "|---|---:|---|---|---|---:|---|" : "",
@@ -2253,6 +2388,7 @@ export function MarketDataPanel() {
   const [fillCommissionBps, setFillCommissionBps] = useState(3);
   const [postTradeReviewDays, setPostTradeReviewDays] = useState(5);
   const [postTradeBenchmarkMovePercent, setPostTradeBenchmarkMovePercent] = useState(0);
+  const [exceptionDueDays, setExceptionDueDays] = useState(2);
   const [watchlistPresetName, setWatchlistPresetName] = useState("核心 ETF");
   const [selectedWatchlistPresetId, setSelectedWatchlistPresetId] = useState("");
   const [savedWatchlistPresets, setSavedWatchlistPresets] = useState<SavedWatchlistPreset[]>([]);
@@ -2472,6 +2608,25 @@ export function MarketDataPanel() {
   const postTradeWatchCount = postTradeAttributionRows.filter((item) => item.status === "watch").length;
   const postTradeDecision: ExecutionReviewStatus = postTradeBlockCount > 0 ? "block" : postTradeWatchCount > 0 ? "watch" : "pass";
   const postTradeResidualMarketImpact = totalUnfilledNotional * (postTradeBenchmarkMovePercent / 100);
+  const platformExceptionItems = platformExceptionQueueItems({
+    policyLimitItems,
+    executionReviewItems,
+    monitoringRules,
+    committeeApprovalItems,
+    executionHandoffItems,
+    executionFillRows,
+    postTradeAttributionRows,
+    executionOwner,
+    riskOwner,
+    settlementOwner,
+    decisionApprover,
+    exceptionDueDays,
+  });
+  const platformExceptionBlockCount = platformExceptionItems.filter((item) => item.status === "block").length;
+  const platformExceptionWatchCount = platformExceptionItems.filter((item) => item.status === "watch").length;
+  const platformExceptionHighPriorityCount = platformExceptionItems.filter((item) => item.priority === "high").length;
+  const platformExceptionDecision: ExecutionReviewStatus =
+    platformExceptionBlockCount > 0 ? "block" : platformExceptionWatchCount > 0 ? "watch" : "pass";
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -2775,6 +2930,15 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleExportPlatformExceptionCsv = () => {
+    if (!platformExceptionItems.length) return;
+
+    downloadTextFile(
+      `bigquery-platform-exceptions-${resultStamp()}.csv`,
+      platformExceptionCsv(platformExceptionItems),
+      "text/csv;charset=utf-8",
+    );
+  };
   const buildAssetComparisonMemo = () =>
     assetComparisonMemo(visibleComparisonRows, {
       name: watchlistPresetName.trim() || "未命名 Watchlist",
@@ -2817,6 +2981,8 @@ export function MarketDataPanel() {
       postTradeAttributionItems: postTradeAttributionRows,
       postTradeReviewDays,
       postTradeBenchmarkMovePercent,
+      platformExceptionItems,
+      exceptionDueDays,
     });
   const handleExportAssetComparisonMemo = () => {
     if (!visibleComparisonRows.length) return;
@@ -4965,6 +5131,104 @@ export function MarketDataPanel() {
                                 </tbody>
                               </table>
                             </div>
+                          </div>
+
+                          <div className="border-t border-slate-800 pt-3 space-y-3">
+                            <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-3">
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <h5 className="text-xs font-bold text-slate-100">例外事項總控台</h5>
+                                  <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(platformExceptionDecision)}`}>
+                                    {executionReviewLabel(platformExceptionDecision)}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-slate-500 mt-0.5">
+                                  將政策、簽核、交接、成交與復盤的觀察/暫停項目集中成 Action Queue
+                                </p>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-[120px_auto] gap-2 text-xs">
+                                <label className="space-y-1">
+                                  <span className="text-slate-500">處理期限</span>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    max={30}
+                                    step={1}
+                                    value={exceptionDueDays}
+                                    onChange={(event) => setExceptionDueDays(Math.min(30, Math.max(1, Math.floor(Number(event.target.value) || 1))))}
+                                    className="w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-right font-mono text-slate-100"
+                                  />
+                                </label>
+                                <button
+                                  onClick={handleExportPlatformExceptionCsv}
+                                  disabled={!platformExceptionItems.length}
+                                  className="sm:self-end px-3 py-2 rounded-md bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-100 font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+                                >
+                                  例外 CSV
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                              {[
+                                ["待處理", `${platformExceptionItems.length} 項`],
+                                ["高優先", `${platformExceptionHighPriorityCount} 項`],
+                                ["暫停 / 觀察", `${platformExceptionBlockCount} / ${platformExceptionWatchCount}`],
+                                ["期限", `T+${exceptionDueDays}`],
+                              ].map(([label, value]) => (
+                                <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 p-3 min-w-0">
+                                  <p className="text-[11px] text-slate-600 truncate">{label}</p>
+                                  <p className="mt-1 font-mono text-sm font-bold text-slate-100 truncate" title={value}>
+                                    {value}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+
+                            {platformExceptionItems.length ? (
+                              <div className="overflow-x-auto">
+                                <table className="w-full min-w-[1120px] text-xs">
+                                  <thead>
+                                    <tr className="text-left text-[11px] text-slate-600">
+                                      <th className="py-2 px-3 font-medium">來源</th>
+                                      <th className="py-2 px-3 font-medium">負責人</th>
+                                      <th className="py-2 px-3 font-medium">項目</th>
+                                      <th className="py-2 px-3 font-medium text-right">優先級</th>
+                                      <th className="py-2 px-3 font-medium text-right">期限</th>
+                                      <th className="py-2 px-3 font-medium text-right">狀態</th>
+                                      <th className="py-2 px-3 font-medium">依據</th>
+                                      <th className="py-2 px-3 font-medium">下一步</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {platformExceptionItems.map((item) => (
+                                      <tr key={`${item.source}-${item.item}-${item.owner}`} className={`border-t ${executionReviewRowClass(item.status)}`}>
+                                        <td className="py-2 px-3 font-bold text-slate-100">{item.source}</td>
+                                        <td className="py-2 px-3 text-slate-300">{item.owner}</td>
+                                        <td className="py-2 px-3 text-slate-200">{item.item}</td>
+                                        <td className="py-2 px-3 text-right">
+                                          <span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${executionHandoffPriorityClass(item.priority)}`}>
+                                            {executionHandoffPriorityLabel(item.priority)}
+                                          </span>
+                                        </td>
+                                        <td className="py-2 px-3 text-right font-mono text-slate-300">{item.due}</td>
+                                        <td className="py-2 px-3 text-right">
+                                          <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(item.status)}`}>
+                                            {executionReviewLabel(item.status)}
+                                          </span>
+                                        </td>
+                                        <td className="py-2 px-3 font-mono text-slate-400">{item.evidence}</td>
+                                        <td className="py-2 px-3 text-slate-500">{item.nextAction}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            ) : (
+                              <div className="rounded-md border border-emerald-500/20 bg-emerald-950/10 p-3 text-xs text-emerald-200">
+                                目前沒有待處理例外事項。
+                              </div>
+                            )}
                           </div>
                         </div>
                       </section>
