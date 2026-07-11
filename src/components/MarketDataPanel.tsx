@@ -183,6 +183,16 @@ type DecisionFunnelStage = {
   note: string;
 };
 
+type MarketAlertEvent = {
+  source: string;
+  title: string;
+  status: ExecutionReviewStatus;
+  priority: ExecutionHandoffPriority;
+  owner: string;
+  evidence: string;
+  action: string;
+};
+
 const statusMeta: Record<MarketSourceStatus, { label: string; className: string }> = {
   ready: {
     label: "可接 API",
@@ -2440,6 +2450,117 @@ function decisionFunnelCsv(rows: DecisionFunnelStage[]) {
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
+function marketAlertPriorityFromStatus(status: ExecutionReviewStatus): ExecutionHandoffPriority {
+  if (status === "block") return "high";
+  if (status === "watch") return "medium";
+  return "low";
+}
+
+function buildMarketAlertEvents({
+  qualityCards,
+  decisionFunnelStages,
+  operatingKriItems,
+  platformExceptionItems,
+  slaEscalationItems,
+  riskOwner,
+  decisionApprover,
+}: {
+  qualityCards: Array<{ label: string; value: string; status: QualityStatus; note: string }>;
+  decisionFunnelStages: DecisionFunnelStage[];
+  operatingKriItems: OperatingKriItem[];
+  platformExceptionItems: PlatformExceptionItem[];
+  slaEscalationItems: SlaEscalationItem[];
+  riskOwner: string;
+  decisionApprover: string;
+}): MarketAlertEvent[] {
+  const cleanRiskOwner = riskOwner.trim() || "風控";
+  const cleanApprover = decisionApprover.trim() || "投委會";
+  const dataAlerts = qualityCards
+    .filter((card) => card.status !== "strong" && card.status !== "neutral")
+    .map((card) => {
+      const status = qualityToExecutionStatus(card.status);
+
+      return {
+        source: "資料品質",
+        title: card.label,
+        status,
+        priority: marketAlertPriorityFromStatus(status),
+        owner: cleanRiskOwner,
+        evidence: card.value,
+        action: card.note,
+      };
+    });
+  const funnelAlerts = decisionFunnelStages
+    .filter((stage) => stage.status !== "pass")
+    .map((stage) => ({
+      source: "決策漏斗",
+      title: stage.label,
+      status: stage.status,
+      priority: marketAlertPriorityFromStatus(stage.status),
+      owner: stage.owner,
+      evidence: `${stage.value} / ${stage.conversion}`,
+      action: stage.note,
+    }));
+  const kriAlerts = operatingKriItems
+    .filter((item) => item.status !== "pass")
+    .map((item) => ({
+      source: "營運 KRI",
+      title: item.label,
+      status: item.status,
+      priority: marketAlertPriorityFromStatus(item.status),
+      owner: item.owner,
+      evidence: item.value,
+      action: item.note,
+    }));
+  const slaAlerts = slaEscalationItems
+    .filter((item) => item.tier !== "routine" || item.status !== "pass")
+    .map((item) => ({
+      source: "SLA 升級",
+      title: item.trigger,
+      status: item.status,
+      priority: item.priority,
+      owner: item.owner,
+      evidence: `${slaEscalationTierLabel(item.tier)} / ${item.due}`,
+      action: item.action,
+    }));
+  const exceptionAlerts = platformExceptionItems.map((item) => ({
+    source: item.source,
+    title: item.item,
+    status: item.status,
+    priority: item.priority,
+    owner: item.owner || cleanApprover,
+    evidence: item.evidence,
+    action: item.nextAction,
+  }));
+  const priorityRank: Record<ExecutionHandoffPriority, number> = { high: 0, medium: 1, low: 2 };
+  const statusRank: Record<ExecutionReviewStatus, number> = { block: 0, watch: 1, pass: 2 };
+
+  return [...dataAlerts, ...funnelAlerts, ...kriAlerts, ...slaAlerts, ...exceptionAlerts]
+    .sort(
+      (left, right) =>
+        priorityRank[left.priority] - priorityRank[right.priority] ||
+        statusRank[left.status] - statusRank[right.status] ||
+        left.source.localeCompare(right.source, "zh-Hant") ||
+        left.title.localeCompare(right.title, "zh-Hant"),
+    )
+    .slice(0, 30);
+}
+
+function marketAlertCsv(rows: MarketAlertEvent[]) {
+  const header = ["source", "title", "priority", "status", "owner", "evidence", "action"];
+  const csvRows = rows.map((row) => [
+    row.source,
+    row.title,
+    executionHandoffPriorityLabel(row.priority),
+    executionReviewLabel(row.status),
+    row.owner,
+    row.evidence,
+    row.action,
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
 function averageComparisonMetric(rows: AssetComparisonRow[], selector: (row: AssetComparisonRow) => number | null) {
   const values = rows.map(selector).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
   if (!values.length) return null;
@@ -2510,6 +2631,7 @@ function assetComparisonMemo(
     slaReviewHours?: number;
     operatingKriItems?: OperatingKriItem[];
     decisionFunnelStages?: DecisionFunnelStage[];
+    marketAlertEvents?: MarketAlertEvent[];
   },
 ) {
   const candidateRows = rows.filter((row) => row.signal === "candidate");
@@ -2540,6 +2662,7 @@ function assetComparisonMemo(
   const memoSlaEscalationItems = (options.slaEscalationItems ?? []).slice(0, 12);
   const memoOperatingKriItems = (options.operatingKriItems ?? []).slice(0, 12);
   const memoDecisionFunnelStages = (options.decisionFunnelStages ?? []).slice(0, 12);
+  const memoMarketAlertEvents = (options.marketAlertEvents ?? []).slice(0, 16);
   const tableHeader = "| 商品 | 分數 | 訊號 | 年化報酬 | 年化波動 | 最大回撤 | 最新日 | 說明 |";
   const tableDivider = "|---|---:|---|---:|---:|---:|---|---|";
   const tableRows = topRows.map((row) =>
@@ -2746,6 +2869,17 @@ function assetComparisonMemo(
       markdownCell(row.note),
     ].join(" | "),
   );
+  const marketAlertTableRows = memoMarketAlertEvents.map((row) =>
+    [
+      markdownCell(row.source),
+      markdownCell(row.title),
+      markdownCell(executionHandoffPriorityLabel(row.priority)),
+      markdownCell(executionReviewLabel(row.status)),
+      markdownCell(row.owner),
+      markdownCell(row.evidence),
+      markdownCell(row.action),
+    ].join(" | "),
+  );
 
   return [
     `# ${options.name || "未命名 Watchlist"} 研究摘要`,
@@ -2778,6 +2912,11 @@ function assetComparisonMemo(
     memoDecisionFunnelStages.length ? "| 階段 | 狀態 | 數量 | 轉換率 | 負責人 | 說明 |" : "目前沒有可輸出的決策漏斗。",
     memoDecisionFunnelStages.length ? "|---|---|---:|---:|---|---|" : "",
     ...decisionFunnelTableRows.map((row) => `| ${row} |`),
+    "",
+    "## 市場警示中心",
+    memoMarketAlertEvents.length ? "| 來源 | 事件 | 優先級 | 狀態 | 負責人 | 依據 | 動作 |" : "目前沒有需要處理的市場警示。",
+    memoMarketAlertEvents.length ? "|---|---|---|---|---|---|---|" : "",
+    ...marketAlertTableRows.map((row) => `| ${row} |`),
     "",
     "## 篩選概況",
     `- 顯示商品：${rows.length} / ${options.totalRows} 檔`,
@@ -3285,6 +3424,20 @@ export function MarketDataPanel() {
   const decisionFunnelBlockCount = decisionFunnelStages.filter((stage) => stage.status === "block").length;
   const decisionFunnelWatchCount = decisionFunnelStages.filter((stage) => stage.status === "watch").length;
   const decisionFunnelDecision = combinedExecutionStatus(decisionFunnelStages.map((stage) => stage.status));
+  const marketAlertEvents = buildMarketAlertEvents({
+    qualityCards,
+    decisionFunnelStages,
+    operatingKriItems,
+    platformExceptionItems,
+    slaEscalationItems,
+    riskOwner,
+    decisionApprover,
+  });
+  const marketHighAlertCount = marketAlertEvents.filter((event) => event.priority === "high").length;
+  const marketMediumAlertCount = marketAlertEvents.filter((event) => event.priority === "medium").length;
+  const marketAlertDecision = marketAlertEvents.length
+    ? combinedExecutionStatus(marketAlertEvents.map((event) => event.status))
+    : "pass";
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -3633,6 +3786,15 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleExportMarketAlertCsv = () => {
+    if (!marketAlertEvents.length) return;
+
+    downloadTextFile(
+      `bigquery-market-alerts-${resultStamp()}.csv`,
+      marketAlertCsv(marketAlertEvents),
+      "text/csv;charset=utf-8",
+    );
+  };
   const buildAssetComparisonMemo = () =>
     assetComparisonMemo(visibleComparisonRows, {
       name: watchlistPresetName.trim() || "未命名 Watchlist",
@@ -3683,6 +3845,7 @@ export function MarketDataPanel() {
       slaReviewHours,
       operatingKriItems,
       decisionFunnelStages,
+      marketAlertEvents,
     });
   const handleExportAssetComparisonMemo = () => {
     if (!visibleComparisonRows.length) return;
@@ -6248,6 +6411,88 @@ export function MarketDataPanel() {
                                 </div>
                               ))}
                             </div>
+                          </div>
+
+                          <div className="border-t border-slate-800 pt-3 space-y-3">
+                            <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-3">
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <h5 className="text-xs font-bold text-slate-100">市場警示中心</h5>
+                                  <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(marketAlertDecision)}`}>
+                                    {executionReviewLabel(marketAlertDecision)}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-slate-500 mt-0.5">
+                                  將資料品質、決策漏斗、KRI、SLA 與例外事項合併成可分派的警示事件流
+                                </p>
+                              </div>
+                              <button
+                                onClick={handleExportMarketAlertCsv}
+                                disabled={!marketAlertEvents.length}
+                                className="px-3 py-2 rounded-md bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-100 text-xs font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+                              >
+                                警示 CSV
+                              </button>
+                            </div>
+
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                              {[
+                                ["警示狀態", executionReviewLabel(marketAlertDecision)],
+                                ["事件數", `${marketAlertEvents.length} 筆`],
+                                ["高 / 中優先", `${marketHighAlertCount} / ${marketMediumAlertCount}`],
+                                ["待處理例外", `${platformExceptionItems.length} 項`],
+                              ].map(([label, value]) => (
+                                <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 p-3 min-w-0">
+                                  <p className="text-[11px] text-slate-600 truncate">{label}</p>
+                                  <p className="mt-1 font-mono text-sm font-bold text-slate-100 truncate" title={value}>
+                                    {value}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+
+                            {marketAlertEvents.length ? (
+                              <div className="overflow-x-auto">
+                                <table className="w-full min-w-[1120px] text-xs">
+                                  <thead>
+                                    <tr className="text-left text-[11px] text-slate-600">
+                                      <th className="py-2 px-3 font-medium">來源</th>
+                                      <th className="py-2 px-3 font-medium">事件</th>
+                                      <th className="py-2 px-3 font-medium text-right">優先級</th>
+                                      <th className="py-2 px-3 font-medium text-right">狀態</th>
+                                      <th className="py-2 px-3 font-medium">負責人</th>
+                                      <th className="py-2 px-3 font-medium">依據</th>
+                                      <th className="py-2 px-3 font-medium">動作</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {marketAlertEvents.map((event, index) => (
+                                      <tr key={`${event.source}-${event.title}-${index}`} className={`border-t ${executionReviewRowClass(event.status)}`}>
+                                        <td className="py-2 px-3 font-bold text-slate-100">{event.source}</td>
+                                        <td className="py-2 px-3 text-slate-200">{event.title}</td>
+                                        <td className="py-2 px-3 text-right">
+                                          <span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${executionHandoffPriorityClass(event.priority)}`}>
+                                            {executionHandoffPriorityLabel(event.priority)}
+                                          </span>
+                                        </td>
+                                        <td className="py-2 px-3 text-right">
+                                          <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(event.status)}`}>
+                                            {executionReviewLabel(event.status)}
+                                          </span>
+                                        </td>
+                                        <td className="py-2 px-3 text-slate-300">{event.owner}</td>
+                                        <td className="py-2 px-3 font-mono text-slate-400">{event.evidence}</td>
+                                        <td className="py-2 px-3 text-slate-500">{event.action}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            ) : (
+                              <div className="rounded-md border border-emerald-500/20 bg-emerald-950/10 p-3 text-xs text-emerald-200">
+                                目前沒有需要處理的市場警示。
+                              </div>
+                            )}
                           </div>
                         </div>
                       </section>
