@@ -109,6 +109,12 @@ type ExecutionReviewItem = {
 
 type CommitteeDecision = "approve" | "conditional" | "hold";
 
+type DecisionAuditRecord = {
+  label: string;
+  value: string;
+  note: string;
+};
+
 const statusMeta: Record<MarketSourceStatus, { label: string; className: string }> = {
   ready: {
     label: "可接 API",
@@ -1302,6 +1308,142 @@ function committeeApprovalChecklist({
   ];
 }
 
+function formatDecisionAuditTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value || "--";
+  return date.toLocaleString("zh-TW", { hour12: false });
+}
+
+function buildDecisionAuditId(name: string, symbols: string, generatedAt: string) {
+  const slug =
+    `${name}-${symbols}`
+      .trim()
+      .replace(/[^a-zA-Z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 24)
+      .toUpperCase() || "WATCHLIST";
+  const stamp = generatedAt.replace(/\D/g, "").slice(0, 12) || resultStamp().replace(/\D/g, "").slice(0, 12);
+
+  return `IC-${stamp}-${slug}`;
+}
+
+function buildDecisionAuditRecords({
+  auditId,
+  generatedAt,
+  owner,
+  approver,
+  watchlistName,
+  comparisonSymbols,
+  committeeDecision,
+  policyDecision,
+  policyLimitItems,
+  executionReviewItems,
+  monitoringRules,
+  committeeApprovalItems,
+  tradeTickets,
+  tradeBatches,
+  allocationCapital,
+}: {
+  auditId: string;
+  generatedAt: string;
+  owner: string;
+  approver: string;
+  watchlistName: string;
+  comparisonSymbols: string;
+  committeeDecision: CommitteeDecision;
+  policyDecision: ExecutionReviewStatus;
+  policyLimitItems: ExecutionReviewItem[];
+  executionReviewItems: ExecutionReviewItem[];
+  monitoringRules: ExecutionReviewItem[];
+  committeeApprovalItems: ExecutionReviewItem[];
+  tradeTickets: TradeTicketRow[];
+  tradeBatches: TradeBatchRow[];
+  allocationCapital: number;
+}): DecisionAuditRecord[] {
+  const symbols = parseSymbolList(comparisonSymbols);
+  const allReviewItems = [...policyLimitItems, ...executionReviewItems, ...monitoringRules, ...committeeApprovalItems];
+  const blockCount = allReviewItems.filter((item) => item.status === "block").length;
+  const watchCount = allReviewItems.filter((item) => item.status === "watch").length;
+  const policyBlockCount = policyLimitItems.filter((item) => item.status === "block").length;
+  const policyWatchCount = policyLimitItems.filter((item) => item.status === "watch").length;
+  const tradeBatchCount = tradeBatches.reduce((maxValue, row) => Math.max(maxValue, row.batchNumber), 0);
+
+  return [
+    {
+      label: "決策包編號",
+      value: auditId,
+      note: "用於比對本次投委會摘要、交易清單與匯出檔版本",
+    },
+    {
+      label: "產出時間",
+      value: formatDecisionAuditTime(generatedAt),
+      note: "刷新時間後會重新產生稽核版本",
+    },
+    {
+      label: "決策人",
+      value: owner.trim() || "--",
+      note: "送簽前確認本次決策負責人",
+    },
+    {
+      label: "簽核單位",
+      value: approver.trim() || "--",
+      note: "用於保留投委會或覆核人資訊",
+    },
+    {
+      label: "Watchlist",
+      value: watchlistName.trim() || "未命名 Watchlist",
+      note: "對應目前研究名單",
+    },
+    {
+      label: "商品清單",
+      value: symbols.join(" ") || "--",
+      note: `共 ${symbols.length} 檔商品`,
+    },
+    {
+      label: "簽核建議",
+      value: committeeDecisionLabel(committeeDecision),
+      note: "由政策限制、交易前檢核、交易後監控共同推導",
+    },
+    {
+      label: "政策狀態",
+      value: executionReviewLabel(policyDecision),
+      note: `政策暫停 ${policyBlockCount} / 觀察 ${policyWatchCount}`,
+    },
+    {
+      label: "風控檢核",
+      value: `暫停 ${blockCount} / 觀察 ${watchCount}`,
+      note: "合併政策、交易前、交易後與簽核檢查",
+    },
+    {
+      label: "交易清單",
+      value: `${tradeTickets.length} 檔`,
+      note: `分批計畫 ${tradeBatchCount} 批`,
+    },
+    {
+      label: "模型本金",
+      value: formatCurrency(allocationCapital),
+      note: "本次配置、交易額與風險比例基準",
+    },
+    {
+      label: "稽核備註",
+      value:
+        committeeDecision === "approve"
+          ? "可歸檔送執行"
+          : committeeDecision === "conditional"
+            ? "需保留條件執行紀錄"
+            : "暫緩並保留阻擋原因",
+      note: "作為後續回看與版本追蹤的人工覆核入口",
+    },
+  ];
+}
+
+function decisionAuditCsv(rows: DecisionAuditRecord[]) {
+  const header = ["label", "value", "note"];
+  const csvRows = rows.map((row) => [row.label, row.value, row.note]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
 function averageComparisonMetric(rows: AssetComparisonRow[], selector: (row: AssetComparisonRow) => number | null) {
   const values = rows.map(selector).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
   if (!values.length) return null;
@@ -1355,6 +1497,7 @@ function assetComparisonMemo(
     policyMinimumScore?: number;
     committeeDecision?: CommitteeDecision;
     committeeApprovalItems?: ExecutionReviewItem[];
+    decisionAuditRecords?: DecisionAuditRecord[];
   },
 ) {
   const candidateRows = rows.filter((row) => row.signal === "candidate");
@@ -1376,6 +1519,7 @@ function assetComparisonMemo(
   const memoMonitoringRules = (options.monitoringRules ?? []).slice(0, 8);
   const memoPolicyLimitItems = (options.policyLimitItems ?? []).slice(0, 8);
   const memoCommitteeApprovalItems = (options.committeeApprovalItems ?? []).slice(0, 8);
+  const memoDecisionAuditRecords = (options.decisionAuditRecords ?? []).slice(0, 12);
   const tableHeader = "| 商品 | 分數 | 訊號 | 年化報酬 | 年化波動 | 最大回撤 | 最新日 | 說明 |";
   const tableDivider = "|---|---:|---|---:|---:|---:|---|---|";
   const tableRows = topRows.map((row) =>
@@ -1489,6 +1633,13 @@ function assetComparisonMemo(
       markdownCell(row.note),
     ].join(" | "),
   );
+  const decisionAuditTableRows = memoDecisionAuditRecords.map((row) =>
+    [
+      markdownCell(row.label),
+      markdownCell(row.value),
+      markdownCell(row.note),
+    ].join(" | "),
+  );
 
   return [
     `# ${options.name || "未命名 Watchlist"} 研究摘要`,
@@ -1576,6 +1727,11 @@ function assetComparisonMemo(
     memoCommitteeApprovalItems.length ? "|---|---|---:|---|---|" : "",
     ...committeeApprovalTableRows.map((row) => `| ${row} |`),
     "",
+    "## 決策包稽核紀錄",
+    memoDecisionAuditRecords.length ? "| 欄位 | 值 | 說明 |" : "目前沒有可輸出的決策包稽核紀錄。",
+    memoDecisionAuditRecords.length ? "|---|---|---|" : "",
+    ...decisionAuditTableRows.map((row) => `| ${row} |`),
+    "",
     "## 需要複核的風險",
     reviewRows.length ? "| 商品 | 分數 | 訊號 | 品質 | 最新日 | 距今天 | 說明 |" : "目前篩選結果未偵測到明確風險。",
     reviewRows.length ? "|---|---:|---|---|---|---:|---|" : "",
@@ -1643,6 +1799,9 @@ export function MarketDataPanel() {
   const [policyMaxVolatilityPercent, setPolicyMaxVolatilityPercent] = useState(25);
   const [policyMaxDrawdownPercent, setPolicyMaxDrawdownPercent] = useState(-25);
   const [policyMinimumScore, setPolicyMinimumScore] = useState(55);
+  const [decisionOwner, setDecisionOwner] = useState("Frank");
+  const [decisionApprover, setDecisionApprover] = useState("投委會");
+  const [decisionGeneratedAt, setDecisionGeneratedAt] = useState(() => new Date().toISOString());
   const [watchlistPresetName, setWatchlistPresetName] = useState("核心 ETF");
   const [selectedWatchlistPresetId, setSelectedWatchlistPresetId] = useState("");
   const [savedWatchlistPresets, setSavedWatchlistPresets] = useState<SavedWatchlistPreset[]>([]);
@@ -1800,6 +1959,25 @@ export function MarketDataPanel() {
   });
   const committeeBlockCount = committeeApprovalItems.filter((item) => item.status === "block").length;
   const committeeWatchCount = committeeApprovalItems.filter((item) => item.status === "watch").length;
+  const decisionAuditId = buildDecisionAuditId(watchlistPresetName, comparisonSymbols, decisionGeneratedAt);
+  const decisionAuditGeneratedText = formatDecisionAuditTime(decisionGeneratedAt);
+  const decisionAuditRecords = buildDecisionAuditRecords({
+    auditId: decisionAuditId,
+    generatedAt: decisionGeneratedAt,
+    owner: decisionOwner,
+    approver: decisionApprover,
+    watchlistName: watchlistPresetName,
+    comparisonSymbols,
+    committeeDecision,
+    policyDecision,
+    policyLimitItems,
+    executionReviewItems,
+    monitoringRules,
+    committeeApprovalItems,
+    tradeTickets,
+    tradeBatches,
+    allocationCapital,
+  });
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -2067,6 +2245,15 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleExportDecisionAuditCsv = () => {
+    if (!decisionAuditRecords.length) return;
+
+    downloadTextFile(
+      `bigquery-decision-audit-${resultStamp()}.csv`,
+      decisionAuditCsv(decisionAuditRecords),
+      "text/csv;charset=utf-8",
+    );
+  };
   const buildAssetComparisonMemo = () =>
     assetComparisonMemo(visibleComparisonRows, {
       name: watchlistPresetName.trim() || "未命名 Watchlist",
@@ -2100,6 +2287,7 @@ export function MarketDataPanel() {
       policyMinimumScore,
       committeeDecision,
       committeeApprovalItems,
+      decisionAuditRecords,
     });
   const handleExportAssetComparisonMemo = () => {
     if (!visibleComparisonRows.length) return;
@@ -3830,6 +4018,91 @@ export function MarketDataPanel() {
                                       </td>
                                       <td className="py-2 px-3 text-right font-mono text-slate-200">{item.value}</td>
                                       <td className="py-2 px-3 text-slate-400">{item.threshold}</td>
+                                      <td className="py-2 px-3 text-slate-500">{item.note}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+
+                          <div className="border-t border-slate-800 pt-3 space-y-3">
+                            <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-3">
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <h5 className="text-xs font-bold text-slate-100">決策包稽核紀錄</h5>
+                                  <span className="rounded px-2 py-0.5 text-[10px] font-bold bg-cyan-500/10 text-cyan-200 border border-cyan-500/30">
+                                    {decisionAuditId}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-slate-500 mt-0.5">
+                                  將本次政策、簽核、交易清單與版本時間整理成可追蹤紀錄
+                                </p>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-[140px_140px_auto_auto] gap-2 text-xs">
+                                <label className="space-y-1">
+                                  <span className="text-slate-500">決策人</span>
+                                  <input
+                                    type="text"
+                                    value={decisionOwner}
+                                    onChange={(event) => setDecisionOwner(event.target.value)}
+                                    className="w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-slate-100"
+                                  />
+                                </label>
+                                <label className="space-y-1">
+                                  <span className="text-slate-500">簽核單位</span>
+                                  <input
+                                    type="text"
+                                    value={decisionApprover}
+                                    onChange={(event) => setDecisionApprover(event.target.value)}
+                                    className="w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-slate-100"
+                                  />
+                                </label>
+                                <button
+                                  onClick={() => setDecisionGeneratedAt(new Date().toISOString())}
+                                  className="sm:self-end px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold"
+                                >
+                                  刷新版本
+                                </button>
+                                <button
+                                  onClick={handleExportDecisionAuditCsv}
+                                  className="sm:self-end px-3 py-2 rounded-md bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-100 font-bold"
+                                >
+                                  稽核 CSV
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                              {[
+                                ["決策包", decisionAuditId],
+                                ["版本時間", decisionAuditGeneratedText],
+                                ["決策人", decisionOwner.trim() || "--"],
+                                ["簽核單位", decisionApprover.trim() || "--"],
+                              ].map(([label, value]) => (
+                                <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 p-3 min-w-0">
+                                  <p className="text-[11px] text-slate-600 truncate">{label}</p>
+                                  <p className="mt-1 font-mono text-sm font-bold text-slate-100 truncate" title={value}>
+                                    {value}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+
+                            <div className="overflow-x-auto">
+                              <table className="w-full min-w-[860px] text-xs">
+                                <thead>
+                                  <tr className="text-left text-[11px] text-slate-600">
+                                    <th className="py-2 px-3 font-medium">欄位</th>
+                                    <th className="py-2 px-3 font-medium">值</th>
+                                    <th className="py-2 px-3 font-medium">說明</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {decisionAuditRecords.map((item) => (
+                                    <tr key={item.label} className="border-t border-slate-900">
+                                      <td className="py-2 px-3 font-bold text-slate-100">{item.label}</td>
+                                      <td className="py-2 px-3 font-mono text-slate-200">{item.value}</td>
                                       <td className="py-2 px-3 text-slate-500">{item.note}</td>
                                     </tr>
                                   ))}
