@@ -886,6 +886,11 @@ function minimumFiniteValue(values: Array<number | null | undefined>) {
   return cleanValues.length ? Math.min(...cleanValues) : null;
 }
 
+function maximumFiniteValue(values: Array<number | null | undefined>) {
+  const cleanValues = finiteValues(values);
+  return cleanValues.length ? Math.max(...cleanValues) : null;
+}
+
 function tradeExecutionReviewItems({
   tradeTickets,
   activeTrades,
@@ -987,6 +992,97 @@ function executionReviewCsv(rows: ExecutionReviewItem[]) {
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
+function tradeMonitoringRuleItems({
+  tradeTickets,
+  tradeBatches,
+  activeTrades,
+  allocationCapital,
+  allocationRisk,
+  priceFreshnessDays,
+  skippedTradeCount,
+  monitoringHorizonDays,
+  monitoringDrawdownAlertPercent,
+}: {
+  tradeTickets: TradeTicketRow[];
+  tradeBatches: TradeBatchRow[];
+  activeTrades: RebalanceDraftRow[];
+  allocationCapital: number;
+  allocationRisk: AllocationRiskSnapshot;
+  priceFreshnessDays: number | null;
+  skippedTradeCount: number;
+  monitoringHorizonDays: number;
+  monitoringDrawdownAlertPercent: number;
+}): ExecutionReviewItem[] {
+  const tradeSymbols = new Set(tradeTickets.map((row) => row.symbol));
+  const skippedTrades = activeTrades.filter((row) => !tradeSymbols.has(row.symbol));
+  const maxSkippedDrift = maximumFiniteValue(skippedTrades.map((row) => Math.abs(row.tradeWeight)));
+  const minTradeScore = minimumFiniteValue(tradeTickets.map((row) => row.score));
+  const firstBatch = tradeBatches.find((row) => row.batchNumber === 1);
+  const firstBatchCashRatio = allocationCapital > 0 && firstBatch ? Math.abs(firstBatch.batchCashImpact) / allocationCapital : null;
+  const maxBatchGross = maximumFiniteValue(tradeBatches.map((row) => row.batchGrossAmount));
+  const maxBatchGrossRatio = allocationCapital > 0 && maxBatchGross !== null ? maxBatchGross / allocationCapital : null;
+  const drawdownLimit = -Math.max(0.01, Math.abs(monitoringDrawdownAlertPercent) / 100);
+  const weightedDrawdown = allocationRisk.weightedMaxDrawdown;
+  const drawdownWatchLimit = drawdownLimit * 0.75;
+  const priceStatus: ExecutionReviewStatus =
+    priceFreshnessDays === null ? "watch" : priceFreshnessDays <= 3 ? "pass" : priceFreshnessDays <= 10 ? "watch" : "block";
+  const skippedStatus: ExecutionReviewStatus =
+    skippedTradeCount === 0 ? "pass" : skippedTradeCount <= 2 ? "watch" : "block";
+  const firstBatchCashStatus: ExecutionReviewStatus =
+    firstBatchCashRatio === null ? "watch" : firstBatchCashRatio <= 0.1 ? "pass" : firstBatchCashRatio <= 0.2 ? "watch" : "block";
+  const batchSizeStatus: ExecutionReviewStatus =
+    maxBatchGrossRatio === null ? "watch" : maxBatchGrossRatio <= 0.2 ? "pass" : maxBatchGrossRatio <= 0.35 ? "watch" : "block";
+  const scoreStatus: ExecutionReviewStatus =
+    minTradeScore === null ? "watch" : minTradeScore >= 55 ? "pass" : minTradeScore >= 45 ? "watch" : "block";
+  const drawdownStatus: ExecutionReviewStatus =
+    weightedDrawdown === null ? "watch" : weightedDrawdown <= drawdownLimit ? "block" : weightedDrawdown <= drawdownWatchLimit ? "watch" : "pass";
+
+  return [
+    {
+      label: `T+${monitoringHorizonDays} 價格更新`,
+      status: priceStatus,
+      value: priceFreshnessDays === null ? "--" : `${priceFreshnessDays} 天`,
+      threshold: "交易後必須確認 daily_prices 更新",
+      note: priceStatus === "pass" ? "資料可支援交易後追蹤" : "先補齊價格更新，再檢查交易後偏離",
+    },
+    {
+      label: "未執行偏離",
+      status: skippedStatus,
+      value: `${Math.max(0, skippedTradeCount)} 檔 / ${formatPercent(maxSkippedDrift)}`,
+      threshold: "低於最小交易金額的偏離需定期回看",
+      note: skippedTradeCount ? "下次再平衡前先檢查這些殘留偏離" : "本輪沒有殘留未執行交易",
+    },
+    {
+      label: "首批現金壓力",
+      status: firstBatchCashStatus,
+      value: `${formatCurrency(firstBatch?.batchCashImpact)} / ${formatPercent(firstBatchCashRatio)}`,
+      threshold: "首批現金影響低於模型本金 10% 為佳",
+      note: firstBatch?.batchCashImpact && firstBatch.batchCashImpact < 0 ? "需確認現金來源與入金時間" : "首批不需要明顯額外現金",
+    },
+    {
+      label: "批次規模",
+      status: batchSizeStatus,
+      value: `${formatCurrency(maxBatchGross)} / ${formatPercent(maxBatchGrossRatio)}`,
+      threshold: "最大單批低於模型本金 20% 為佳",
+      note: batchSizeStatus === "block" ? "建議再降低單批金額上限" : "批次規模可作為執行節奏參考",
+    },
+    {
+      label: "低分交易覆核",
+      status: scoreStatus,
+      value: minTradeScore === null ? "--" : String(minTradeScore),
+      threshold: "最低分數 55 以上較適合直接執行",
+      note: scoreStatus === "pass" ? "交易清單未包含明顯低分標的" : "低分標的應先人工確認理由",
+    },
+    {
+      label: "回撤警戒",
+      status: drawdownStatus,
+      value: `${formatPercent(weightedDrawdown)} / ${formatPercent(drawdownLimit)}`,
+      threshold: "超過設定回撤警戒需重新檢查配置",
+      note: "以配置草稿的加權最大回撤作為交易後監控基準",
+    },
+  ];
+}
+
 function averageComparisonMetric(rows: AssetComparisonRow[], selector: (row: AssetComparisonRow) => number | null) {
   const values = rows.map(selector).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
   if (!values.length) return null;
@@ -1030,6 +1126,9 @@ function assetComparisonMemo(
     maximumBatchAmount?: number;
     maximumTicketsPerBatch?: number;
     executionReviewItems?: ExecutionReviewItem[];
+    monitoringRules?: ExecutionReviewItem[];
+    monitoringHorizonDays?: number;
+    monitoringDrawdownAlertPercent?: number;
   },
 ) {
   const candidateRows = rows.filter((row) => row.signal === "candidate");
@@ -1048,6 +1147,7 @@ function assetComparisonMemo(
   const memoTradeTickets = (options.tradeTickets ?? []).slice(0, 8);
   const memoTradeBatches = (options.tradeBatches ?? []).slice(0, 10);
   const memoExecutionReviewItems = (options.executionReviewItems ?? []).slice(0, 8);
+  const memoMonitoringRules = (options.monitoringRules ?? []).slice(0, 8);
   const tableHeader = "| 商品 | 分數 | 訊號 | 年化報酬 | 年化波動 | 最大回撤 | 最新日 | 說明 |";
   const tableDivider = "|---|---:|---|---:|---:|---:|---|---|";
   const tableRows = topRows.map((row) =>
@@ -1134,6 +1234,15 @@ function assetComparisonMemo(
       markdownCell(row.note),
     ].join(" | "),
   );
+  const monitoringRuleTableRows = memoMonitoringRules.map((row) =>
+    [
+      markdownCell(row.label),
+      markdownCell(executionReviewLabel(row.status)),
+      markdownCell(row.value),
+      markdownCell(row.threshold),
+      markdownCell(row.note),
+    ].join(" | "),
+  );
 
   return [
     `# ${options.name || "未命名 Watchlist"} 研究摘要`,
@@ -1199,6 +1308,13 @@ function assetComparisonMemo(
     memoExecutionReviewItems.length ? "|---|---|---:|---|---|" : "",
     ...executionReviewTableRows.map((row) => `| ${row} |`),
     "",
+    "## 交易後監控規則",
+    `- 監控天數：T+${options.monitoringHorizonDays ?? "--"}`,
+    `- 回撤警戒：${options.monitoringDrawdownAlertPercent ?? "--"}%`,
+    memoMonitoringRules.length ? "| 項目 | 狀態 | 目前值 | 觸發條件 | 後續動作 |" : "目前沒有可輸出的交易後監控規則。",
+    memoMonitoringRules.length ? "|---|---|---:|---|---|" : "",
+    ...monitoringRuleTableRows.map((row) => `| ${row} |`),
+    "",
     "## 需要複核的風險",
     reviewRows.length ? "| 商品 | 分數 | 訊號 | 品質 | 最新日 | 距今天 | 說明 |" : "目前篩選結果未偵測到明確風險。",
     reviewRows.length ? "|---|---:|---|---|---|---:|---|" : "",
@@ -1260,6 +1376,8 @@ export function MarketDataPanel() {
   const [minimumTradeAmount, setMinimumTradeAmount] = useState(10_000);
   const [maximumBatchAmount, setMaximumBatchAmount] = useState(300_000);
   const [maximumTicketsPerBatch, setMaximumTicketsPerBatch] = useState(4);
+  const [monitoringHorizonDays, setMonitoringHorizonDays] = useState(10);
+  const [monitoringDrawdownAlertPercent, setMonitoringDrawdownAlertPercent] = useState(-8);
   const [watchlistPresetName, setWatchlistPresetName] = useState("核心 ETF");
   const [selectedWatchlistPresetId, setSelectedWatchlistPresetId] = useState("");
   const [savedWatchlistPresets, setSavedWatchlistPresets] = useState<SavedWatchlistPreset[]>([]);
@@ -1370,6 +1488,20 @@ export function MarketDataPanel() {
   const executionBlockCount = executionReviewItems.filter((item) => item.status === "block").length;
   const executionWatchCount = executionReviewItems.filter((item) => item.status === "watch").length;
   const executionReviewDecision: ExecutionReviewStatus = executionBlockCount > 0 ? "block" : executionWatchCount > 0 ? "watch" : "pass";
+  const monitoringRules = tradeMonitoringRuleItems({
+    tradeTickets,
+    tradeBatches,
+    activeTrades: activeRebalanceRows,
+    allocationCapital,
+    allocationRisk,
+    priceFreshnessDays,
+    skippedTradeCount,
+    monitoringHorizonDays,
+    monitoringDrawdownAlertPercent,
+  });
+  const monitoringAlertCount = monitoringRules.filter((item) => item.status === "block").length;
+  const monitoringWatchCount = monitoringRules.filter((item) => item.status === "watch").length;
+  const monitoringDecision: ExecutionReviewStatus = monitoringAlertCount > 0 ? "block" : monitoringWatchCount > 0 ? "watch" : "pass";
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1610,6 +1742,15 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleExportMonitoringRulesCsv = () => {
+    if (!monitoringRules.length) return;
+
+    downloadTextFile(
+      `bigquery-monitoring-rules-${resultStamp()}.csv`,
+      executionReviewCsv(monitoringRules),
+      "text/csv;charset=utf-8",
+    );
+  };
   const buildAssetComparisonMemo = () =>
     assetComparisonMemo(visibleComparisonRows, {
       name: watchlistPresetName.trim() || "未命名 Watchlist",
@@ -1633,6 +1774,9 @@ export function MarketDataPanel() {
       maximumBatchAmount,
       maximumTicketsPerBatch,
       executionReviewItems,
+      monitoringRules,
+      monitoringHorizonDays,
+      monitoringDrawdownAlertPercent,
     });
   const handleExportAssetComparisonMemo = () => {
     if (!visibleComparisonRows.length) return;
@@ -3083,6 +3227,103 @@ export function MarketDataPanel() {
                                 ))}
                               </tbody>
                             </table>
+                          </div>
+
+                          <div className="border-t border-slate-800 pt-3 space-y-3">
+                            <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-3">
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <h5 className="text-xs font-bold text-slate-100">交易後監控規則</h5>
+                                  <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(monitoringDecision)}`}>
+                                    {executionReviewLabel(monitoringDecision)}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-slate-500 mt-0.5">
+                                  把本次交易轉成後續追蹤條件，避免執行後沒有回看機制
+                                </p>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-[120px_140px_auto] gap-2 text-xs">
+                                <label className="space-y-1">
+                                  <span className="text-slate-500">監控天數</span>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    max={90}
+                                    step={1}
+                                    value={monitoringHorizonDays}
+                                    onChange={(event) => setMonitoringHorizonDays(Math.min(90, Math.max(1, Math.floor(Number(event.target.value) || 1))))}
+                                    className="w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-right font-mono text-slate-100"
+                                  />
+                                </label>
+                                <label className="space-y-1">
+                                  <span className="text-slate-500">回撤警戒 %</span>
+                                  <input
+                                    type="number"
+                                    min={-80}
+                                    max={0}
+                                    step={1}
+                                    value={monitoringDrawdownAlertPercent}
+                                    onChange={(event) => {
+                                      const nextValue = Number(event.target.value);
+                                      setMonitoringDrawdownAlertPercent(Math.min(0, Math.max(-80, Number.isFinite(nextValue) ? nextValue : -8)));
+                                    }}
+                                    className="w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-right font-mono text-slate-100"
+                                  />
+                                </label>
+                                <button
+                                  onClick={handleExportMonitoringRulesCsv}
+                                  disabled={!rebalanceRows.length}
+                                  className="sm:self-end px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+                                >
+                                  監控 CSV
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                              {[
+                                ["監控狀態", executionReviewLabel(monitoringDecision)],
+                                ["警戒項目", `${monitoringAlertCount} 項`],
+                                ["觀察項目", `${monitoringWatchCount} 項`],
+                                ["監控週期", `T+${monitoringHorizonDays}`],
+                              ].map(([label, value]) => (
+                                <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 p-3 min-w-0">
+                                  <p className="text-[11px] text-slate-600 truncate">{label}</p>
+                                  <p className="mt-1 font-mono text-sm font-bold text-slate-100 truncate" title={value}>
+                                    {value}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+
+                            <div className="overflow-x-auto">
+                              <table className="w-full min-w-[920px] text-xs">
+                                <thead>
+                                  <tr className="text-left text-[11px] text-slate-600">
+                                    <th className="py-2 px-3 font-medium">項目</th>
+                                    <th className="py-2 px-3 font-medium text-right">狀態</th>
+                                    <th className="py-2 px-3 font-medium text-right">目前值</th>
+                                    <th className="py-2 px-3 font-medium">觸發條件</th>
+                                    <th className="py-2 px-3 font-medium">後續動作</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {monitoringRules.map((item) => (
+                                    <tr key={item.label} className={`border-t ${executionReviewRowClass(item.status)}`}>
+                                      <td className="py-2 px-3 font-bold text-slate-100">{item.label}</td>
+                                      <td className="py-2 px-3 text-right">
+                                        <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(item.status)}`}>
+                                          {executionReviewLabel(item.status)}
+                                        </span>
+                                      </td>
+                                      <td className="py-2 px-3 text-right font-mono text-slate-200">{item.value}</td>
+                                      <td className="py-2 px-3 text-slate-400">{item.threshold}</td>
+                                      <td className="py-2 px-3 text-slate-500">{item.note}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
                           </div>
                         </div>
                       </section>
