@@ -83,6 +83,12 @@ type RebalanceDraftRow = {
   note: string;
 };
 
+type TradeTicketRow = RebalanceDraftRow & {
+  ticketAmount: number;
+  cashImpact: number;
+  ticketNote: string;
+};
+
 const statusMeta: Record<MarketSourceStatus, { label: string; className: string }> = {
   ready: {
     label: "可接 API",
@@ -707,6 +713,54 @@ function rebalanceDraftCsv(rows: RebalanceDraftRow[], driftThreshold: number) {
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
+function tradeTicketRows(rows: RebalanceDraftRow[], minimumTradeAmount: number): TradeTicketRow[] {
+  return rows
+    .filter((row) => row.direction !== "hold")
+    .map((row) => {
+      const ticketAmount = Math.abs(row.tradeAmount);
+      const isBelowMinimum = ticketAmount < minimumTradeAmount;
+      return {
+        ...row,
+        ticketAmount,
+        cashImpact: row.direction === "buy" ? -ticketAmount : ticketAmount,
+        ticketNote: isBelowMinimum ? "低於最小交易金額，暫不執行" : "可列入交易清單",
+      };
+    })
+    .filter((row) => row.ticketAmount >= minimumTradeAmount)
+    .sort((left, right) => Math.abs(right.cashImpact) - Math.abs(left.cashImpact));
+}
+
+function tradeTicketCsv(rows: TradeTicketRow[], minimumTradeAmount: number) {
+  const header = [
+    "symbol",
+    "direction",
+    "ticket_amount",
+    "cash_impact",
+    "current_amount",
+    "target_amount",
+    "trade_weight",
+    "minimum_trade_amount",
+    "score",
+    "signal",
+    "note",
+  ];
+  const csvRows = rows.map((row) => [
+    row.symbol,
+    row.direction,
+    row.ticketAmount,
+    row.cashImpact,
+    row.currentAmount,
+    row.targetAmount,
+    row.tradeWeight,
+    minimumTradeAmount,
+    row.score ?? "",
+    row.signal ?? "",
+    row.ticketNote,
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
 function averageComparisonMetric(rows: AssetComparisonRow[], selector: (row: AssetComparisonRow) => number | null) {
   const values = rows.map(selector).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
   if (!values.length) return null;
@@ -744,6 +798,8 @@ function assetComparisonMemo(
     stressShockPercent?: number;
     rebalanceRows?: RebalanceDraftRow[];
     rebalanceThreshold?: number;
+    tradeTickets?: TradeTicketRow[];
+    minimumTradeAmount?: number;
   },
 ) {
   const candidateRows = rows.filter((row) => row.signal === "candidate");
@@ -759,6 +815,7 @@ function assetComparisonMemo(
   const memoAllocationRows = (options.allocationRows ?? []).filter((row) => row.allocationWeight > 0).slice(0, 8);
   const memoRiskRows = (options.allocationRisk?.riskRows ?? []).slice(0, 5);
   const memoRebalanceRows = (options.rebalanceRows ?? []).slice(0, 8);
+  const memoTradeTickets = (options.tradeTickets ?? []).slice(0, 8);
   const tableHeader = "| 商品 | 分數 | 訊號 | 年化報酬 | 年化波動 | 最大回撤 | 最新日 | 說明 |";
   const tableDivider = "|---|---:|---|---:|---:|---:|---|---|";
   const tableRows = topRows.map((row) =>
@@ -814,6 +871,16 @@ function assetComparisonMemo(
       markdownCell(rebalanceDirectionLabel(row.direction)),
     ].join(" | "),
   );
+  const tradeTicketTableRows = memoTradeTickets.map((row) =>
+    [
+      markdownCell(row.symbol),
+      markdownCell(rebalanceDirectionLabel(row.direction)),
+      markdownCell(formatCurrency(row.ticketAmount)),
+      markdownCell(formatCurrency(row.cashImpact)),
+      markdownCell(formatPercent(row.tradeWeight)),
+      markdownCell(row.ticketNote),
+    ].join(" | "),
+  );
 
   return [
     `# ${options.name || "未命名 Watchlist"} 研究摘要`,
@@ -860,6 +927,12 @@ function assetComparisonMemo(
     memoRebalanceRows.length ? "| 商品 | 現有金額 | 目標金額 | 交易差額 | 權重偏離 | 動作 |" : "尚未輸入現有持倉，無法產生再平衡草稿。",
     memoRebalanceRows.length ? "|---|---:|---:|---:|---:|---|" : "",
     ...rebalanceTableRows.map((row) => `| ${row} |`),
+    "",
+    "## 交易執行清單",
+    `- 最小交易金額：${formatCurrency(options.minimumTradeAmount)}`,
+    memoTradeTickets.length ? "| 商品 | 動作 | 交易金額 | 現金影響 | 權重偏離 | 說明 |" : "目前沒有達最小交易金額的可執行交易。",
+    memoTradeTickets.length ? "|---|---|---:|---:|---:|---|" : "",
+    ...tradeTicketTableRows.map((row) => `| ${row} |`),
     "",
     "## 需要複核的風險",
     reviewRows.length ? "| 商品 | 分數 | 訊號 | 品質 | 最新日 | 距今天 | 說明 |" : "目前篩選結果未偵測到明確風險。",
@@ -919,6 +992,7 @@ export function MarketDataPanel() {
   const [stressShockPercent, setStressShockPercent] = useState(-20);
   const [currentHoldingsText, setCurrentHoldingsText] = useState("");
   const [rebalanceThreshold, setRebalanceThreshold] = useState(0.02);
+  const [minimumTradeAmount, setMinimumTradeAmount] = useState(10_000);
   const [watchlistPresetName, setWatchlistPresetName] = useState("核心 ETF");
   const [selectedWatchlistPresetId, setSelectedWatchlistPresetId] = useState("");
   const [savedWatchlistPresets, setSavedWatchlistPresets] = useState<SavedWatchlistPreset[]>([]);
@@ -1008,6 +1082,8 @@ export function MarketDataPanel() {
   const allocationRisk = allocationRiskSnapshot(activeAllocationRows, stressShockPercent);
   const rebalanceRows = rebalanceDraftRows(activeAllocationRows, currentHoldingsText, rebalanceThreshold);
   const activeRebalanceRows = rebalanceRows.filter((row) => row.direction !== "hold");
+  const tradeTickets = tradeTicketRows(rebalanceRows, minimumTradeAmount);
+  const skippedTradeCount = activeRebalanceRows.length - tradeTickets.length;
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1221,6 +1297,15 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleExportTradeTicketCsv = () => {
+    if (!tradeTickets.length) return;
+
+    downloadTextFile(
+      `bigquery-trade-tickets-${resultStamp()}.csv`,
+      tradeTicketCsv(tradeTickets, minimumTradeAmount),
+      "text/csv;charset=utf-8",
+    );
+  };
   const buildAssetComparisonMemo = () =>
     assetComparisonMemo(visibleComparisonRows, {
       name: watchlistPresetName.trim() || "未命名 Watchlist",
@@ -1238,6 +1323,8 @@ export function MarketDataPanel() {
       stressShockPercent,
       rebalanceRows,
       rebalanceThreshold,
+      tradeTickets,
+      minimumTradeAmount,
     });
   const handleExportAssetComparisonMemo = () => {
     if (!visibleComparisonRows.length) return;
@@ -2420,6 +2507,114 @@ export function MarketDataPanel() {
                           </tbody>
                         </table>
                       </div>
+
+                      <section className="rounded-md border border-slate-800 bg-slate-950/70 p-3 space-y-3">
+                        <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-3">
+                          <div>
+                            <h5 className="text-xs font-bold text-slate-100">交易執行清單</h5>
+                            <p className="text-[11px] text-slate-500 mt-0.5">
+                              再用最小交易金額過濾，形成可交給人工覆核的交易清單
+                            </p>
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-[170px_auto] gap-2 text-xs">
+                            <label className="space-y-1">
+                              <span className="text-slate-500">最小交易金額</span>
+                              <input
+                                type="number"
+                                min={0}
+                                step={1000}
+                                value={minimumTradeAmount}
+                                onChange={(event) => setMinimumTradeAmount(Math.max(0, Number(event.target.value) || 0))}
+                                className="w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-right font-mono text-slate-100"
+                              />
+                            </label>
+                            <button
+                              onClick={handleExportTradeTicketCsv}
+                              disabled={!tradeTickets.length}
+                              className="sm:self-end px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+                            >
+                              交易 CSV
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                          {[
+                            ["可執行", `${tradeTickets.length} 檔`],
+                            ["低於門檻", `${Math.max(0, skippedTradeCount)} 檔`],
+                            [
+                              "買入合計",
+                              formatCurrency(
+                                tradeTickets
+                                  .filter((row) => row.direction === "buy")
+                                  .reduce((sum, row) => sum + row.ticketAmount, 0),
+                              ),
+                            ],
+                            [
+                              "現金淨額",
+                              formatCurrency(tradeTickets.reduce((sum, row) => sum + row.cashImpact, 0)),
+                            ],
+                          ].map(([label, value]) => (
+                            <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 p-3 min-w-0">
+                              <p className="text-[11px] text-slate-600 truncate">{label}</p>
+                              <p className="mt-1 font-mono text-sm font-bold text-slate-100 truncate" title={value}>
+                                {value}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+
+                        {tradeTickets.length ? (
+                          <div className="overflow-x-auto rounded-md border border-slate-800">
+                            <table className="w-full min-w-[860px] text-xs">
+                              <thead>
+                                <tr className="text-left text-[11px] text-slate-600">
+                                  <th className="py-2 px-3 font-medium">Symbol</th>
+                                  <th className="py-2 px-3 font-medium text-right">Action</th>
+                                  <th className="py-2 px-3 font-medium text-right">Amount</th>
+                                  <th className="py-2 px-3 font-medium text-right">Cash</th>
+                                  <th className="py-2 px-3 font-medium text-right">Drift</th>
+                                  <th className="py-2 px-3 font-medium text-right">Score</th>
+                                  <th className="py-2 px-3 font-medium">Note</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {tradeTickets.slice(0, 12).map((row) => (
+                                  <tr key={row.symbol} className="border-t border-slate-800/80">
+                                    <td className="py-2 px-3 font-bold text-cyan-200">{row.symbol}</td>
+                                    <td className="py-2 px-3 text-right">
+                                      <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${rebalanceDirectionClass(row.direction)}`}>
+                                        {rebalanceDirectionLabel(row.direction)}
+                                      </span>
+                                    </td>
+                                    <td className="py-2 px-3 text-right font-mono text-slate-100">
+                                      {formatCurrency(row.ticketAmount)}
+                                    </td>
+                                    <td
+                                      className={`py-2 px-3 text-right font-mono ${
+                                        row.cashImpact < 0 ? "text-rose-300" : "text-emerald-300"
+                                      }`}
+                                    >
+                                      {formatCurrency(row.cashImpact)}
+                                    </td>
+                                    <td className="py-2 px-3 text-right font-mono text-slate-300">
+                                      {formatPercent(row.tradeWeight)}
+                                    </td>
+                                    <td className="py-2 px-3 text-right font-mono text-slate-300">
+                                      {row.score ?? "--"}
+                                    </td>
+                                    <td className="py-2 px-3 text-slate-500">{row.ticketNote}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : (
+                          <div className="rounded-md border border-dashed border-slate-800 bg-slate-900/60 p-3 text-xs text-slate-500">
+                            目前沒有超過最小交易金額的買賣項目。
+                          </div>
+                        )}
+                      </section>
                     </div>
                   ) : (
                     <div className="rounded-md border border-dashed border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-500">
