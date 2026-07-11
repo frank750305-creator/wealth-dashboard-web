@@ -165,6 +165,15 @@ type SlaEscalationItem = {
   action: string;
 };
 
+type OperatingKriItem = {
+  label: string;
+  status: ExecutionReviewStatus;
+  value: string;
+  limit: string;
+  owner: string;
+  note: string;
+};
+
 const statusMeta: Record<MarketSourceStatus, { label: string; className: string }> = {
   ready: {
     label: "可接 API",
@@ -2151,6 +2160,132 @@ function slaEscalationCsv(rows: SlaEscalationItem[]) {
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
+function buildOperatingKriItems({
+  dataStatus,
+  allocationRisk,
+  tradeTickets,
+  executionFillRows,
+  totalExecutionCost,
+  totalUnfilledNotional,
+  platformExceptionItems,
+  slaEscalationItems,
+  postTradeDecision,
+  riskOwner,
+  executionOwner,
+  decisionApprover,
+  priceFreshnessDays,
+}: {
+  dataStatus: ExecutionReviewStatus;
+  allocationRisk: AllocationRiskSnapshot;
+  tradeTickets: TradeTicketRow[];
+  executionFillRows: ExecutionFillRow[];
+  totalExecutionCost: number;
+  totalUnfilledNotional: number;
+  platformExceptionItems: PlatformExceptionItem[];
+  slaEscalationItems: SlaEscalationItem[];
+  postTradeDecision: ExecutionReviewStatus;
+  riskOwner: string;
+  executionOwner: string;
+  decisionApprover: string;
+  priceFreshnessDays: number | null;
+}): OperatingKriItem[] {
+  const cleanRiskOwner = riskOwner.trim() || "風控";
+  const cleanExecutionOwner = executionOwner.trim() || "交易員";
+  const cleanApprover = decisionApprover.trim() || "投委會";
+  const totalTicketNotional = tradeTickets.reduce((sum, row) => sum + row.ticketAmount, 0);
+  const totalFilledNotional = executionFillRows.reduce((sum, row) => sum + row.filledNotional, 0);
+  const unfilledRatio = totalTicketNotional > 0 ? totalUnfilledNotional / totalTicketNotional : null;
+  const costBps = totalFilledNotional > 0 ? (totalExecutionCost / totalFilledNotional) * 10000 : null;
+  const stressLossRatio = allocationRisk.investedAmount > 0 ? Math.abs(allocationRisk.stressLoss) / allocationRisk.investedAmount : null;
+  const exceptionBlockCount = platformExceptionItems.filter((item) => item.status === "block").length;
+  const exceptionWatchCount = platformExceptionItems.filter((item) => item.status === "watch").length;
+  const highPriorityExceptionCount = platformExceptionItems.filter((item) => item.priority === "high").length;
+  const criticalSlaCount = slaEscalationItems.filter((item) => item.tier === "critical").length;
+  const reviewSlaCount = slaEscalationItems.filter((item) => item.tier === "review").length;
+  const stressStatus: ExecutionReviewStatus =
+    stressLossRatio === null ? "watch" : stressLossRatio <= 0.12 ? "pass" : stressLossRatio <= 0.25 ? "watch" : "block";
+  const unfilledStatus: ExecutionReviewStatus =
+    unfilledRatio === null ? "watch" : unfilledRatio <= 0.05 ? "pass" : unfilledRatio <= 0.2 ? "watch" : "block";
+  const costStatus: ExecutionReviewStatus =
+    costBps === null ? (totalTicketNotional > 0 ? "block" : "watch") : costBps <= 15 ? "pass" : costBps <= 35 ? "watch" : "block";
+  const exceptionStatus: ExecutionReviewStatus =
+    exceptionBlockCount > 0 ? "block" : exceptionWatchCount > 0 || highPriorityExceptionCount > 0 ? "watch" : "pass";
+  const slaStatus: ExecutionReviewStatus = criticalSlaCount > 0 ? "block" : reviewSlaCount > 0 ? "watch" : "pass";
+
+  return [
+    {
+      label: "資料新鮮度",
+      status: dataStatus,
+      value: priceFreshnessDays === null ? "--" : `${priceFreshnessDays} 天`,
+      limit: "3 天內通過，10 天以上暫停",
+      owner: cleanRiskOwner,
+      note: dataStatus === "block" ? "資料層阻擋正式決策" : dataStatus === "watch" ? "資料可用但需保留觀察" : "資料層可支援營運監控",
+    },
+    {
+      label: "配置壓力損失",
+      status: stressStatus,
+      value: `${formatCurrency(allocationRisk.stressLoss)} / ${formatPercent(stressLossRatio)}`,
+      limit: "低於 12% 通過，25% 以上暫停",
+      owner: cleanRiskOwner,
+      note: stressStatus === "block" ? "壓力損失過高，應先調整配置" : "以目前配置草稿估算下行情境",
+    },
+    {
+      label: "未成交殘單",
+      status: unfilledStatus,
+      value: `${formatCurrency(totalUnfilledNotional)} / ${formatPercent(unfilledRatio)}`,
+      limit: "低於交易額 5% 通過，20% 以上暫停",
+      owner: cleanExecutionOwner,
+      note: unfilledStatus === "block" ? "殘單過高，需重新拆單或延後決策" : "用成交回報檢查執行落差",
+    },
+    {
+      label: "交易成本",
+      status: costStatus,
+      value: `${formatCurrency(totalExecutionCost)} / ${formatBps(costBps)}`,
+      limit: "低於 15 bps 通過，35 bps 以上暫停",
+      owner: cleanExecutionOwner,
+      note: costStatus === "block" ? "交易成本超出營運門檻" : "合併滑價與手續費估算",
+    },
+    {
+      label: "例外事項",
+      status: exceptionStatus,
+      value: `高優先 ${highPriorityExceptionCount} / 暫停 ${exceptionBlockCount} / 觀察 ${exceptionWatchCount}`,
+      limit: "不得有暫停項目，高優先需追蹤",
+      owner: cleanApprover,
+      note: exceptionStatus === "pass" ? "目前沒有需要升級的例外" : "需在例外事項總控台指定處理動作",
+    },
+    {
+      label: "SLA 升級",
+      status: slaStatus,
+      value: `L1 ${criticalSlaCount} / L2 ${reviewSlaCount}`,
+      limit: "L1 項目需立即升級",
+      owner: cleanRiskOwner,
+      note: slaStatus === "block" ? "存在 L1 升級項目" : slaStatus === "watch" ? "存在 L2 覆核項目" : "SLA 處於例行追蹤",
+    },
+    {
+      label: "投後復盤",
+      status: postTradeDecision,
+      value: executionReviewLabel(postTradeDecision),
+      limit: "復盤無暫停項目才可關閉本輪交易",
+      owner: cleanRiskOwner,
+      note: postTradeDecision === "block" ? "復盤仍有阻擋項" : postTradeDecision === "watch" ? "復盤仍有觀察項" : "成交後狀態可接受",
+    },
+  ];
+}
+
+function operatingKriCsv(rows: OperatingKriItem[]) {
+  const header = ["label", "status", "value", "limit", "owner", "note"];
+  const csvRows = rows.map((row) => [
+    row.label,
+    executionReviewLabel(row.status),
+    row.value,
+    row.limit,
+    row.owner,
+    row.note,
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
 function averageComparisonMetric(rows: AssetComparisonRow[], selector: (row: AssetComparisonRow) => number | null) {
   const values = rows.map(selector).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
   if (!values.length) return null;
@@ -2219,6 +2354,7 @@ function assetComparisonMemo(
     slaEscalationItems?: SlaEscalationItem[];
     slaCriticalHours?: number;
     slaReviewHours?: number;
+    operatingKriItems?: OperatingKriItem[];
   },
 ) {
   const candidateRows = rows.filter((row) => row.signal === "candidate");
@@ -2247,6 +2383,7 @@ function assetComparisonMemo(
   const memoPlatformExceptionItems = (options.platformExceptionItems ?? []).slice(0, 12);
   const memoCioOperatingBriefItems = (options.cioOperatingBriefItems ?? []).slice(0, 8);
   const memoSlaEscalationItems = (options.slaEscalationItems ?? []).slice(0, 12);
+  const memoOperatingKriItems = (options.operatingKriItems ?? []).slice(0, 12);
   const tableHeader = "| 商品 | 分數 | 訊號 | 年化報酬 | 年化波動 | 最大回撤 | 最新日 | 說明 |";
   const tableDivider = "|---|---:|---|---:|---:|---:|---|---|";
   const tableRows = topRows.map((row) =>
@@ -2433,6 +2570,16 @@ function assetComparisonMemo(
       markdownCell(row.action),
     ].join(" | "),
   );
+  const operatingKriTableRows = memoOperatingKriItems.map((row) =>
+    [
+      markdownCell(row.label),
+      markdownCell(executionReviewLabel(row.status)),
+      markdownCell(row.value),
+      markdownCell(row.limit),
+      markdownCell(row.owner),
+      markdownCell(row.note),
+    ].join(" | "),
+  );
 
   return [
     `# ${options.name || "未命名 Watchlist"} 研究摘要`,
@@ -2455,6 +2602,11 @@ function assetComparisonMemo(
     memoSlaEscalationItems.length ? "| 層級 | 負責人 | 觸發項 | 優先級 | 時限 | 狀態 | 升級路徑 | 動作 |" : "目前沒有 SLA 升級項目。",
     memoSlaEscalationItems.length ? "|---|---|---|---|---|---|---|---|" : "",
     ...slaEscalationTableRows.map((row) => `| ${row} |`),
+    "",
+    "## 營運 KRI 指標板",
+    memoOperatingKriItems.length ? "| 指標 | 狀態 | 目前值 | 門檻 | 負責人 | 說明 |" : "目前沒有可輸出的營運 KRI。",
+    memoOperatingKriItems.length ? "|---|---|---:|---|---|---|" : "",
+    ...operatingKriTableRows.map((row) => `| ${row} |`),
     "",
     "## 篩選概況",
     `- 顯示商品：${rows.length} / ${options.totalRows} 檔`,
@@ -2921,6 +3073,24 @@ export function MarketDataPanel() {
   const slaReviewCount = slaEscalationItems.filter((item) => item.tier === "review").length;
   const slaEscalationDecision: ExecutionReviewStatus =
     slaCriticalCount > 0 ? "block" : slaReviewCount > 0 || cioOperatingDecision !== "pass" ? "watch" : "pass";
+  const operatingKriItems = buildOperatingKriItems({
+    dataStatus: dataReadinessDecision,
+    allocationRisk,
+    tradeTickets,
+    executionFillRows,
+    totalExecutionCost,
+    totalUnfilledNotional,
+    platformExceptionItems,
+    slaEscalationItems,
+    postTradeDecision,
+    riskOwner,
+    executionOwner,
+    decisionApprover,
+    priceFreshnessDays,
+  });
+  const operatingKriBlockCount = operatingKriItems.filter((item) => item.status === "block").length;
+  const operatingKriWatchCount = operatingKriItems.filter((item) => item.status === "watch").length;
+  const operatingKriDecision = combinedExecutionStatus(operatingKriItems.map((item) => item.status));
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -3251,6 +3421,15 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleExportOperatingKriCsv = () => {
+    if (!operatingKriItems.length) return;
+
+    downloadTextFile(
+      `bigquery-operating-kri-${resultStamp()}.csv`,
+      operatingKriCsv(operatingKriItems),
+      "text/csv;charset=utf-8",
+    );
+  };
   const buildAssetComparisonMemo = () =>
     assetComparisonMemo(visibleComparisonRows, {
       name: watchlistPresetName.trim() || "未命名 Watchlist",
@@ -3299,6 +3478,7 @@ export function MarketDataPanel() {
       slaEscalationItems,
       slaCriticalHours,
       slaReviewHours,
+      operatingKriItems,
     });
   const handleExportAssetComparisonMemo = () => {
     if (!visibleComparisonRows.length) return;
@@ -5712,6 +5892,79 @@ export function MarketDataPanel() {
                                       </td>
                                       <td className="py-2 px-3 text-slate-400">{item.escalationPath}</td>
                                       <td className="py-2 px-3 text-slate-500">{item.action}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+
+                          <div className="border-t border-slate-800 pt-3 space-y-3">
+                            <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-3">
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <h5 className="text-xs font-bold text-slate-100">營運 KRI 指標板</h5>
+                                  <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(operatingKriDecision)}`}>
+                                    {executionReviewLabel(operatingKriDecision)}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-slate-500 mt-0.5">
+                                  把資料品質、壓力損失、殘單、成本、例外、SLA 與投後復盤整理成營運風險指標
+                                </p>
+                              </div>
+                              <button
+                                onClick={handleExportOperatingKriCsv}
+                                disabled={!operatingKriItems.length}
+                                className="px-3 py-2 rounded-md bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-100 text-xs font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+                              >
+                                KRI CSV
+                              </button>
+                            </div>
+
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                              {[
+                                ["KRI 狀態", executionReviewLabel(operatingKriDecision)],
+                                ["暫停 / 觀察", `${operatingKriBlockCount} / ${operatingKriWatchCount}`],
+                                [
+                                  "交易成本",
+                                  `${formatCurrency(totalExecutionCost)} / ${formatBps(totalFilledNotional > 0 ? (totalExecutionCost / totalFilledNotional) * 10000 : null)}`,
+                                ],
+                                ["未成交", formatCurrency(totalUnfilledNotional)],
+                              ].map(([label, value]) => (
+                                <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 p-3 min-w-0">
+                                  <p className="text-[11px] text-slate-600 truncate">{label}</p>
+                                  <p className="mt-1 font-mono text-sm font-bold text-slate-100 truncate" title={value}>
+                                    {value}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+
+                            <div className="overflow-x-auto">
+                              <table className="w-full min-w-[1050px] text-xs">
+                                <thead>
+                                  <tr className="text-left text-[11px] text-slate-600">
+                                    <th className="py-2 px-3 font-medium">指標</th>
+                                    <th className="py-2 px-3 font-medium text-right">狀態</th>
+                                    <th className="py-2 px-3 font-medium text-right">目前值</th>
+                                    <th className="py-2 px-3 font-medium">門檻</th>
+                                    <th className="py-2 px-3 font-medium">負責人</th>
+                                    <th className="py-2 px-3 font-medium">說明</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {operatingKriItems.map((item) => (
+                                    <tr key={item.label} className={`border-t ${executionReviewRowClass(item.status)}`}>
+                                      <td className="py-2 px-3 font-bold text-slate-100">{item.label}</td>
+                                      <td className="py-2 px-3 text-right">
+                                        <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(item.status)}`}>
+                                          {executionReviewLabel(item.status)}
+                                        </span>
+                                      </td>
+                                      <td className="py-2 px-3 text-right font-mono text-slate-200">{item.value}</td>
+                                      <td className="py-2 px-3 text-slate-400">{item.limit}</td>
+                                      <td className="py-2 px-3 text-slate-300">{item.owner}</td>
+                                      <td className="py-2 px-3 text-slate-500">{item.note}</td>
                                     </tr>
                                   ))}
                                 </tbody>
