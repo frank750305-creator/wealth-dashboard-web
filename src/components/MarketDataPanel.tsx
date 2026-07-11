@@ -107,6 +107,8 @@ type ExecutionReviewItem = {
   note: string;
 };
 
+type CommitteeDecision = "approve" | "conditional" | "hold";
+
 const statusMeta: Record<MarketSourceStatus, { label: string; className: string }> = {
   ready: {
     label: "可接 API",
@@ -1083,6 +1085,128 @@ function tradeMonitoringRuleItems({
   ];
 }
 
+function committeeDecisionLabel(decision: CommitteeDecision) {
+  if (decision === "approve") return "可執行";
+  if (decision === "conditional") return "條件執行";
+  return "暫緩";
+}
+
+function committeeDecisionStatus(decision: CommitteeDecision): ExecutionReviewStatus {
+  if (decision === "approve") return "pass";
+  if (decision === "conditional") return "watch";
+  return "block";
+}
+
+function committeeDecisionFromItems({
+  tradeTickets,
+  executionReviewItems,
+  monitoringRules,
+}: {
+  tradeTickets: TradeTicketRow[];
+  executionReviewItems: ExecutionReviewItem[];
+  monitoringRules: ExecutionReviewItem[];
+}): CommitteeDecision {
+  const hasBlock = [...executionReviewItems, ...monitoringRules].some((item) => item.status === "block");
+  const hasWatch = [...executionReviewItems, ...monitoringRules].some((item) => item.status === "watch");
+
+  if (!tradeTickets.length || hasBlock) return "hold";
+  if (hasWatch) return "conditional";
+  return "approve";
+}
+
+function committeeApprovalChecklist({
+  decision,
+  tradeTickets,
+  tradeBatches,
+  executionReviewItems,
+  monitoringRules,
+  allocationRisk,
+  allocationCapital,
+  skippedTradeCount,
+}: {
+  decision: CommitteeDecision;
+  tradeTickets: TradeTicketRow[];
+  tradeBatches: TradeBatchRow[];
+  executionReviewItems: ExecutionReviewItem[];
+  monitoringRules: ExecutionReviewItem[];
+  allocationRisk: AllocationRiskSnapshot;
+  allocationCapital: number;
+  skippedTradeCount: number;
+}): ExecutionReviewItem[] {
+  const allReviewItems = [...executionReviewItems, ...monitoringRules];
+  const blockCount = allReviewItems.filter((item) => item.status === "block").length;
+  const watchCount = allReviewItems.filter((item) => item.status === "watch").length;
+  const batchCount = tradeBatches.reduce((maxValue, row) => Math.max(maxValue, row.batchNumber), 0);
+  const grossTradeAmount = tradeTickets.reduce((sum, row) => sum + row.ticketAmount, 0);
+  const netCashImpact = tradeTickets.reduce((sum, row) => sum + row.cashImpact, 0);
+  const grossTradeRatio = allocationCapital > 0 ? grossTradeAmount / allocationCapital : null;
+  const netCashRatio = allocationCapital > 0 ? Math.abs(netCashImpact) / allocationCapital : null;
+  const stressLossRatio = allocationRisk.investedAmount > 0 ? Math.abs(allocationRisk.stressLoss) / allocationRisk.investedAmount : null;
+  const tradeAmountStatus: ExecutionReviewStatus =
+    grossTradeRatio === null ? "watch" : grossTradeRatio <= 0.5 ? "pass" : grossTradeRatio <= 0.8 ? "watch" : "block";
+  const netCashStatus: ExecutionReviewStatus =
+    netCashRatio === null ? "watch" : netCashRatio <= 0.15 ? "pass" : netCashRatio <= 0.3 ? "watch" : "block";
+  const stressStatus: ExecutionReviewStatus =
+    stressLossRatio === null ? "watch" : stressLossRatio <= 0.12 ? "pass" : stressLossRatio <= 0.25 ? "watch" : "block";
+
+  return [
+    {
+      label: "簽核結論",
+      status: committeeDecisionStatus(decision),
+      value: committeeDecisionLabel(decision),
+      threshold: "沒有暫停項目才可直接執行",
+      note:
+        decision === "approve"
+          ? "可進入交易執行"
+          : decision === "conditional"
+            ? "需要先處理觀察項目，再執行或分批執行"
+            : "存在暫停項目或尚無交易清單，暫不建議執行",
+    },
+    {
+      label: "交易範圍",
+      status: tradeTickets.length ? "pass" : "block",
+      value: `${tradeTickets.length} 檔 / ${batchCount} 批`,
+      threshold: "至少一檔可執行交易",
+      note: tradeTickets.length ? "交易清單與批次計畫已形成" : "尚未形成可送簽的交易清單",
+    },
+    {
+      label: "未處理警示",
+      status: blockCount > 0 ? "block" : watchCount > 0 ? "watch" : "pass",
+      value: `暫停 ${blockCount} / 觀察 ${watchCount}`,
+      threshold: "暫停項目必須先解除",
+      note: blockCount > 0 ? "先處理暫停項目再送出交易" : watchCount > 0 ? "可條件執行，但需保留覆核紀錄" : "未發現阻擋項目",
+    },
+    {
+      label: "總交易額",
+      status: tradeAmountStatus,
+      value: `${formatCurrency(grossTradeAmount)} / ${formatPercent(grossTradeRatio)}`,
+      threshold: "總交易額低於模型本金 50% 為佳",
+      note: tradeAmountStatus === "block" ? "交易幅度過大，建議重新拆批或降低目標差距" : "用於判斷本次調倉幅度",
+    },
+    {
+      label: "現金影響",
+      status: netCashStatus,
+      value: `${formatCurrency(netCashImpact)} / ${formatPercent(netCashRatio)}`,
+      threshold: "淨現金影響低於模型本金 15% 為佳",
+      note: netCashImpact < 0 ? "執行前需確認現金來源" : netCashImpact > 0 ? "執行後會釋放現金" : "買賣現金大致平衡",
+    },
+    {
+      label: "壓力風險",
+      status: stressStatus,
+      value: `${formatCurrency(allocationRisk.stressLoss)} / ${formatPercent(stressLossRatio)}`,
+      threshold: "壓力損失低於 12% 為佳",
+      note: "簽核時保留配置草稿的壓力風險基準",
+    },
+    {
+      label: "殘留偏離",
+      status: skippedTradeCount === 0 ? "pass" : skippedTradeCount <= 2 ? "watch" : "block",
+      value: `${Math.max(0, skippedTradeCount)} 檔`,
+      threshold: "低於最小交易金額的殘留偏離需列入下次追蹤",
+      note: skippedTradeCount ? "有交易因金額太小未執行，需在下次再平衡複核" : "沒有因最小交易金額留下的殘留項目",
+    },
+  ];
+}
+
 function averageComparisonMetric(rows: AssetComparisonRow[], selector: (row: AssetComparisonRow) => number | null) {
   const values = rows.map(selector).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
   if (!values.length) return null;
@@ -1129,6 +1253,8 @@ function assetComparisonMemo(
     monitoringRules?: ExecutionReviewItem[];
     monitoringHorizonDays?: number;
     monitoringDrawdownAlertPercent?: number;
+    committeeDecision?: CommitteeDecision;
+    committeeApprovalItems?: ExecutionReviewItem[];
   },
 ) {
   const candidateRows = rows.filter((row) => row.signal === "candidate");
@@ -1148,6 +1274,7 @@ function assetComparisonMemo(
   const memoTradeBatches = (options.tradeBatches ?? []).slice(0, 10);
   const memoExecutionReviewItems = (options.executionReviewItems ?? []).slice(0, 8);
   const memoMonitoringRules = (options.monitoringRules ?? []).slice(0, 8);
+  const memoCommitteeApprovalItems = (options.committeeApprovalItems ?? []).slice(0, 8);
   const tableHeader = "| 商品 | 分數 | 訊號 | 年化報酬 | 年化波動 | 最大回撤 | 最新日 | 說明 |";
   const tableDivider = "|---|---:|---|---:|---:|---:|---|---|";
   const tableRows = topRows.map((row) =>
@@ -1243,6 +1370,15 @@ function assetComparisonMemo(
       markdownCell(row.note),
     ].join(" | "),
   );
+  const committeeApprovalTableRows = memoCommitteeApprovalItems.map((row) =>
+    [
+      markdownCell(row.label),
+      markdownCell(executionReviewLabel(row.status)),
+      markdownCell(row.value),
+      markdownCell(row.threshold),
+      markdownCell(row.note),
+    ].join(" | "),
+  );
 
   return [
     `# ${options.name || "未命名 Watchlist"} 研究摘要`,
@@ -1314,6 +1450,12 @@ function assetComparisonMemo(
     memoMonitoringRules.length ? "| 項目 | 狀態 | 目前值 | 觸發條件 | 後續動作 |" : "目前沒有可輸出的交易後監控規則。",
     memoMonitoringRules.length ? "|---|---|---:|---|---|" : "",
     ...monitoringRuleTableRows.map((row) => `| ${row} |`),
+    "",
+    "## 投委會簽核摘要",
+    `- 簽核建議：${options.committeeDecision ? committeeDecisionLabel(options.committeeDecision) : "--"}`,
+    memoCommitteeApprovalItems.length ? "| 項目 | 狀態 | 目前值 | 門檻 | 說明 |" : "目前沒有可輸出的簽核摘要。",
+    memoCommitteeApprovalItems.length ? "|---|---|---:|---|---|" : "",
+    ...committeeApprovalTableRows.map((row) => `| ${row} |`),
     "",
     "## 需要複核的風險",
     reviewRows.length ? "| 商品 | 分數 | 訊號 | 品質 | 最新日 | 距今天 | 說明 |" : "目前篩選結果未偵測到明確風險。",
@@ -1502,6 +1644,23 @@ export function MarketDataPanel() {
   const monitoringAlertCount = monitoringRules.filter((item) => item.status === "block").length;
   const monitoringWatchCount = monitoringRules.filter((item) => item.status === "watch").length;
   const monitoringDecision: ExecutionReviewStatus = monitoringAlertCount > 0 ? "block" : monitoringWatchCount > 0 ? "watch" : "pass";
+  const committeeDecision = committeeDecisionFromItems({
+    tradeTickets,
+    executionReviewItems,
+    monitoringRules,
+  });
+  const committeeApprovalItems = committeeApprovalChecklist({
+    decision: committeeDecision,
+    tradeTickets,
+    tradeBatches,
+    executionReviewItems,
+    monitoringRules,
+    allocationRisk,
+    allocationCapital,
+    skippedTradeCount,
+  });
+  const committeeBlockCount = committeeApprovalItems.filter((item) => item.status === "block").length;
+  const committeeWatchCount = committeeApprovalItems.filter((item) => item.status === "watch").length;
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1751,6 +1910,15 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleExportCommitteeApprovalCsv = () => {
+    if (!committeeApprovalItems.length) return;
+
+    downloadTextFile(
+      `bigquery-committee-approval-${resultStamp()}.csv`,
+      executionReviewCsv(committeeApprovalItems),
+      "text/csv;charset=utf-8",
+    );
+  };
   const buildAssetComparisonMemo = () =>
     assetComparisonMemo(visibleComparisonRows, {
       name: watchlistPresetName.trim() || "未命名 Watchlist",
@@ -1777,6 +1945,8 @@ export function MarketDataPanel() {
       monitoringRules,
       monitoringHorizonDays,
       monitoringDrawdownAlertPercent,
+      committeeDecision,
+      committeeApprovalItems,
     });
   const handleExportAssetComparisonMemo = () => {
     if (!visibleComparisonRows.length) return;
@@ -3309,6 +3479,74 @@ export function MarketDataPanel() {
                                 </thead>
                                 <tbody>
                                   {monitoringRules.map((item) => (
+                                    <tr key={item.label} className={`border-t ${executionReviewRowClass(item.status)}`}>
+                                      <td className="py-2 px-3 font-bold text-slate-100">{item.label}</td>
+                                      <td className="py-2 px-3 text-right">
+                                        <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(item.status)}`}>
+                                          {executionReviewLabel(item.status)}
+                                        </span>
+                                      </td>
+                                      <td className="py-2 px-3 text-right font-mono text-slate-200">{item.value}</td>
+                                      <td className="py-2 px-3 text-slate-400">{item.threshold}</td>
+                                      <td className="py-2 px-3 text-slate-500">{item.note}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+
+                          <div className="border-t border-slate-800 pt-3 space-y-3">
+                            <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-3">
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <h5 className="text-xs font-bold text-slate-100">投委會簽核摘要</h5>
+                                  <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(committeeDecisionStatus(committeeDecision))}`}>
+                                    {committeeDecisionLabel(committeeDecision)}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-slate-500 mt-0.5">
+                                  將交易前檢核與交易後監控合併成可送簽的最終決策摘要
+                                </p>
+                              </div>
+                              <button
+                                onClick={handleExportCommitteeApprovalCsv}
+                                disabled={!rebalanceRows.length}
+                                className="px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+                              >
+                                簽核 CSV
+                              </button>
+                            </div>
+
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                              {[
+                                ["簽核建議", committeeDecisionLabel(committeeDecision)],
+                                ["暫停項目", `${committeeBlockCount} 項`],
+                                ["觀察項目", `${committeeWatchCount} 項`],
+                                ["送簽交易", `${tradeTickets.length} 檔`],
+                              ].map(([label, value]) => (
+                                <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 p-3 min-w-0">
+                                  <p className="text-[11px] text-slate-600 truncate">{label}</p>
+                                  <p className="mt-1 font-mono text-sm font-bold text-slate-100 truncate" title={value}>
+                                    {value}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+
+                            <div className="overflow-x-auto">
+                              <table className="w-full min-w-[920px] text-xs">
+                                <thead>
+                                  <tr className="text-left text-[11px] text-slate-600">
+                                    <th className="py-2 px-3 font-medium">項目</th>
+                                    <th className="py-2 px-3 font-medium text-right">狀態</th>
+                                    <th className="py-2 px-3 font-medium text-right">目前值</th>
+                                    <th className="py-2 px-3 font-medium">門檻</th>
+                                    <th className="py-2 px-3 font-medium">說明</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {committeeApprovalItems.map((item) => (
                                     <tr key={item.label} className={`border-t ${executionReviewRowClass(item.status)}`}>
                                       <td className="py-2 px-3 font-bold text-slate-100">{item.label}</td>
                                       <td className="py-2 px-3 text-right">
