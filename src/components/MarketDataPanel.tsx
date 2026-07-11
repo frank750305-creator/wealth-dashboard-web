@@ -6,6 +6,7 @@ import type {
   BigQueryAssetProfileResponse,
   BigQueryFxCurrency,
   BigQueryMarketDiagnostics,
+  BigQuerySchemaCheck,
   BigQueryStaleSymbol,
   MarketSourceStatus,
 } from "@/types/market";
@@ -216,6 +217,19 @@ type DataPipelineTableSnapshot = {
   rowCount: string;
   coverage: string;
   freshness: string;
+  owner: string;
+  action: string;
+};
+
+type DataContractItem = {
+  table: string;
+  layer: string;
+  status: ExecutionReviewStatus;
+  requiredColumns: string[];
+  presentColumns: string[];
+  missingColumns: string[];
+  freshness: string;
+  volume: string;
   owner: string;
   action: string;
 };
@@ -2718,7 +2732,100 @@ function dataPipelineCsv({
     .join("\n");
 }
 
+function buildDataContractItem({
+  check,
+  layer,
+  freshness,
+  volume,
+  freshnessStatusValue,
+  owner,
+}: {
+  check: BigQuerySchemaCheck;
+  layer: string;
+  freshness: string;
+  volume: string;
+  freshnessStatusValue: QualityStatus;
+  owner: string;
+}): DataContractItem {
+  const schemaStatusValue: ExecutionReviewStatus = check.isReady ? "pass" : "block";
+  const status = combinedExecutionStatus([schemaStatusValue, qualityToExecutionStatus(freshnessStatusValue)]);
+
+  return {
+    table: check.tableName,
+    layer,
+    status,
+    requiredColumns: check.requiredColumns,
+    presentColumns: check.presentColumns,
+    missingColumns: check.missingColumns,
+    freshness,
+    volume,
+    owner,
+    action: check.isReady
+      ? status === "pass"
+        ? "欄位合約與更新狀態可用"
+        : "欄位合約可用，但需確認更新批次"
+      : `補齊欄位：${check.missingColumns.join(", ") || "--"}`,
+  };
+}
+
+function buildDataContractItems({
+  diagnostics,
+  priceFreshnessDays,
+  fxFreshnessDays,
+  priceFreshnessStatus,
+  fxFreshnessStatus,
+  riskOwner,
+}: {
+  diagnostics?: BigQueryMarketDiagnostics;
+  priceFreshnessDays: number | null;
+  fxFreshnessDays: number | null;
+  priceFreshnessStatus: QualityStatus;
+  fxFreshnessStatus: QualityStatus;
+  riskOwner: string;
+}): DataContractItem[] {
+  const cleanRiskOwner = riskOwner.trim() || "風控";
+  if (!diagnostics) return [];
+
+  return [
+    buildDataContractItem({
+      check: diagnostics.schemaChecks.priceTable,
+      layer: "價格事實表",
+      freshness: priceFreshnessDays === null ? "--" : `${priceFreshnessDays} 天`,
+      volume: `${formatCount(diagnostics.priceSummary.row_count)} rows / ${formatCount(diagnostics.priceSummary.symbol_count)} symbols`,
+      freshnessStatusValue: priceFreshnessStatus,
+      owner: cleanRiskOwner,
+    }),
+    buildDataContractItem({
+      check: diagnostics.schemaChecks.fxTable,
+      layer: "匯率事實表",
+      freshness: fxFreshnessDays === null ? "--" : `${fxFreshnessDays} 天`,
+      volume: `${formatCount(diagnostics.fxSummary.row_count)} rows / ${formatCount(diagnostics.fxSummary.currency_count)} currencies`,
+      freshnessStatusValue: fxFreshnessStatus,
+      owner: cleanRiskOwner,
+    }),
+  ];
+}
+
+function dataContractCsv(rows: DataContractItem[]) {
+  const header = ["table", "layer", "status", "required_columns", "present_columns", "missing_columns", "freshness", "volume", "owner", "action"];
+  const csvRows = rows.map((row) => [
+    row.table,
+    row.layer,
+    executionReviewLabel(row.status),
+    row.requiredColumns.join("|"),
+    row.presentColumns.join("|"),
+    row.missingColumns.join("|"),
+    row.freshness,
+    row.volume,
+    row.owner,
+    row.action,
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
 function buildMarketAlertEvents({
+  dataContractItems,
   dataPipelineHealthItems,
   qualityCards,
   decisionFunnelStages,
@@ -2728,6 +2835,7 @@ function buildMarketAlertEvents({
   riskOwner,
   decisionApprover,
 }: {
+  dataContractItems: DataContractItem[];
   dataPipelineHealthItems: DataPipelineHealthItem[];
   qualityCards: Array<{ label: string; value: string; status: QualityStatus; note: string }>;
   decisionFunnelStages: DecisionFunnelStage[];
@@ -2739,6 +2847,17 @@ function buildMarketAlertEvents({
 }): MarketAlertEvent[] {
   const cleanRiskOwner = riskOwner.trim() || "風控";
   const cleanApprover = decisionApprover.trim() || "投委會";
+  const contractAlerts = dataContractItems
+    .filter((item) => item.status !== "pass")
+    .map((item) => ({
+      source: "資料合約",
+      title: item.table,
+      status: item.status,
+      priority: marketAlertPriorityFromStatus(item.status),
+      owner: item.owner,
+      evidence: item.missingColumns.length ? `缺欄位 ${item.missingColumns.join(", ")}` : item.freshness,
+      action: item.action,
+    }));
   const pipelineAlerts = dataPipelineHealthItems
     .filter((item) => item.status !== "pass")
     .map((item) => ({
@@ -2810,7 +2929,7 @@ function buildMarketAlertEvents({
   const priorityRank: Record<ExecutionHandoffPriority, number> = { high: 0, medium: 1, low: 2 };
   const statusRank: Record<ExecutionReviewStatus, number> = { block: 0, watch: 1, pass: 2 };
 
-  return [...pipelineAlerts, ...dataAlerts, ...funnelAlerts, ...kriAlerts, ...slaAlerts, ...exceptionAlerts]
+  return [...contractAlerts, ...pipelineAlerts, ...dataAlerts, ...funnelAlerts, ...kriAlerts, ...slaAlerts, ...exceptionAlerts]
     .sort(
       (left, right) =>
         priorityRank[left.priority] - priorityRank[right.priority] ||
@@ -2910,6 +3029,7 @@ function assetComparisonMemo(
     dataPipelineHealthItems?: DataPipelineHealthItem[];
     dataPipelineTableSnapshots?: DataPipelineTableSnapshot[];
     dataPipelineGeneratedAt?: string;
+    dataContractItems?: DataContractItem[];
   },
 ) {
   const candidateRows = rows.filter((row) => row.signal === "candidate");
@@ -2943,6 +3063,7 @@ function assetComparisonMemo(
   const memoMarketAlertEvents = (options.marketAlertEvents ?? []).slice(0, 16);
   const memoDataPipelineHealthItems = (options.dataPipelineHealthItems ?? []).slice(0, 12);
   const memoDataPipelineTableSnapshots = (options.dataPipelineTableSnapshots ?? []).slice(0, 6);
+  const memoDataContractItems = (options.dataContractItems ?? []).slice(0, 8);
   const tableHeader = "| 商品 | 分數 | 訊號 | 年化報酬 | 年化波動 | 最大回撤 | 最新日 | 說明 |";
   const tableDivider = "|---|---:|---|---:|---:|---:|---|---|";
   const tableRows = topRows.map((row) =>
@@ -3181,6 +3302,18 @@ function assetComparisonMemo(
       markdownCell(row.action),
     ].join(" | "),
   );
+  const dataContractTableRows = memoDataContractItems.map((row) =>
+    [
+      markdownCell(row.table),
+      markdownCell(row.layer),
+      markdownCell(executionReviewLabel(row.status)),
+      markdownCell(`${row.presentColumns.length}/${row.requiredColumns.length}`),
+      markdownCell(row.missingColumns.join(", ") || "--"),
+      markdownCell(row.freshness),
+      markdownCell(row.volume),
+      markdownCell(row.action),
+    ].join(" | "),
+  );
 
   return [
     `# ${options.name || "未命名 Watchlist"} 研究摘要`,
@@ -3227,6 +3360,11 @@ function assetComparisonMemo(
     memoDataPipelineTableSnapshots.length ? "| 資料表 | 狀態 | 最新日 | 筆數 | 覆蓋 | 新鮮度 | 動作 |" : "",
     memoDataPipelineTableSnapshots.length ? "|---|---|---|---:|---:|---:|---|" : "",
     ...dataPipelineTableRows.map((row) => `| ${row} |`),
+    "",
+    "## 資料合約中心",
+    memoDataContractItems.length ? "| 資料表 | 層級 | 狀態 | 欄位覆蓋 | 缺欄位 | 新鮮度 | 資料量 | 動作 |" : "目前沒有可輸出的資料合約。",
+    memoDataContractItems.length ? "|---|---|---|---:|---|---:|---:|---|" : "",
+    ...dataContractTableRows.map((row) => `| ${row} |`),
     "",
     "## 篩選概況",
     `- 顯示商品：${rows.length} / ${options.totalRows} 檔`,
@@ -3708,6 +3846,19 @@ export function MarketDataPanel() {
   const dataPipelineBlockCount = dataPipelineHealthItems.filter((item) => item.status === "block").length;
   const dataPipelineWatchCount = dataPipelineHealthItems.filter((item) => item.status === "watch").length;
   const dataPipelineDecision = combinedExecutionStatus(dataPipelineHealthItems.map((item) => item.status));
+  const dataContractItems = buildDataContractItems({
+    diagnostics: bigQueryDiagnostics ?? undefined,
+    priceFreshnessDays,
+    fxFreshnessDays,
+    priceFreshnessStatus,
+    fxFreshnessStatus,
+    riskOwner,
+  });
+  const dataContractBlockCount = dataContractItems.filter((item) => item.status === "block").length;
+  const dataContractWatchCount = dataContractItems.filter((item) => item.status === "watch").length;
+  const dataContractDecision = dataContractItems.length
+    ? combinedExecutionStatus(dataContractItems.map((item) => item.status))
+    : "watch";
   const candidateVisibleCount = visibleComparisonRows.filter((row) => row.signal === "candidate").length;
   const cioOperatingBriefItems = buildCioOperatingBriefItems({
     dataStatus: dataReadinessDecision,
@@ -3782,6 +3933,7 @@ export function MarketDataPanel() {
   const decisionFunnelWatchCount = decisionFunnelStages.filter((stage) => stage.status === "watch").length;
   const decisionFunnelDecision = combinedExecutionStatus(decisionFunnelStages.map((stage) => stage.status));
   const marketAlertEvents = buildMarketAlertEvents({
+    dataContractItems,
     dataPipelineHealthItems,
     qualityCards,
     decisionFunnelStages,
@@ -3923,6 +4075,15 @@ export function MarketDataPanel() {
         staleSymbols,
         fxCurrencies,
       }),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportDataContractCsv = () => {
+    if (!dataContractItems.length) return;
+
+    downloadTextFile(
+      `bigquery-data-contracts-${resultStamp()}.csv`,
+      dataContractCsv(dataContractItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -4219,6 +4380,7 @@ export function MarketDataPanel() {
       dataPipelineHealthItems,
       dataPipelineTableSnapshots,
       dataPipelineGeneratedAt: bigQueryDiagnostics?.generatedAt,
+      dataContractItems,
     });
   const handleExportAssetComparisonMemo = () => {
     if (!visibleComparisonRows.length) return;
@@ -4580,6 +4742,87 @@ export function MarketDataPanel() {
                     ))}
                   </div>
                 </div>
+              </div>
+
+              <div className="border-t border-slate-800 pt-3 space-y-3">
+                <div className="flex flex-col md:flex-row md:items-end justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="text-xs font-bold text-slate-100">資料合約中心</h4>
+                      <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(dataContractDecision)}`}>
+                        {executionReviewLabel(dataContractDecision)}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-[11px] text-slate-500">
+                      管理資料表必要欄位、缺欄位、資料量、新鮮度與修復動作
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-end gap-2 text-xs">
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        ["暫停", `${dataContractBlockCount}`],
+                        ["觀察", `${dataContractWatchCount}`],
+                      ].map(([label, value]) => (
+                        <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 px-3 py-2 text-right">
+                          <p className="text-[10px] text-slate-600">{label}</p>
+                          <p className="mt-0.5 font-mono font-bold text-slate-100">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      onClick={handleExportDataContractCsv}
+                      disabled={!dataContractItems.length}
+                      className="px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+                    >
+                      合約 CSV
+                    </button>
+                  </div>
+                </div>
+
+                {dataContractItems.length ? (
+                  <div className="overflow-x-auto rounded-lg border border-slate-800">
+                    <table className="w-full min-w-[1120px] text-xs">
+                      <thead className="bg-slate-900/80">
+                        <tr className="text-left text-[11px] text-slate-600">
+                          <th className="py-2 px-3 font-medium">資料表</th>
+                          <th className="py-2 px-3 font-medium">層級</th>
+                          <th className="py-2 px-3 font-medium text-right">狀態</th>
+                          <th className="py-2 px-3 font-medium text-right">欄位覆蓋</th>
+                          <th className="py-2 px-3 font-medium">缺欄位</th>
+                          <th className="py-2 px-3 font-medium text-right">新鮮度</th>
+                          <th className="py-2 px-3 font-medium">資料量</th>
+                          <th className="py-2 px-3 font-medium">動作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dataContractItems.map((item) => (
+                          <tr key={item.table} className={`border-t ${executionReviewRowClass(item.status)}`}>
+                            <td className="py-2 px-3 font-mono text-slate-100">{item.table}</td>
+                            <td className="py-2 px-3 text-slate-300">{item.layer}</td>
+                            <td className="py-2 px-3 text-right">
+                              <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(item.status)}`}>
+                                {executionReviewLabel(item.status)}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-right font-mono text-slate-200">
+                              {item.presentColumns.length}/{item.requiredColumns.length}
+                            </td>
+                            <td className="py-2 px-3 text-slate-400">
+                              {item.missingColumns.length ? item.missingColumns.join(", ") : "--"}
+                            </td>
+                            <td className="py-2 px-3 text-right font-mono text-slate-300">{item.freshness}</td>
+                            <td className="py-2 px-3 font-mono text-slate-400">{item.volume}</td>
+                            <td className="py-2 px-3 text-slate-500">{item.action}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-dashed border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-500">
+                    讀取 BigQuery 診斷後，這裡會顯示資料表欄位合約。
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 text-xs">
