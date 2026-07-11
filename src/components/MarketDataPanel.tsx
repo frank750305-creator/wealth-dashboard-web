@@ -50,6 +50,22 @@ type AllocationDraftRow = AssetComparisonRow & {
   allocationNote: string;
 };
 
+type AllocationRiskRow = AllocationDraftRow & {
+  weightedVolatility: number;
+  riskContribution: number;
+};
+
+type AllocationRiskSnapshot = {
+  investedAmount: number;
+  expectedAnnualReturn: number | null;
+  estimatedAnnualVolatility: number | null;
+  weightedMaxDrawdown: number | null;
+  worstMaxDrawdown: number | null;
+  stressLoss: number;
+  stressedValue: number;
+  riskRows: AllocationRiskRow[];
+};
+
 const statusMeta: Record<MarketSourceStatus, { label: string; className: string }> = {
   ready: {
     label: "可接 API",
@@ -430,6 +446,82 @@ function allocationDraftCsv(rows: AllocationDraftRow[], mode: AllocationMode, ca
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
+function allocationRiskRows(rows: AllocationDraftRow[]) {
+  const riskRows = rows.map((row) => ({
+    ...row,
+    weightedVolatility: row.allocationWeight * (row.annualizedVolatility ?? 0),
+    riskContribution: 0,
+  }));
+  const totalWeightedVolatility = riskRows.reduce((sum, row) => sum + row.weightedVolatility, 0);
+
+  return riskRows
+    .map((row) => ({
+      ...row,
+      riskContribution: totalWeightedVolatility > 0 ? row.weightedVolatility / totalWeightedVolatility : 0,
+    }))
+    .sort((left, right) => right.riskContribution - left.riskContribution || right.allocationWeight - left.allocationWeight);
+}
+
+function weightedAllocationMetric(rows: AllocationDraftRow[], selector: (row: AllocationDraftRow) => number | null) {
+  const validRows = rows.filter((row) => typeof selector(row) === "number" && Number.isFinite(selector(row) as number));
+  if (!validRows.length) return null;
+  return validRows.reduce((sum, row) => sum + row.allocationWeight * (selector(row) as number), 0);
+}
+
+function allocationRiskSnapshot(rows: AllocationDraftRow[], stressShockPercent: number): AllocationRiskSnapshot {
+  const investedAmount = rows.reduce((sum, row) => sum + row.allocationAmount, 0);
+  const stressRate = stressShockPercent / 100;
+  const maxDrawdownValues = rows
+    .map((row) => row.maxDrawdown)
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+
+  return {
+    investedAmount,
+    expectedAnnualReturn: weightedAllocationMetric(rows, (row) => row.annualizedReturn),
+    estimatedAnnualVolatility: weightedAllocationMetric(rows, (row) => row.annualizedVolatility),
+    weightedMaxDrawdown: weightedAllocationMetric(rows, (row) => row.maxDrawdown),
+    worstMaxDrawdown: maxDrawdownValues.length ? Math.min(...maxDrawdownValues) : null,
+    stressLoss: investedAmount * stressRate,
+    stressedValue: investedAmount * (1 + stressRate),
+    riskRows: allocationRiskRows(rows),
+  };
+}
+
+function allocationRiskCsv(snapshot: AllocationRiskSnapshot, stressShockPercent: number) {
+  const summaryRows = [
+    ["summary", "invested_amount", snapshot.investedAmount, "", "", "", "", "", "", "", "", ""],
+    ["summary", "expected_annual_return", snapshot.expectedAnnualReturn ?? "", "", "", "", "", "", "", "", "", ""],
+    ["summary", "estimated_annual_volatility", snapshot.estimatedAnnualVolatility ?? "", "", "", "", "", "", "", "", "", ""],
+    ["summary", "weighted_max_drawdown", snapshot.weightedMaxDrawdown ?? "", "", "", "", "", "", "", "", "", ""],
+    ["summary", "worst_asset_drawdown", snapshot.worstMaxDrawdown ?? "", "", "", "", "", "", "", "", "", ""],
+    ["summary", "stress_shock_percent", stressShockPercent, "", "", "", "", "", "", "", "", ""],
+    ["summary", "stress_loss", snapshot.stressLoss, "", "", "", "", "", "", "", "", ""],
+    ["summary", "stressed_value", snapshot.stressedValue, "", "", "", "", "", "", "", "", ""],
+  ];
+  const riskRows = snapshot.riskRows.map((row) => [
+    "risk_budget",
+    "asset",
+    "",
+    row.symbol,
+    row.allocationWeight,
+    row.allocationAmount,
+    row.annualizedVolatility ?? "",
+    row.weightedVolatility,
+    row.riskContribution,
+    row.maxDrawdown ?? "",
+    row.score,
+    row.signal,
+  ]);
+
+  return [
+    ["section", "name", "value", "symbol", "allocation_weight", "allocation_amount", "annualized_volatility", "weighted_volatility", "risk_contribution", "max_drawdown", "score", "signal"],
+    ...summaryRows,
+    ...riskRows,
+  ]
+    .map((row) => row.map(csvCell).join(","))
+    .join("\n");
+}
+
 function averageComparisonMetric(rows: AssetComparisonRow[], selector: (row: AssetComparisonRow) => number | null) {
   const values = rows.map(selector).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
   if (!values.length) return null;
@@ -462,6 +554,8 @@ function assetComparisonMemo(
     allocationRows?: AllocationDraftRow[];
     allocationMode?: AllocationMode;
     allocationCapital?: number;
+    allocationRisk?: AllocationRiskSnapshot;
+    stressShockPercent?: number;
   },
 ) {
   const candidateRows = rows.filter((row) => row.signal === "candidate");
@@ -475,6 +569,7 @@ function assetComparisonMemo(
   const topRows = rows.slice(0, 8);
   const reviewRows = [...riskRows, ...qualityRows.filter((row) => !riskRows.some((riskRow) => riskRow.symbol === row.symbol))].slice(0, 8);
   const memoAllocationRows = (options.allocationRows ?? []).filter((row) => row.allocationWeight > 0).slice(0, 8);
+  const memoRiskRows = (options.allocationRisk?.riskRows ?? []).slice(0, 5);
   const tableHeader = "| 商品 | 分數 | 訊號 | 年化報酬 | 年化波動 | 最大回撤 | 最新日 | 說明 |";
   const tableDivider = "|---|---:|---|---:|---:|---:|---|---|";
   const tableRows = topRows.map((row) =>
@@ -510,6 +605,15 @@ function assetComparisonMemo(
       markdownCell(row.allocationNote),
     ].join(" | "),
   );
+  const riskBudgetTableRows = memoRiskRows.map((row) =>
+    [
+      markdownCell(row.symbol),
+      markdownCell(formatPercent(row.allocationWeight)),
+      markdownCell(formatPercent(row.riskContribution)),
+      markdownCell(formatPercent(row.annualizedVolatility)),
+      markdownCell(formatPercent(row.maxDrawdown)),
+    ].join(" | "),
+  );
 
   return [
     `# ${options.name || "未命名 Watchlist"} 研究摘要`,
@@ -539,6 +643,16 @@ function assetComparisonMemo(
     memoAllocationRows.length ? "| 商品 | 權重 | 金額 | 分數 | 訊號 | 說明 |" : "目前篩選條件下沒有可納入配置的商品。",
     memoAllocationRows.length ? "|---|---:|---:|---:|---|---|" : "",
     ...allocationTableRows.map((row) => `| ${row} |`),
+    "",
+    "## 配置風險壓力測試",
+    `- 預估年化報酬：${formatPercent(options.allocationRisk?.expectedAnnualReturn)}`,
+    `- 預估年化波動：${formatPercent(options.allocationRisk?.estimatedAnnualVolatility)}`,
+    `- 加權最大回撤：${formatPercent(options.allocationRisk?.weightedMaxDrawdown)}`,
+    `- 壓力情境：${options.stressShockPercent ?? "--"}%`,
+    `- 情境損益：${formatCurrency(options.allocationRisk?.stressLoss)}`,
+    memoRiskRows.length ? "| 商品 | 權重 | 風險貢獻 | 年化波動 | 最大回撤 |" : "目前沒有可計算風險貢獻的配置商品。",
+    memoRiskRows.length ? "|---|---:|---:|---:|---:|" : "",
+    ...riskBudgetTableRows.map((row) => `| ${row} |`),
     "",
     "## 需要複核的風險",
     reviewRows.length ? "| 商品 | 分數 | 訊號 | 品質 | 最新日 | 距今天 | 說明 |" : "目前篩選結果未偵測到明確風險。",
@@ -594,6 +708,7 @@ export function MarketDataPanel() {
   const [minimumComparisonScore, setMinimumComparisonScore] = useState(0);
   const [allocationMode, setAllocationMode] = useState<AllocationMode>("risk");
   const [allocationCapital, setAllocationCapital] = useState(1_000_000);
+  const [stressShockPercent, setStressShockPercent] = useState(-20);
   const [watchlistPresetName, setWatchlistPresetName] = useState("核心 ETF");
   const [selectedWatchlistPresetId, setSelectedWatchlistPresetId] = useState("");
   const [savedWatchlistPresets, setSavedWatchlistPresets] = useState<SavedWatchlistPreset[]>([]);
@@ -676,6 +791,7 @@ export function MarketDataPanel() {
   );
   const modelAllocationRows = allocationDraftRows(visibleComparisonRows, allocationMode, allocationCapital);
   const activeAllocationRows = modelAllocationRows.filter((row) => row.allocationWeight > 0);
+  const allocationRisk = allocationRiskSnapshot(activeAllocationRows, stressShockPercent);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -871,6 +987,15 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleExportAllocationRiskCsv = () => {
+    if (!activeAllocationRows.length) return;
+
+    downloadTextFile(
+      `bigquery-allocation-risk-${resultStamp()}.csv`,
+      allocationRiskCsv(allocationRisk, stressShockPercent),
+      "text/csv;charset=utf-8",
+    );
+  };
   const buildAssetComparisonMemo = () =>
     assetComparisonMemo(visibleComparisonRows, {
       name: watchlistPresetName.trim() || "未命名 Watchlist",
@@ -883,6 +1008,8 @@ export function MarketDataPanel() {
       allocationRows: modelAllocationRows,
       allocationMode,
       allocationCapital,
+      allocationRisk,
+      stressShockPercent,
     });
   const handleExportAssetComparisonMemo = () => {
     if (!visibleComparisonRows.length) return;
@@ -1715,7 +1842,7 @@ export function MarketDataPanel() {
                       依目前 Watchlist 篩選結果產生研究用權重；風險訊號與低分商品會自動排除
                     </p>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-[150px_160px_auto] gap-2 text-xs">
+                  <div className="grid grid-cols-1 sm:grid-cols-[150px_160px_150px_auto_auto] gap-2 text-xs">
                     <label className="space-y-1">
                       <span className="text-slate-500">配置模式</span>
                       <select
@@ -1739,12 +1866,31 @@ export function MarketDataPanel() {
                         className="w-full rounded-md border border-slate-800 bg-slate-950 px-3 py-2 text-right font-mono text-slate-100"
                       />
                     </label>
+                    <label className="space-y-1">
+                      <span className="text-slate-500">壓力情境</span>
+                      <input
+                        type="number"
+                        min={-80}
+                        max={0}
+                        step={5}
+                        value={stressShockPercent}
+                        onChange={(event) => setStressShockPercent(Math.min(0, Math.max(-80, Number(event.target.value) || 0)))}
+                        className="w-full rounded-md border border-slate-800 bg-slate-950 px-3 py-2 text-right font-mono text-slate-100"
+                      />
+                    </label>
                     <button
                       onClick={handleExportAllocationDraftCsv}
                       disabled={!modelAllocationRows.length}
                       className="sm:self-end px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
                     >
                       配置 CSV
+                    </button>
+                    <button
+                      onClick={handleExportAllocationRiskCsv}
+                      disabled={!activeAllocationRows.length}
+                      className="sm:self-end px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+                    >
+                      風險 CSV
                     </button>
                   </div>
                 </div>
@@ -1758,6 +1904,15 @@ export function MarketDataPanel() {
                       "最高權重",
                       activeAllocationRows.length
                         ? `${activeAllocationRows[0].symbol} · ${formatPercent(activeAllocationRows[0].allocationWeight)}`
+                        : "--",
+                    ],
+                    ["預估年化報酬", formatPercent(allocationRisk.expectedAnnualReturn)],
+                    ["預估年化波動", formatPercent(allocationRisk.estimatedAnnualVolatility)],
+                    ["壓力損益", formatCurrency(allocationRisk.stressLoss)],
+                    [
+                      "最大風險貢獻",
+                      allocationRisk.riskRows.length
+                        ? `${allocationRisk.riskRows[0].symbol} · ${formatPercent(allocationRisk.riskRows[0].riskContribution)}`
                         : "--",
                     ],
                   ].map(([label, value]) => (
@@ -1811,6 +1966,74 @@ export function MarketDataPanel() {
                       ))}
                     </tbody>
                   </table>
+                </div>
+
+                <div className="grid grid-cols-1 xl:grid-cols-[0.85fr_1.15fr] gap-3">
+                  <div className="rounded-md border border-slate-800 bg-slate-950/70 p-3 text-xs space-y-3">
+                    <div>
+                      <p className="text-[11px] text-slate-600">壓力情境損益</p>
+                      <p className={`mt-1 font-mono text-lg font-bold ${allocationRisk.stressLoss < 0 ? "text-rose-300" : "text-emerald-300"}`}>
+                        {formatCurrency(allocationRisk.stressLoss)}
+                      </p>
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        {formatPercent(stressShockPercent / 100)} 情境後估計市值 {formatCurrency(allocationRisk.stressedValue)}
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <p className="text-[11px] text-slate-600">加權最大回撤</p>
+                        <p className="mt-1 font-mono text-sm font-bold text-rose-300">
+                          {formatPercent(allocationRisk.weightedMaxDrawdown)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] text-slate-600">單檔最差回撤</p>
+                        <p className="mt-1 font-mono text-sm font-bold text-rose-300">
+                          {formatPercent(allocationRisk.worstMaxDrawdown)}
+                        </p>
+                      </div>
+                    </div>
+                    <p className="text-[11px] leading-relaxed text-slate-500">
+                      目前使用單資產歷史波動估算風險預算，尚未納入資產間相關係數；後續接完整歷史報酬矩陣後，可升級為共變異數模型。
+                    </p>
+                  </div>
+
+                  <div className="overflow-x-auto rounded-md border border-slate-800 bg-slate-950/70">
+                    <table className="w-full min-w-[720px] text-xs">
+                      <thead>
+                        <tr className="text-left text-[11px] text-slate-600">
+                          <th className="py-2 px-3 font-medium">Symbol</th>
+                          <th className="py-2 px-3 font-medium text-right">Weight</th>
+                          <th className="py-2 px-3 font-medium text-right">Risk Budget</th>
+                          <th className="py-2 px-3 font-medium text-right">Weighted Vol</th>
+                          <th className="py-2 px-3 font-medium text-right">Vol</th>
+                          <th className="py-2 px-3 font-medium text-right">Drawdown</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {allocationRisk.riskRows.slice(0, 8).map((row) => (
+                          <tr key={row.symbol} className="border-t border-slate-800/80">
+                            <td className="py-2 px-3 font-bold text-cyan-200">{row.symbol}</td>
+                            <td className="py-2 px-3 text-right font-mono text-slate-300">
+                              {formatPercent(row.allocationWeight)}
+                            </td>
+                            <td className="py-2 px-3 text-right font-mono text-slate-100">
+                              {formatPercent(row.riskContribution)}
+                            </td>
+                            <td className="py-2 px-3 text-right font-mono text-slate-400">
+                              {formatPercent(row.weightedVolatility)}
+                            </td>
+                            <td className="py-2 px-3 text-right font-mono text-amber-200">
+                              {formatPercent(row.annualizedVolatility)}
+                            </td>
+                            <td className="py-2 px-3 text-right font-mono text-rose-300">
+                              {formatPercent(row.maxDrawdown)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </section>
 
