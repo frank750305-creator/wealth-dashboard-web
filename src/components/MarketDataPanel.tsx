@@ -89,6 +89,16 @@ type TradeTicketRow = RebalanceDraftRow & {
   ticketNote: string;
 };
 
+type ExecutionReviewStatus = "pass" | "watch" | "block";
+
+type ExecutionReviewItem = {
+  label: string;
+  status: ExecutionReviewStatus;
+  value: string;
+  threshold: string;
+  note: string;
+};
+
 const statusMeta: Record<MarketSourceStatus, { label: string; className: string }> = {
   ready: {
     label: "可接 API",
@@ -761,6 +771,134 @@ function tradeTicketCsv(rows: TradeTicketRow[], minimumTradeAmount: number) {
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
+function executionReviewLabel(status: ExecutionReviewStatus) {
+  if (status === "pass") return "通過";
+  if (status === "watch") return "觀察";
+  return "暫停";
+}
+
+function executionReviewBadgeClass(status: ExecutionReviewStatus) {
+  if (status === "pass") return "bg-emerald-500/15 text-emerald-200";
+  if (status === "watch") return "bg-amber-500/15 text-amber-200";
+  return "bg-rose-500/15 text-rose-200";
+}
+
+function executionReviewRowClass(status: ExecutionReviewStatus) {
+  if (status === "pass") return "border-emerald-500/15 bg-emerald-950/10";
+  if (status === "watch") return "border-amber-500/20 bg-amber-950/10";
+  return "border-rose-500/20 bg-rose-950/10";
+}
+
+function finiteValues(values: Array<number | null | undefined>) {
+  return values.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+}
+
+function minimumFiniteValue(values: Array<number | null | undefined>) {
+  const cleanValues = finiteValues(values);
+  return cleanValues.length ? Math.min(...cleanValues) : null;
+}
+
+function tradeExecutionReviewItems({
+  tradeTickets,
+  activeTrades,
+  allocationCapital,
+  priceFreshnessDays,
+  allocationRisk,
+  skippedTradeCount,
+}: {
+  tradeTickets: TradeTicketRow[];
+  activeTrades: RebalanceDraftRow[];
+  allocationCapital: number;
+  priceFreshnessDays: number | null;
+  allocationRisk: AllocationRiskSnapshot;
+  skippedTradeCount: number;
+}): ExecutionReviewItem[] {
+  const activeCount = activeTrades.length;
+  const ticketCount = tradeTickets.length;
+  const executableCoverage = activeCount ? ticketCount / activeCount : null;
+  const netCash = tradeTickets.reduce((sum, row) => sum + row.cashImpact, 0);
+  const maxTicketAmount = tradeTickets.reduce((maxValue, row) => Math.max(maxValue, row.ticketAmount), 0);
+  const netCashRatio = allocationCapital > 0 ? Math.abs(netCash) / allocationCapital : null;
+  const maxTicketRatio = allocationCapital > 0 ? maxTicketAmount / allocationCapital : null;
+  const minScore = minimumFiniteValue(tradeTickets.map((row) => row.score));
+  const stressLossRatio = allocationRisk.investedAmount > 0 ? Math.abs(allocationRisk.stressLoss) / allocationRisk.investedAmount : null;
+  const coverageReviewStatus: ExecutionReviewStatus =
+    activeCount === 0 ? "watch" : ticketCount === 0 ? "block" : skippedTradeCount > 0 ? "watch" : "pass";
+  const cashReviewStatus: ExecutionReviewStatus =
+    netCashRatio === null ? "watch" : netCashRatio <= 0.15 ? "pass" : netCashRatio <= 0.3 ? "watch" : "block";
+  const concentrationReviewStatus: ExecutionReviewStatus =
+    maxTicketRatio === null ? "watch" : maxTicketRatio <= 0.2 ? "pass" : maxTicketRatio <= 0.35 ? "watch" : "block";
+  const freshnessReviewStatus: ExecutionReviewStatus =
+    priceFreshnessDays === null ? "watch" : priceFreshnessDays <= 3 ? "pass" : priceFreshnessDays <= 10 ? "watch" : "block";
+  const scoreReviewStatus: ExecutionReviewStatus =
+    minScore === null ? "watch" : minScore >= 55 ? "pass" : minScore >= 45 ? "watch" : "block";
+  const stressReviewStatus: ExecutionReviewStatus =
+    stressLossRatio === null ? "watch" : stressLossRatio <= 0.12 ? "pass" : stressLossRatio <= 0.25 ? "watch" : "block";
+
+  return [
+    {
+      label: "交易覆蓋率",
+      status: coverageReviewStatus,
+      value: executableCoverage === null ? "--" : `${ticketCount}/${activeCount} (${formatPercent(executableCoverage)})`,
+      threshold: "可執行交易不得為 0",
+      note:
+        activeCount === 0
+          ? "尚未形成需交易項目"
+          : skippedTradeCount > 0
+            ? "部分交易低於最小交易金額，需人工決定是否合併或暫緩"
+            : "所有需交易項目都已進入執行清單",
+    },
+    {
+      label: "現金淨流量",
+      status: cashReviewStatus,
+      value: `${formatCurrency(netCash)} / ${formatPercent(netCashRatio)}`,
+      threshold: "低於模型本金 15% 為佳",
+      note: netCash < 0 ? "本次交易需要淨投入現金" : netCash > 0 ? "本次交易會釋放現金" : "買賣金額大致平衡",
+    },
+    {
+      label: "最大單筆交易",
+      status: concentrationReviewStatus,
+      value: `${formatCurrency(maxTicketAmount)} / ${formatPercent(maxTicketRatio)}`,
+      threshold: "單筆低於模型本金 20% 為佳",
+      note: "避免單一商品交易主導整批調倉",
+    },
+    {
+      label: "價格資料新鮮度",
+      status: freshnessReviewStatus,
+      value: priceFreshnessDays === null ? "--" : `${priceFreshnessDays} 天`,
+      threshold: "3 天內通過，10 天內觀察",
+      note: "交易前應確認 BigQuery daily_prices 已更新",
+    },
+    {
+      label: "最低模型分數",
+      status: scoreReviewStatus,
+      value: minScore === null ? "--" : String(minScore),
+      threshold: "55 分以上通過，45 分以下暫停",
+      note: "避免低分商品被動進入交易單",
+    },
+    {
+      label: "壓力損失比例",
+      status: stressReviewStatus,
+      value: `${formatCurrency(allocationRisk.stressLoss)} / ${formatPercent(stressLossRatio)}`,
+      threshold: "低於 12% 通過，25% 以上暫停",
+      note: "使用目前配置草稿的壓力情境估算",
+    },
+  ];
+}
+
+function executionReviewCsv(rows: ExecutionReviewItem[]) {
+  const header = ["label", "status", "value", "threshold", "note"];
+  const csvRows = rows.map((row) => [
+    row.label,
+    executionReviewLabel(row.status),
+    row.value,
+    row.threshold,
+    row.note,
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
 function averageComparisonMetric(rows: AssetComparisonRow[], selector: (row: AssetComparisonRow) => number | null) {
   const values = rows.map(selector).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
   if (!values.length) return null;
@@ -800,6 +938,7 @@ function assetComparisonMemo(
     rebalanceThreshold?: number;
     tradeTickets?: TradeTicketRow[];
     minimumTradeAmount?: number;
+    executionReviewItems?: ExecutionReviewItem[];
   },
 ) {
   const candidateRows = rows.filter((row) => row.signal === "candidate");
@@ -816,6 +955,7 @@ function assetComparisonMemo(
   const memoRiskRows = (options.allocationRisk?.riskRows ?? []).slice(0, 5);
   const memoRebalanceRows = (options.rebalanceRows ?? []).slice(0, 8);
   const memoTradeTickets = (options.tradeTickets ?? []).slice(0, 8);
+  const memoExecutionReviewItems = (options.executionReviewItems ?? []).slice(0, 8);
   const tableHeader = "| 商品 | 分數 | 訊號 | 年化報酬 | 年化波動 | 最大回撤 | 最新日 | 說明 |";
   const tableDivider = "|---|---:|---|---:|---:|---:|---|---|";
   const tableRows = topRows.map((row) =>
@@ -881,6 +1021,15 @@ function assetComparisonMemo(
       markdownCell(row.ticketNote),
     ].join(" | "),
   );
+  const executionReviewTableRows = memoExecutionReviewItems.map((row) =>
+    [
+      markdownCell(row.label),
+      markdownCell(executionReviewLabel(row.status)),
+      markdownCell(row.value),
+      markdownCell(row.threshold),
+      markdownCell(row.note),
+    ].join(" | "),
+  );
 
   return [
     `# ${options.name || "未命名 Watchlist"} 研究摘要`,
@@ -933,6 +1082,11 @@ function assetComparisonMemo(
     memoTradeTickets.length ? "| 商品 | 動作 | 交易金額 | 現金影響 | 權重偏離 | 說明 |" : "目前沒有達最小交易金額的可執行交易。",
     memoTradeTickets.length ? "|---|---|---:|---:|---:|---|" : "",
     ...tradeTicketTableRows.map((row) => `| ${row} |`),
+    "",
+    "## 交易前檢核",
+    memoExecutionReviewItems.length ? "| 項目 | 狀態 | 目前值 | 門檻 | 說明 |" : "目前沒有可輸出的交易前檢核。",
+    memoExecutionReviewItems.length ? "|---|---|---:|---|---|" : "",
+    ...executionReviewTableRows.map((row) => `| ${row} |`),
     "",
     "## 需要複核的風險",
     reviewRows.length ? "| 商品 | 分數 | 訊號 | 品質 | 最新日 | 距今天 | 說明 |" : "目前篩選結果未偵測到明確風險。",
@@ -1084,6 +1238,17 @@ export function MarketDataPanel() {
   const activeRebalanceRows = rebalanceRows.filter((row) => row.direction !== "hold");
   const tradeTickets = tradeTicketRows(rebalanceRows, minimumTradeAmount);
   const skippedTradeCount = activeRebalanceRows.length - tradeTickets.length;
+  const executionReviewItems = tradeExecutionReviewItems({
+    tradeTickets,
+    activeTrades: activeRebalanceRows,
+    allocationCapital,
+    priceFreshnessDays,
+    allocationRisk,
+    skippedTradeCount,
+  });
+  const executionBlockCount = executionReviewItems.filter((item) => item.status === "block").length;
+  const executionWatchCount = executionReviewItems.filter((item) => item.status === "watch").length;
+  const executionReviewDecision: ExecutionReviewStatus = executionBlockCount > 0 ? "block" : executionWatchCount > 0 ? "watch" : "pass";
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1306,6 +1471,15 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleExportExecutionReviewCsv = () => {
+    if (!executionReviewItems.length) return;
+
+    downloadTextFile(
+      `bigquery-execution-review-${resultStamp()}.csv`,
+      executionReviewCsv(executionReviewItems),
+      "text/csv;charset=utf-8",
+    );
+  };
   const buildAssetComparisonMemo = () =>
     assetComparisonMemo(visibleComparisonRows, {
       name: watchlistPresetName.trim() || "未命名 Watchlist",
@@ -1325,6 +1499,7 @@ export function MarketDataPanel() {
       rebalanceThreshold,
       tradeTickets,
       minimumTradeAmount,
+      executionReviewItems,
     });
   const handleExportAssetComparisonMemo = () => {
     if (!visibleComparisonRows.length) return;
@@ -2614,6 +2789,63 @@ export function MarketDataPanel() {
                             目前沒有超過最小交易金額的買賣項目。
                           </div>
                         )}
+
+                        <div className="border-t border-slate-800 pt-3 space-y-3">
+                          <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-3">
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h5 className="text-xs font-bold text-slate-100">交易前檢核中心</h5>
+                                <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(executionReviewDecision)}`}>
+                                  {executionReviewLabel(executionReviewDecision)}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-slate-500 mt-0.5">
+                                將交易清單轉成可覆核的現金、集中度、資料新鮮度與壓力風險檢查
+                              </p>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2 text-xs">
+                              <span className="rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-slate-400">
+                                暫停 {executionBlockCount} · 觀察 {executionWatchCount}
+                              </span>
+                              <button
+                                onClick={handleExportExecutionReviewCsv}
+                                disabled={!rebalanceRows.length}
+                                className="px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+                              >
+                                檢核 CSV
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="overflow-x-auto">
+                            <table className="w-full min-w-[900px] text-xs">
+                              <thead>
+                                <tr className="text-left text-[11px] text-slate-600">
+                                  <th className="py-2 px-3 font-medium">項目</th>
+                                  <th className="py-2 px-3 font-medium text-right">狀態</th>
+                                  <th className="py-2 px-3 font-medium text-right">目前值</th>
+                                  <th className="py-2 px-3 font-medium">門檻</th>
+                                  <th className="py-2 px-3 font-medium">說明</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {executionReviewItems.map((item) => (
+                                  <tr key={item.label} className={`border-t ${executionReviewRowClass(item.status)}`}>
+                                    <td className="py-2 px-3 font-bold text-slate-100">{item.label}</td>
+                                    <td className="py-2 px-3 text-right">
+                                      <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(item.status)}`}>
+                                        {executionReviewLabel(item.status)}
+                                      </span>
+                                    </td>
+                                    <td className="py-2 px-3 text-right font-mono text-slate-200">{item.value}</td>
+                                    <td className="py-2 px-3 text-slate-400">{item.threshold}</td>
+                                    <td className="py-2 px-3 text-slate-500">{item.note}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
                       </section>
                     </div>
                   ) : (
