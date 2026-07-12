@@ -367,6 +367,17 @@ type DataLicenseComplianceItem = {
   action: string;
 };
 
+type SecurityAuditItem = {
+  control: string;
+  scope: string;
+  owner: string;
+  status: ExecutionReviewStatus;
+  evidence: string;
+  risk: string;
+  frequency: string;
+  action: string;
+};
+
 const statusMeta: Record<MarketSourceStatus, { label: string; className: string }> = {
   ready: {
     label: "可接 API",
@@ -4421,6 +4432,154 @@ function dataLicenseComplianceCsv(rows: DataLicenseComplianceItem[]) {
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
+function buildSecurityAuditItems({
+  apiContractBlueprintDecision,
+  platformEntitlementDecision,
+  clientWorkspaceProvisioningDecision,
+  usageBillingDecision,
+  dataLicenseComplianceDecision,
+  marketAlertDecision,
+  hasBigQueryCredentials,
+  riskOwner,
+  decisionOwner,
+}: {
+  apiContractBlueprintDecision: ExecutionReviewStatus;
+  platformEntitlementDecision: ExecutionReviewStatus;
+  clientWorkspaceProvisioningDecision: ExecutionReviewStatus;
+  usageBillingDecision: ExecutionReviewStatus;
+  dataLicenseComplianceDecision: ExecutionReviewStatus;
+  marketAlertDecision: ExecutionReviewStatus;
+  hasBigQueryCredentials: boolean;
+  riskOwner: string;
+  decisionOwner: string;
+}): SecurityAuditItem[] {
+  const cleanRiskOwner = riskOwner.trim() || "風控";
+  const cleanDecisionOwner = decisionOwner.trim() || "研究";
+  const apiSecurityStatus = combinedExecutionStatus([apiContractBlueprintDecision, platformEntitlementDecision]);
+  const tenantSecurityStatus = combinedExecutionStatus([platformEntitlementDecision, clientWorkspaceProvisioningDecision]);
+  const commercialSecurityStatus = combinedExecutionStatus([clientWorkspaceProvisioningDecision, usageBillingDecision]);
+  const complianceSecurityStatus = combinedExecutionStatus([dataLicenseComplianceDecision, marketAlertDecision]);
+
+  return [
+    {
+      control: "SSO / MFA / 帳號開通",
+      scope: "Enterprise、Internal Admin、Risk Control Room",
+      owner: cleanRiskOwner,
+      status: tenantSecurityStatus,
+      evidence: `工作區與權限狀態：${executionReviewLabel(tenantSecurityStatus)}`,
+      risk: "未完成 SSO/MFA 前，不應開放企業客戶正式使用",
+      frequency: "每次企業上線前",
+      action: tenantSecurityStatus === "pass" ? "可進入 SSO/OIDC 具體接入設計" : "先完成角色、方案與工作區開通邊界",
+    },
+    {
+      control: "API key 輪替與停權",
+      scope: "Market API / Portfolio API / Trading API",
+      owner: cleanRiskOwner,
+      status: apiSecurityStatus,
+      evidence: `API 合約與權限矩陣：${executionReviewLabel(apiSecurityStatus)}`,
+      risk: "key 未輪替或未分權會放大資料外洩與未授權使用風險",
+      frequency: "每季檢查",
+      action: apiSecurityStatus === "pass" ? "可建立 key 發放、輪替、停權與 IP allowlist 流程" : "先凍結 API 合約與角色權限",
+    },
+    {
+      control: "IP allowlist / 客戶網域限制",
+      scope: "Enterprise API 與交易流程",
+      owner: cleanRiskOwner,
+      status: clientWorkspaceProvisioningDecision,
+      evidence: `工作區開通狀態：${executionReviewLabel(clientWorkspaceProvisioningDecision)}`,
+      risk: "企業 key 若無來源限制，難以控管外部轉用",
+      frequency: "企業合約簽署前",
+      action: clientWorkspaceProvisioningDecision === "pass" ? "可把 IP allowlist 放進企業開通清單" : "先完成企業工作區上線檢核",
+    },
+    {
+      control: "匯出稽核與下載留痕",
+      scope: "CSV、Markdown memo、OpenAPI JSON、帳務報表",
+      owner: cleanRiskOwner,
+      status: dataLicenseComplianceDecision,
+      evidence: `授權合規狀態：${executionReviewLabel(dataLicenseComplianceDecision)}`,
+      risk: "未留痕的匯出會造成資料授權與再散布責任不清",
+      frequency: "每次匯出",
+      action: dataLicenseComplianceDecision === "pass" ? "可設計 export log 與 watermark 欄位" : "先完成授權與匯出政策",
+    },
+    {
+      control: "管理員操作審計",
+      scope: "角色、方案、工作區、API key、資料產品",
+      owner: cleanRiskOwner,
+      status: platformEntitlementDecision,
+      evidence: `權限矩陣狀態：${executionReviewLabel(platformEntitlementDecision)}`,
+      risk: "管理員可改權限但無審計，會造成責任歸屬不清",
+      frequency: "所有管理員操作",
+      action: platformEntitlementDecision === "pass" ? "可建立 admin audit log 與雙人覆核規則" : "先收斂管理員權限邊界",
+    },
+    {
+      control: "帳務與合約資料權限",
+      scope: "MRR、發票、年度合約、客戶用量",
+      owner: cleanRiskOwner,
+      status: usageBillingDecision,
+      evidence: `帳務狀態：${executionReviewLabel(usageBillingDecision)}`,
+      risk: "帳務資料若被非授權角色讀取，會暴露客戶與商業敏感資訊",
+      frequency: "每月結帳前",
+      action: usageBillingDecision === "pass" ? "可建立 Revenue Ops 權限與報表遮蔽規則" : "先完成帳務模式與發票狀態",
+    },
+    {
+      control: "BigQuery service account 金鑰控管",
+      scope: "Vercel env、BigQuery dataset、資料管線",
+      owner: cleanRiskOwner,
+      status: hasBigQueryCredentials ? "pass" : "block",
+      evidence: hasBigQueryCredentials ? "Vercel BigQuery 環境變數已設定" : "缺少 BigQuery 環境變數",
+      risk: "資料倉儲金鑰缺失或外洩會直接影響資料服務",
+      frequency: "每次部署與每季輪替",
+      action: hasBigQueryCredentials ? "可規劃 service account 最小權限與輪替" : "先補齊 GCP_SERVICE_ACCOUNT_JSON",
+    },
+    {
+      control: "事件回應與停權流程",
+      scope: "資料外洩、API 濫用、超額匯出、異常交易",
+      owner: cleanRiskOwner,
+      status: marketAlertDecision,
+      evidence: `市場警示與營運監控：${executionReviewLabel(marketAlertDecision)}`,
+      risk: "沒有停權與事件分級時，異常用量會延伸成合約或法遵問題",
+      frequency: "即時事件",
+      action: marketAlertDecision === "pass" ? "可建立 L1/L2/L3 事件回應 playbook" : "先關閉阻斷警示與高優先事件",
+    },
+    {
+      control: "投資建議責任聲明",
+      scope: "研究 memo、投組分析、最佳化、交易票",
+      owner: cleanDecisionOwner,
+      status: apiContractBlueprintDecision,
+      evidence: `分析 API 合約：${executionReviewLabel(apiContractBlueprintDecision)}`,
+      risk: "未標示模型口徑與責任邊界，容易被誤用為保證性建議",
+      frequency: "每個對外報告版本",
+      action: apiContractBlueprintDecision === "pass" ? "可把模型口徑與免責聲明接進 memo" : "先凍結分析輸出欄位與版本",
+    },
+    {
+      control: "合規證據庫",
+      scope: "資料血緣、授權、匯出、帳務、審核軌跡",
+      owner: cleanRiskOwner,
+      status: complianceSecurityStatus,
+      evidence: `合規與警示狀態：${executionReviewLabel(complianceSecurityStatus)}`,
+      risk: "缺少集中證據時，客戶稽核或供應商審查難以快速回覆",
+      frequency: "每季稽核",
+      action: complianceSecurityStatus === "pass" ? "可規劃合規 evidence vault" : "先補齊授權合規與警示資料",
+    },
+  ];
+}
+
+function securityAuditCsv(rows: SecurityAuditItem[]) {
+  const header = ["control", "scope", "owner", "status", "evidence", "risk", "frequency", "action"];
+  const csvRows = rows.map((row) => [
+    row.control,
+    row.scope,
+    row.owner,
+    executionReviewLabel(row.status),
+    row.evidence,
+    row.risk,
+    row.frequency,
+    row.action,
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
 function buildMarketAlertEvents({
   coverageUniverseItems,
   dataContractItems,
@@ -4650,6 +4809,7 @@ function assetComparisonMemo(
     clientWorkspaceProvisioningItems?: ClientWorkspaceProvisioningItem[];
     usageBillingItems?: UsageBillingItem[];
     dataLicenseComplianceItems?: DataLicenseComplianceItem[];
+    securityAuditItems?: SecurityAuditItem[];
   },
 ) {
   const candidateRows = rows.filter((row) => row.signal === "candidate");
@@ -4694,6 +4854,7 @@ function assetComparisonMemo(
   const memoClientWorkspaceProvisioningItems = (options.clientWorkspaceProvisioningItems ?? []).slice(0, 12);
   const memoUsageBillingItems = (options.usageBillingItems ?? []).slice(0, 12);
   const memoDataLicenseComplianceItems = (options.dataLicenseComplianceItems ?? []).slice(0, 12);
+  const memoSecurityAuditItems = (options.securityAuditItems ?? []).slice(0, 12);
   const tableHeader = "| 商品 | 分數 | 訊號 | 年化報酬 | 年化波動 | 最大回撤 | 最新日 | 說明 |";
   const tableDivider = "|---|---:|---|---:|---:|---:|---|---|";
   const tableRows = topRows.map((row) =>
@@ -5074,6 +5235,18 @@ function assetComparisonMemo(
       markdownCell(row.action),
     ].join(" | "),
   );
+  const securityAuditTableRows = memoSecurityAuditItems.map((row) =>
+    [
+      markdownCell(row.control),
+      markdownCell(row.scope),
+      markdownCell(row.owner),
+      markdownCell(executionReviewLabel(row.status)),
+      markdownCell(row.evidence),
+      markdownCell(row.risk),
+      markdownCell(row.frequency),
+      markdownCell(row.action),
+    ].join(" | "),
+  );
 
   return [
     `# ${options.name || "未命名 Watchlist"} 研究摘要`,
@@ -5175,6 +5348,11 @@ function assetComparisonMemo(
     memoDataLicenseComplianceItems.length ? "| 來源 | 資料集 | 授權範圍 | 再散布限制 | 客戶可見範圍 | 匯出政策 | 稽核軌跡 | 續約 | 狀態 | 動作 |" : "目前沒有可輸出的資料授權與合規資料。",
     memoDataLicenseComplianceItems.length ? "|---|---|---|---|---|---|---|---|---|---|" : "",
     ...dataLicenseComplianceTableRows.map((row) => `| ${row} |`),
+    "",
+    "## 安全與審計中心",
+    memoSecurityAuditItems.length ? "| 控制項 | 範圍 | 負責人 | 狀態 | 依據 | 風險 | 頻率 | 動作 |" : "目前沒有可輸出的安全審計資料。",
+    memoSecurityAuditItems.length ? "|---|---|---|---|---|---|---|---|" : "",
+    ...securityAuditTableRows.map((row) => `| ${row} |`),
     "",
     "## 篩選概況",
     `- 顯示商品：${rows.length} / ${options.totalRows} 檔`,
@@ -5910,6 +6088,22 @@ export function MarketDataPanel() {
   const dataLicenseComplianceDecision = dataLicenseComplianceItems.length
     ? combinedExecutionStatus(dataLicenseComplianceItems.map((item) => item.status))
     : "watch";
+  const securityAuditItems = buildSecurityAuditItems({
+    apiContractBlueprintDecision,
+    platformEntitlementDecision,
+    clientWorkspaceProvisioningDecision,
+    usageBillingDecision,
+    dataLicenseComplianceDecision,
+    marketAlertDecision,
+    hasBigQueryCredentials,
+    riskOwner,
+    decisionOwner,
+  });
+  const securityReadyCount = securityAuditItems.filter((item) => item.status === "pass").length;
+  const securityBlockCount = securityAuditItems.filter((item) => item.status === "block").length;
+  const securityAuditDecision = securityAuditItems.length
+    ? combinedExecutionStatus(securityAuditItems.map((item) => item.status))
+    : "watch";
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -6136,6 +6330,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-data-license-compliance-${resultStamp()}.csv`,
       dataLicenseComplianceCsv(dataLicenseComplianceItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportSecurityAuditCsv = () => {
+    if (!securityAuditItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-security-audit-${resultStamp()}.csv`,
+      securityAuditCsv(securityAuditItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -6443,6 +6646,7 @@ export function MarketDataPanel() {
       clientWorkspaceProvisioningItems,
       usageBillingItems,
       dataLicenseComplianceItems,
+      securityAuditItems,
     });
   const handleExportAssetComparisonMemo = () => {
     if (!visibleComparisonRows.length) return;
@@ -7713,6 +7917,83 @@ export function MarketDataPanel() {
                 ) : (
                   <div className="rounded-md border border-dashed border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-500">
                     建立用量與帳務資料後，這裡會顯示資料授權與合規清單。
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-slate-800 pt-3 space-y-3">
+                <div className="flex flex-col md:flex-row md:items-end justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="text-xs font-bold text-slate-100">安全與審計中心</h4>
+                      <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(securityAuditDecision)}`}>
+                        {executionReviewLabel(securityAuditDecision)}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-[11px] text-slate-500">
+                      管理 SSO、API key 輪替、IP allowlist、匯出稽核、管理員操作與事件回應
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-end gap-2 text-xs">
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        ["就緒", `${securityReadyCount}`],
+                        ["阻擋", `${securityBlockCount}`],
+                      ].map(([label, value]) => (
+                        <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 px-3 py-2 text-right">
+                          <p className="text-[10px] text-slate-600">{label}</p>
+                          <p className="mt-0.5 font-mono font-bold text-slate-100">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      onClick={handleExportSecurityAuditCsv}
+                      disabled={!securityAuditItems.length}
+                      className="px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+                    >
+                      安全 CSV
+                    </button>
+                  </div>
+                </div>
+
+                {securityAuditItems.length ? (
+                  <div className="overflow-x-auto rounded-lg border border-slate-800">
+                    <table className="w-full min-w-[1500px] text-xs">
+                      <thead className="bg-slate-900/80">
+                        <tr className="text-left text-[11px] text-slate-600">
+                          <th className="py-2 px-3 font-medium">控制項</th>
+                          <th className="py-2 px-3 font-medium">範圍</th>
+                          <th className="py-2 px-3 font-medium">負責人</th>
+                          <th className="py-2 px-3 font-medium text-right">狀態</th>
+                          <th className="py-2 px-3 font-medium">依據</th>
+                          <th className="py-2 px-3 font-medium">風險</th>
+                          <th className="py-2 px-3 font-medium">頻率</th>
+                          <th className="py-2 px-3 font-medium">動作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {securityAuditItems.map((item) => (
+                          <tr key={`${item.control}-${item.scope}`} className={`border-t ${executionReviewRowClass(item.status)}`}>
+                            <td className="py-2 px-3 font-bold text-slate-100">{item.control}</td>
+                            <td className="py-2 px-3 text-slate-400">{item.scope}</td>
+                            <td className="py-2 px-3 text-slate-400">{item.owner}</td>
+                            <td className="py-2 px-3 text-right">
+                              <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(item.status)}`}>
+                                {executionReviewLabel(item.status)}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-slate-500">{item.evidence}</td>
+                            <td className="py-2 px-3 text-slate-500">{item.risk}</td>
+                            <td className="py-2 px-3 text-slate-500">{item.frequency}</td>
+                            <td className="py-2 px-3 text-slate-500">{item.action}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-dashed border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-500">
+                    建立授權合規資料後，這裡會顯示安全與審計控制項。
                   </div>
                 )}
               </div>
