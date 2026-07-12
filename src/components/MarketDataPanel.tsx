@@ -308,6 +308,20 @@ type ApiContractBlueprintItem = {
   action: string;
 };
 
+type PlatformEntitlementItem = {
+  role: string;
+  plan: string;
+  dataScope: string;
+  apiAccess: string;
+  tools: string;
+  exportRights: string;
+  approvalLimit: string;
+  status: ExecutionReviewStatus;
+  owner: string;
+  evidence: string;
+  action: string;
+};
+
 const statusMeta: Record<MarketSourceStatus, { label: string; className: string }> = {
   ready: {
     label: "可接 API",
@@ -3719,6 +3733,150 @@ function apiContractBlueprintJson(rows: ApiContractBlueprintItem[]) {
   );
 }
 
+function buildPlatformEntitlementItems({
+  dataReadinessDecision,
+  apiServiceCatalogDecision,
+  apiContractBlueprintDecision,
+  marketAlertDecision,
+  hasBigQueryCredentials,
+  comparisonRows,
+  activeAllocationRows,
+  tradeTickets,
+  riskOwner,
+  decisionOwner,
+}: {
+  dataReadinessDecision: ExecutionReviewStatus;
+  apiServiceCatalogDecision: ExecutionReviewStatus;
+  apiContractBlueprintDecision: ExecutionReviewStatus;
+  marketAlertDecision: ExecutionReviewStatus;
+  hasBigQueryCredentials: boolean;
+  comparisonRows: AssetComparisonRow[];
+  activeAllocationRows: AllocationDraftRow[];
+  tradeTickets: TradeTicketRow[];
+  riskOwner: string;
+  decisionOwner: string;
+}): PlatformEntitlementItem[] {
+  const cleanRiskOwner = riskOwner.trim() || "風控";
+  const cleanDecisionOwner = decisionOwner.trim() || "研究";
+  const marketDataStatus: ExecutionReviewStatus = hasBigQueryCredentials ? dataReadinessDecision : "block";
+  const portfolioStatus: ExecutionReviewStatus =
+    comparisonRows.length && activeAllocationRows.length ? combinedExecutionStatus([dataReadinessDecision, apiContractBlueprintDecision]) : "watch";
+  const governanceStatus = combinedExecutionStatus([apiServiceCatalogDecision, apiContractBlueprintDecision, marketAlertDecision]);
+
+  return [
+    {
+      role: "訪客 / Demo",
+      plan: "Free",
+      dataScope: "公開資料源狀態與平台能力摘要",
+      apiAccess: "/api/v1/market/sources",
+      tools: "資料源狀態、平台導覽",
+      exportRights: "不可匯出",
+      approvalLimit: "無交易與投組權限",
+      status: "pass",
+      owner: cleanRiskOwner,
+      evidence: "公開資訊不讀取 BigQuery 明細",
+      action: "可作為 landing demo 與銷售入口",
+    },
+    {
+      role: "註冊研究員",
+      plan: "Pro",
+      dataScope: "商品搜尋、商品主檔、價格與風險指標",
+      apiAccess: "/api/v1/market/bigquery/assets, /api/v1/market/bigquery/assets/:symbol",
+      tools: "商品搜尋、Watchlist、研究摘要",
+      exportRights: "Markdown memo / 研究 CSV",
+      approvalLimit: "不可送出交易票",
+      status: marketDataStatus,
+      owner: cleanDecisionOwner,
+      evidence: hasBigQueryCredentials ? "BigQuery 憑證已設定" : "缺少 BigQuery 憑證",
+      action: marketDataStatus === "pass" ? "可開放研究工作台" : "先補齊 BigQuery 金鑰與資料讀取",
+    },
+    {
+      role: "投資顧問",
+      plan: "Pro Plus",
+      dataScope: "投組分析、模型配置、風險預算",
+      apiAccess: "/api/v1/portfolio/analyze-bigquery, /api/v1/portfolio/optimize-bigquery",
+      tools: "投組分析、最佳化、再平衡草案",
+      exportRights: "投組 memo / 交易前檢核",
+      approvalLimit: "可產生建議，不可直接執行",
+      status: portfolioStatus,
+      owner: cleanDecisionOwner,
+      evidence: `${comparisonRows.length} 檔比較 / ${activeAllocationRows.length} 檔配置`,
+      action: portfolioStatus === "pass" ? "可接入顧問工作流" : "先建立有效 watchlist 與配置草案",
+    },
+    {
+      role: "交易營運",
+      plan: "Enterprise",
+      dataScope: "交易票、批次、執行交接",
+      apiAccess: "/api/v1/trading/tickets",
+      tools: "交易票、批次、執行回填",
+      exportRights: "交易 CSV / 執行報告",
+      approvalLimit: "需投委會或主管核准",
+      status: tradeTickets.length ? portfolioStatus : "watch",
+      owner: cleanDecisionOwner,
+      evidence: `${tradeTickets.length} 張交易票`,
+      action: tradeTickets.length ? "可接執行交接" : "先產生交易票與最小交易金額規則",
+    },
+    {
+      role: "資料工程",
+      plan: "Internal",
+      dataScope: "資料表診斷、資料合約、API 合約",
+      apiAccess: "/api/v1/market/bigquery/diagnostics, /api/v1/platform/data-products",
+      tools: "資料管線、合約中心、OpenAPI 藍圖",
+      exportRights: "OpenAPI JSON / 資料品質 CSV",
+      approvalLimit: "可修復資料，不可覆核投資決策",
+      status: apiContractBlueprintDecision,
+      owner: cleanRiskOwner,
+      evidence: `API 合約狀態：${executionReviewLabel(apiContractBlueprintDecision)}`,
+      action: apiContractBlueprintDecision === "pass" ? "可進入 API 文件化" : "先凍結 request/response 與版本策略",
+    },
+    {
+      role: "風控 / 合規",
+      plan: "Enterprise",
+      dataScope: "警示、SLA、KRI、審核軌跡",
+      apiAccess: "/api/v1/platform/data-products, /api/v1/trading/tickets",
+      tools: "市場警示、SLA 升級、投委會審核",
+      exportRights: "審核 memo / 例外報告",
+      approvalLimit: "可阻擋交易與資料產品發布",
+      status: marketAlertDecision,
+      owner: cleanRiskOwner,
+      evidence: `警示狀態：${executionReviewLabel(marketAlertDecision)}`,
+      action: marketAlertDecision === "pass" ? "可維持日常監控" : "先處理阻斷警示與高優先例外",
+    },
+    {
+      role: "平台管理員",
+      plan: "Internal Admin",
+      dataScope: "全部 API、環境變數、角色與方案設定",
+      apiAccess: "all internal endpoints",
+      tools: "權限、資料產品、API 合約、營運監控",
+      exportRights: "全部內部匯出",
+      approvalLimit: "可調整權限，不直接覆核投資建議",
+      status: governanceStatus,
+      owner: cleanRiskOwner,
+      evidence: `治理狀態：${executionReviewLabel(governanceStatus)}`,
+      action: governanceStatus === "pass" ? "可進入正式權限系統設計" : "先收斂 API、警示與資料治理缺口",
+    },
+  ];
+}
+
+function platformEntitlementCsv(rows: PlatformEntitlementItem[]) {
+  const header = ["role", "plan", "data_scope", "api_access", "tools", "export_rights", "approval_limit", "status", "owner", "evidence", "action"];
+  const csvRows = rows.map((row) => [
+    row.role,
+    row.plan,
+    row.dataScope,
+    row.apiAccess,
+    row.tools,
+    row.exportRights,
+    row.approvalLimit,
+    executionReviewLabel(row.status),
+    row.owner,
+    row.evidence,
+    row.action,
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
 function buildMarketAlertEvents({
   coverageUniverseItems,
   dataContractItems,
@@ -3944,6 +4102,7 @@ function assetComparisonMemo(
     dataProductCatalogItems?: DataProductCatalogItem[];
     apiServiceCatalogItems?: ApiServiceCatalogItem[];
     apiContractBlueprintItems?: ApiContractBlueprintItem[];
+    platformEntitlementItems?: PlatformEntitlementItem[];
   },
 ) {
   const candidateRows = rows.filter((row) => row.signal === "candidate");
@@ -3984,6 +4143,7 @@ function assetComparisonMemo(
   const memoDataProductCatalogItems = (options.dataProductCatalogItems ?? []).slice(0, 10);
   const memoApiServiceCatalogItems = (options.apiServiceCatalogItems ?? []).slice(0, 12);
   const memoApiContractBlueprintItems = (options.apiContractBlueprintItems ?? []).slice(0, 12);
+  const memoPlatformEntitlementItems = (options.platformEntitlementItems ?? []).slice(0, 12);
   const tableHeader = "| 商品 | 分數 | 訊號 | 年化報酬 | 年化波動 | 最大回撤 | 最新日 | 說明 |";
   const tableDivider = "|---|---:|---|---:|---:|---:|---|---|";
   const tableRows = topRows.map((row) =>
@@ -4309,6 +4469,19 @@ function assetComparisonMemo(
       markdownCell(row.action),
     ].join(" | "),
   );
+  const platformEntitlementTableRows = memoPlatformEntitlementItems.map((row) =>
+    [
+      markdownCell(row.role),
+      markdownCell(row.plan),
+      markdownCell(row.dataScope),
+      markdownCell(row.apiAccess),
+      markdownCell(row.tools),
+      markdownCell(row.exportRights),
+      markdownCell(row.approvalLimit),
+      markdownCell(executionReviewLabel(row.status)),
+      markdownCell(row.action),
+    ].join(" | "),
+  );
 
   return [
     `# ${options.name || "未命名 Watchlist"} 研究摘要`,
@@ -4390,6 +4563,11 @@ function assetComparisonMemo(
     memoApiContractBlueprintItems.length ? "| Method | Endpoint | Version | Auth | Request | Response | Stability | 狀態 | 動作 |" : "目前沒有可輸出的 API 合約藍圖。",
     memoApiContractBlueprintItems.length ? "|---|---|---|---|---|---|---|---|---|" : "",
     ...apiContractBlueprintTableRows.map((row) => `| ${row} |`),
+    "",
+    "## 權限與方案控管",
+    memoPlatformEntitlementItems.length ? "| 角色 | 方案 | 資料範圍 | API 權限 | 工具 | 匯出權限 | 簽核限制 | 狀態 | 動作 |" : "目前沒有可輸出的權限矩陣。",
+    memoPlatformEntitlementItems.length ? "|---|---|---|---|---|---|---|---|---|" : "",
+    ...platformEntitlementTableRows.map((row) => `| ${row} |`),
     "",
     "## 篩選概況",
     `- 顯示商品：${rows.length} / ${options.totalRows} 檔`,
@@ -5061,6 +5239,23 @@ export function MarketDataPanel() {
   const apiContractBlueprintDecision = apiContractBlueprintItems.length
     ? combinedExecutionStatus(apiContractBlueprintItems.map((item) => item.status))
     : "watch";
+  const platformEntitlementItems = buildPlatformEntitlementItems({
+    dataReadinessDecision,
+    apiServiceCatalogDecision,
+    apiContractBlueprintDecision,
+    marketAlertDecision,
+    hasBigQueryCredentials,
+    comparisonRows,
+    activeAllocationRows: modelAllocationRows,
+    tradeTickets,
+    riskOwner,
+    decisionOwner,
+  });
+  const entitlementReadyCount = platformEntitlementItems.filter((item) => item.status === "pass").length;
+  const entitlementRestrictedCount = platformEntitlementItems.filter((item) => item.status === "block").length;
+  const platformEntitlementDecision = platformEntitlementItems.length
+    ? combinedExecutionStatus(platformEntitlementItems.map((item) => item.status))
+    : "watch";
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -5252,6 +5447,15 @@ export function MarketDataPanel() {
       `wealth-dashboard-openapi-blueprint-${resultStamp()}.json`,
       apiContractBlueprintJson(apiContractBlueprintItems),
       "application/json;charset=utf-8",
+    );
+  };
+  const handleExportPlatformEntitlementCsv = () => {
+    if (!platformEntitlementItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-entitlement-matrix-${resultStamp()}.csv`,
+      platformEntitlementCsv(platformEntitlementItems),
+      "text/csv;charset=utf-8",
     );
   };
   const handleSearchAssets = async () => {
@@ -5554,6 +5758,7 @@ export function MarketDataPanel() {
       dataProductCatalogItems,
       apiServiceCatalogItems,
       apiContractBlueprintItems,
+      platformEntitlementItems,
     });
   const handleExportAssetComparisonMemo = () => {
     if (!visibleComparisonRows.length) return;
@@ -6482,6 +6687,91 @@ export function MarketDataPanel() {
                 ) : (
                   <div className="rounded-md border border-dashed border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-500">
                     建立 API 服務目錄後，這裡會顯示 OpenAPI 藍圖。
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-slate-800 pt-3 space-y-3">
+                <div className="flex flex-col md:flex-row md:items-end justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="text-xs font-bold text-slate-100">權限與方案控管</h4>
+                      <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(platformEntitlementDecision)}`}>
+                        {executionReviewLabel(platformEntitlementDecision)}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-[11px] text-slate-500">
+                      定義角色、方案、資料範圍、API 權限、匯出權限與簽核限制
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-end gap-2 text-xs">
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        ["可啟用", `${entitlementReadyCount}`],
+                        ["受限", `${entitlementRestrictedCount}`],
+                      ].map(([label, value]) => (
+                        <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 px-3 py-2 text-right">
+                          <p className="text-[10px] text-slate-600">{label}</p>
+                          <p className="mt-0.5 font-mono font-bold text-slate-100">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      onClick={handleExportPlatformEntitlementCsv}
+                      disabled={!platformEntitlementItems.length}
+                      className="px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+                    >
+                      權限 CSV
+                    </button>
+                  </div>
+                </div>
+
+                {platformEntitlementItems.length ? (
+                  <div className="overflow-x-auto rounded-lg border border-slate-800">
+                    <table className="w-full min-w-[1500px] text-xs">
+                      <thead className="bg-slate-900/80">
+                        <tr className="text-left text-[11px] text-slate-600">
+                          <th className="py-2 px-3 font-medium">角色</th>
+                          <th className="py-2 px-3 font-medium">方案</th>
+                          <th className="py-2 px-3 font-medium">資料範圍</th>
+                          <th className="py-2 px-3 font-medium">API 權限</th>
+                          <th className="py-2 px-3 font-medium">工具</th>
+                          <th className="py-2 px-3 font-medium">匯出權限</th>
+                          <th className="py-2 px-3 font-medium">簽核限制</th>
+                          <th className="py-2 px-3 font-medium text-right">狀態</th>
+                          <th className="py-2 px-3 font-medium">依據</th>
+                          <th className="py-2 px-3 font-medium">動作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {platformEntitlementItems.map((item) => (
+                          <tr key={`${item.plan}-${item.role}`} className={`border-t ${executionReviewRowClass(item.status)}`}>
+                            <td className="py-2 px-3 font-bold text-slate-100">{item.role}</td>
+                            <td className="py-2 px-3">
+                              <span className="rounded border border-slate-700 bg-slate-950 px-2 py-0.5 text-[10px] font-bold text-slate-300">
+                                {item.plan}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-slate-400">{item.dataScope}</td>
+                            <td className="py-2 px-3 font-mono text-[11px] text-slate-400">{item.apiAccess}</td>
+                            <td className="py-2 px-3 text-slate-400">{item.tools}</td>
+                            <td className="py-2 px-3 text-slate-400">{item.exportRights}</td>
+                            <td className="py-2 px-3 text-slate-500">{item.approvalLimit}</td>
+                            <td className="py-2 px-3 text-right">
+                              <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(item.status)}`}>
+                                {executionReviewLabel(item.status)}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-slate-500">{item.evidence}</td>
+                            <td className="py-2 px-3 text-slate-500">{item.action}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-dashed border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-500">
+                    建立 API 合約後，這裡會顯示角色與方案權限矩陣。
                   </div>
                 )}
               </div>
