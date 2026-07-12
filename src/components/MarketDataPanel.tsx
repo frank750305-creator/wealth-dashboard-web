@@ -293,6 +293,21 @@ type ApiServiceCatalogItem = {
   action: string;
 };
 
+type ApiContractBlueprintItem = {
+  endpoint: string;
+  method: "GET" | "POST";
+  product: string;
+  version: string;
+  auth: string;
+  requestSchema: string;
+  responseSchema: string;
+  stability: "stable" | "beta" | "draft";
+  status: ExecutionReviewStatus;
+  owner: string;
+  breakingRisk: string;
+  action: string;
+};
+
 const statusMeta: Record<MarketSourceStatus, { label: string; className: string }> = {
   ready: {
     label: "可接 API",
@@ -3493,6 +3508,217 @@ function apiServiceCatalogCsv(rows: ApiServiceCatalogItem[]) {
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
+function apiContractStabilityLabel(stability: ApiContractBlueprintItem["stability"]) {
+  if (stability === "stable") return "Stable";
+  if (stability === "beta") return "Beta";
+  return "Draft";
+}
+
+function apiContractStabilityClass(stability: ApiContractBlueprintItem["stability"]) {
+  if (stability === "stable") return "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
+  if (stability === "beta") return "border-sky-500/40 bg-sky-500/10 text-sky-300";
+  return "border-amber-500/40 bg-amber-500/10 text-amber-300";
+}
+
+function buildApiContractBlueprintItems({
+  apiServiceCatalogItems,
+  hasBigQueryCredentials,
+  riskOwner,
+  decisionOwner,
+}: {
+  apiServiceCatalogItems: ApiServiceCatalogItem[];
+  hasBigQueryCredentials: boolean;
+  riskOwner: string;
+  decisionOwner: string;
+}): ApiContractBlueprintItem[] {
+  const cleanRiskOwner = riskOwner.trim() || "風控";
+  const cleanDecisionOwner = decisionOwner.trim() || "研究";
+  const serviceByEndpoint = new Map(apiServiceCatalogItems.map((item) => [item.endpoint, item]));
+  const serviceStatus = (endpoint: string): ExecutionReviewStatus => serviceByEndpoint.get(endpoint)?.status ?? "watch";
+
+  return [
+    {
+      method: "GET",
+      endpoint: "/api/v1/market/sources",
+      product: "資料源狀態",
+      version: "v1",
+      auth: "public-read",
+      requestSchema: "none",
+      responseSchema: "MarketSource[]",
+      stability: "stable",
+      status: serviceStatus("/api/v1/market/sources"),
+      owner: cleanRiskOwner,
+      breakingRisk: "低：只新增資料源欄位時可向後相容",
+      action: "維持欄位向後相容，新增欄位需設 optional",
+    },
+    {
+      method: "GET",
+      endpoint: "/api/v1/market/bigquery/status",
+      product: "BigQuery 連線狀態",
+      version: "v1",
+      auth: "server-env",
+      requestSchema: "none",
+      responseSchema: "BigQueryConnectionStatus",
+      stability: "stable",
+      status: hasBigQueryCredentials ? serviceStatus("/api/v1/market/bigquery/status") : "block",
+      owner: cleanRiskOwner,
+      breakingRisk: "中：credential 欄位命名會影響前端提示",
+      action: hasBigQueryCredentials ? "可作為部署後 health check" : "先補齊 Vercel BigQuery 環境變數",
+    },
+    {
+      method: "GET",
+      endpoint: "/api/v1/market/bigquery/diagnostics",
+      product: "資料倉儲診斷",
+      version: "v1",
+      auth: "service-account",
+      requestSchema: "none",
+      responseSchema: "BigQueryDiagnostics",
+      stability: "beta",
+      status: serviceStatus("/api/v1/market/bigquery/diagnostics"),
+      owner: cleanRiskOwner,
+      breakingRisk: "中：schemaChecks 與 summary 欄位需維持",
+      action: "新增診斷項目時用 optional 欄位，避免破壞既有頁面",
+    },
+    {
+      method: "GET",
+      endpoint: "/api/v1/market/bigquery/assets",
+      product: "商品搜尋",
+      version: "v1",
+      auth: "service-account",
+      requestSchema: "{ query: string; limit?: number }",
+      responseSchema: "{ assets: AssetSearchResult[] }",
+      stability: "beta",
+      status: serviceStatus("/api/v1/market/bigquery/assets"),
+      owner: cleanDecisionOwner,
+      breakingRisk: "中：symbol、name、currency 欄位不可改名",
+      action: "下一步可加 asset_class、region、exchange 篩選",
+    },
+    {
+      method: "GET",
+      endpoint: "/api/v1/market/bigquery/assets/:symbol",
+      product: "商品主檔分析",
+      version: "v1",
+      auth: "service-account",
+      requestSchema: "{ symbol: string; price_basis?: adjusted | raw; lookback?: number }",
+      responseSchema: "AssetProfile",
+      stability: "beta",
+      status: serviceStatus("/api/v1/market/bigquery/assets/:symbol"),
+      owner: cleanDecisionOwner,
+      breakingRisk: "高：metrics 與 price series 是研究畫面核心依賴",
+      action: "先凍結 metrics 命名，再擴充估值、配息與基本面",
+    },
+    {
+      method: "POST",
+      endpoint: "/api/v1/portfolio/analyze-bigquery",
+      product: "投組分析",
+      version: "v1",
+      auth: "service-account",
+      requestSchema: "PortfolioAnalyzeRequest",
+      responseSchema: "PortfolioAnalysisResult",
+      stability: "draft",
+      status: serviceStatus("/api/v1/portfolio/analyze-bigquery"),
+      owner: cleanDecisionOwner,
+      breakingRisk: "高：投組風險欄位會影響 memo 與簽核資料",
+      action: "把 request/response 固化後，再開放外部客戶或內部工具串接",
+    },
+    {
+      method: "POST",
+      endpoint: "/api/v1/portfolio/optimize-bigquery",
+      product: "AI 調倉最佳化",
+      version: "v1",
+      auth: "service-account",
+      requestSchema: "PortfolioOptimizeRequest",
+      responseSchema: "PortfolioOptimizeResult",
+      stability: "draft",
+      status: serviceStatus("/api/v1/portfolio/optimize-bigquery"),
+      owner: cleanDecisionOwner,
+      breakingRisk: "高：權重、限制與交易票欄位不可無預警改版",
+      action: "需補版本化限制條件與 optimizer policy，再進入正式建議",
+    },
+    {
+      method: "GET",
+      endpoint: "/api/v1/platform/data-products",
+      product: "資料產品目錄",
+      version: "v1",
+      auth: "internal",
+      requestSchema: "none",
+      responseSchema: "DataProductCatalogItem[]",
+      stability: "beta",
+      status: serviceStatus("/api/v1/platform/data-products"),
+      owner: cleanRiskOwner,
+      breakingRisk: "中：owner、consumer、SLA 欄位需維持",
+      action: "可接入權限控管與內部審計流程",
+    },
+    {
+      method: "GET",
+      endpoint: "/api/v1/trading/tickets",
+      product: "交易票查詢",
+      version: "v1",
+      auth: "internal",
+      requestSchema: "{ portfolio_id?: string; batch_id?: string }",
+      responseSchema: "TradeTicketRow[]",
+      stability: "draft",
+      status: serviceStatus("/api/v1/trading/tickets"),
+      owner: cleanDecisionOwner,
+      breakingRisk: "高：交易方向、金額與現金影響欄位需可追溯",
+      action: "接交易前審查與執行回填前，先建立欄位凍結規則",
+    },
+  ];
+}
+
+function apiContractBlueprintJson(rows: ApiContractBlueprintItem[]) {
+  const paths = Object.fromEntries(
+    rows.map((row) => {
+      const endpoint = row.endpoint.replace(":symbol", "{symbol}");
+      const method = row.method.toLowerCase();
+      return [
+        endpoint,
+        {
+          [method]: {
+            summary: row.product,
+            tags: [row.product],
+            security: [{ [row.auth]: [] }],
+            "x-version": row.version,
+            "x-status": executionReviewLabel(row.status),
+            "x-stability": apiContractStabilityLabel(row.stability),
+            "x-owner": row.owner,
+            "x-breaking-risk": row.breakingRisk,
+            parameters: row.method === "GET" && row.requestSchema !== "none" ? [{ name: "request", in: "query", schema: { type: "object" } }] : [],
+            requestBody:
+              row.method === "POST"
+                ? {
+                    required: true,
+                    description: row.requestSchema,
+                    content: { "application/json": { schema: { type: "object" } } },
+                  }
+                : undefined,
+            responses: {
+              "200": {
+                description: row.responseSchema,
+                content: { "application/json": { schema: { type: "object" } } },
+              },
+            },
+          },
+        },
+      ];
+    }),
+  );
+
+  return JSON.stringify(
+    {
+      openapi: "3.1.0",
+      info: {
+        title: "Wealth Dashboard Platform API",
+        version: "0.1.0",
+        description: "Internal API blueprint for market data, portfolio analytics, data products, and trading workflow.",
+      },
+      paths,
+    },
+    null,
+    2,
+  );
+}
+
 function buildMarketAlertEvents({
   coverageUniverseItems,
   dataContractItems,
@@ -3717,6 +3943,7 @@ function assetComparisonMemo(
     dataLineageItems?: DataLineageItem[];
     dataProductCatalogItems?: DataProductCatalogItem[];
     apiServiceCatalogItems?: ApiServiceCatalogItem[];
+    apiContractBlueprintItems?: ApiContractBlueprintItem[];
   },
 ) {
   const candidateRows = rows.filter((row) => row.signal === "candidate");
@@ -3756,6 +3983,7 @@ function assetComparisonMemo(
   const memoDataLineageItems = (options.dataLineageItems ?? []).slice(0, 14);
   const memoDataProductCatalogItems = (options.dataProductCatalogItems ?? []).slice(0, 10);
   const memoApiServiceCatalogItems = (options.apiServiceCatalogItems ?? []).slice(0, 12);
+  const memoApiContractBlueprintItems = (options.apiContractBlueprintItems ?? []).slice(0, 12);
   const tableHeader = "| 商品 | 分數 | 訊號 | 年化報酬 | 年化波動 | 最大回撤 | 最新日 | 說明 |";
   const tableDivider = "|---|---:|---|---:|---:|---:|---|---|";
   const tableRows = topRows.map((row) =>
@@ -4068,6 +4296,19 @@ function assetComparisonMemo(
       markdownCell(row.action),
     ].join(" | "),
   );
+  const apiContractBlueprintTableRows = memoApiContractBlueprintItems.map((row) =>
+    [
+      markdownCell(row.method),
+      markdownCell(row.endpoint),
+      markdownCell(row.version),
+      markdownCell(row.auth),
+      markdownCell(row.requestSchema),
+      markdownCell(row.responseSchema),
+      markdownCell(apiContractStabilityLabel(row.stability)),
+      markdownCell(executionReviewLabel(row.status)),
+      markdownCell(row.action),
+    ].join(" | "),
+  );
 
   return [
     `# ${options.name || "未命名 Watchlist"} 研究摘要`,
@@ -4144,6 +4385,11 @@ function assetComparisonMemo(
     memoApiServiceCatalogItems.length ? "| Method | Endpoint | 產品 | 狀態 | 負責人 | 使用者 | 輸入 | 輸出 | 服務等級 | 動作 |" : "目前沒有可輸出的 API 服務目錄。",
     memoApiServiceCatalogItems.length ? "|---|---|---|---|---|---|---|---|---|---|" : "",
     ...apiServiceCatalogTableRows.map((row) => `| ${row} |`),
+    "",
+    "## API 合約 / OpenAPI 藍圖",
+    memoApiContractBlueprintItems.length ? "| Method | Endpoint | Version | Auth | Request | Response | Stability | 狀態 | 動作 |" : "目前沒有可輸出的 API 合約藍圖。",
+    memoApiContractBlueprintItems.length ? "|---|---|---|---|---|---|---|---|---|" : "",
+    ...apiContractBlueprintTableRows.map((row) => `| ${row} |`),
     "",
     "## 篩選概況",
     `- 顯示商品：${rows.length} / ${options.totalRows} 檔`,
@@ -4804,6 +5050,17 @@ export function MarketDataPanel() {
   const apiServiceCatalogDecision = apiServiceCatalogItems.length
     ? combinedExecutionStatus(apiServiceCatalogItems.map((item) => item.status))
     : "watch";
+  const apiContractBlueprintItems = buildApiContractBlueprintItems({
+    apiServiceCatalogItems,
+    hasBigQueryCredentials,
+    riskOwner,
+    decisionOwner,
+  });
+  const apiContractStableCount = apiContractBlueprintItems.filter((item) => item.stability === "stable").length;
+  const apiContractDraftCount = apiContractBlueprintItems.filter((item) => item.stability === "draft").length;
+  const apiContractBlueprintDecision = apiContractBlueprintItems.length
+    ? combinedExecutionStatus(apiContractBlueprintItems.map((item) => item.status))
+    : "watch";
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -4986,6 +5243,15 @@ export function MarketDataPanel() {
       `bigquery-api-service-catalog-${resultStamp()}.csv`,
       apiServiceCatalogCsv(apiServiceCatalogItems),
       "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportApiContractBlueprintJson = () => {
+    if (!apiContractBlueprintItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-openapi-blueprint-${resultStamp()}.json`,
+      apiContractBlueprintJson(apiContractBlueprintItems),
+      "application/json;charset=utf-8",
     );
   };
   const handleSearchAssets = async () => {
@@ -5287,6 +5553,7 @@ export function MarketDataPanel() {
       dataLineageItems,
       dataProductCatalogItems,
       apiServiceCatalogItems,
+      apiContractBlueprintItems,
     });
   const handleExportAssetComparisonMemo = () => {
     if (!visibleComparisonRows.length) return;
@@ -6120,6 +6387,101 @@ export function MarketDataPanel() {
                 ) : (
                   <div className="rounded-md border border-dashed border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-500">
                     讀取資料診斷後，這裡會顯示 API 服務目錄。
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-slate-800 pt-3 space-y-3">
+                <div className="flex flex-col md:flex-row md:items-end justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="text-xs font-bold text-slate-100">API 合約 / OpenAPI 藍圖</h4>
+                      <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(apiContractBlueprintDecision)}`}>
+                        {executionReviewLabel(apiContractBlueprintDecision)}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-[11px] text-slate-500">
+                      管理每個 API 的版本、認證、request、response、穩定度與破壞性變更風險
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-end gap-2 text-xs">
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        ["Stable", `${apiContractStableCount}`],
+                        ["Draft", `${apiContractDraftCount}`],
+                      ].map(([label, value]) => (
+                        <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 px-3 py-2 text-right">
+                          <p className="text-[10px] text-slate-600">{label}</p>
+                          <p className="mt-0.5 font-mono font-bold text-slate-100">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      onClick={handleExportApiContractBlueprintJson}
+                      disabled={!apiContractBlueprintItems.length}
+                      className="px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+                    >
+                      OpenAPI JSON
+                    </button>
+                  </div>
+                </div>
+
+                {apiContractBlueprintItems.length ? (
+                  <div className="overflow-x-auto rounded-lg border border-slate-800">
+                    <table className="w-full min-w-[1480px] text-xs">
+                      <thead className="bg-slate-900/80">
+                        <tr className="text-left text-[11px] text-slate-600">
+                          <th className="py-2 px-3 font-medium">Method</th>
+                          <th className="py-2 px-3 font-medium">Endpoint</th>
+                          <th className="py-2 px-3 font-medium">Version</th>
+                          <th className="py-2 px-3 font-medium">Auth</th>
+                          <th className="py-2 px-3 font-medium">Request</th>
+                          <th className="py-2 px-3 font-medium">Response</th>
+                          <th className="py-2 px-3 font-medium">Stability</th>
+                          <th className="py-2 px-3 font-medium text-right">狀態</th>
+                          <th className="py-2 px-3 font-medium">破壞風險</th>
+                          <th className="py-2 px-3 font-medium">動作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {apiContractBlueprintItems.map((item) => (
+                          <tr key={`${item.method}-${item.endpoint}`} className={`border-t ${executionReviewRowClass(item.status)}`}>
+                            <td className="py-2 px-3">
+                              <span
+                                className={`rounded px-2 py-0.5 text-[10px] font-bold ${
+                                  item.method === "GET"
+                                    ? "border border-sky-500/40 bg-sky-500/10 text-sky-300"
+                                    : "border border-violet-500/40 bg-violet-500/10 text-violet-300"
+                                }`}
+                              >
+                                {item.method}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 font-mono text-[11px] text-slate-300">{item.endpoint}</td>
+                            <td className="py-2 px-3 text-slate-400">{item.version}</td>
+                            <td className="py-2 px-3 text-slate-400">{item.auth}</td>
+                            <td className="py-2 px-3 font-mono text-[11px] text-slate-400">{item.requestSchema}</td>
+                            <td className="py-2 px-3 font-mono text-[11px] text-slate-400">{item.responseSchema}</td>
+                            <td className="py-2 px-3">
+                              <span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${apiContractStabilityClass(item.stability)}`}>
+                                {apiContractStabilityLabel(item.stability)}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-right">
+                              <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(item.status)}`}>
+                                {executionReviewLabel(item.status)}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-slate-500">{item.breakingRisk}</td>
+                            <td className="py-2 px-3 text-slate-500">{item.action}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-dashed border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-500">
+                    建立 API 服務目錄後，這裡會顯示 OpenAPI 藍圖。
                   </div>
                 )}
               </div>
