@@ -352,6 +352,21 @@ type UsageBillingItem = {
   action: string;
 };
 
+type DataLicenseComplianceItem = {
+  source: string;
+  dataset: string;
+  licenseScope: string;
+  redistribution: string;
+  clientAccess: string;
+  exportPolicy: string;
+  auditTrail: string;
+  renewal: string;
+  status: ExecutionReviewStatus;
+  owner: string;
+  evidence: string;
+  action: string;
+};
+
 const statusMeta: Record<MarketSourceStatus, { label: string; className: string }> = {
   ready: {
     label: "可接 API",
@@ -4242,6 +4257,170 @@ function usageBillingCsv(rows: UsageBillingItem[]) {
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
+function buildDataLicenseComplianceItems({
+  dataReadinessDecision,
+  apiContractBlueprintDecision,
+  platformEntitlementDecision,
+  clientWorkspaceProvisioningDecision,
+  usageBillingDecision,
+  marketAlertDecision,
+  hasBigQueryCredentials,
+  riskOwner,
+  decisionOwner,
+}: {
+  dataReadinessDecision: ExecutionReviewStatus;
+  apiContractBlueprintDecision: ExecutionReviewStatus;
+  platformEntitlementDecision: ExecutionReviewStatus;
+  clientWorkspaceProvisioningDecision: ExecutionReviewStatus;
+  usageBillingDecision: ExecutionReviewStatus;
+  marketAlertDecision: ExecutionReviewStatus;
+  hasBigQueryCredentials: boolean;
+  riskOwner: string;
+  decisionOwner: string;
+}): DataLicenseComplianceItem[] {
+  const cleanRiskOwner = riskOwner.trim() || "風控";
+  const cleanDecisionOwner = decisionOwner.trim() || "研究";
+  const warehouseStatus: ExecutionReviewStatus = hasBigQueryCredentials ? dataReadinessDecision : "block";
+  const productStatus = combinedExecutionStatus([apiContractBlueprintDecision, platformEntitlementDecision]);
+  const commercialStatus = combinedExecutionStatus([clientWorkspaceProvisioningDecision, usageBillingDecision]);
+  const governanceStatus = combinedExecutionStatus([productStatus, commercialStatus, marketAlertDecision]);
+
+  return [
+    {
+      source: "BigQuery 倉儲",
+      dataset: "daily_prices / daily_fx",
+      licenseScope: "平台內部分析與授權客戶使用",
+      redistribution: "不得原樣再散布；僅可透過授權 API 與報表輸出",
+      clientAccess: "Pro 以上依方案開放",
+      exportPolicy: "研究 memo 與 CSV 需保留來源與時間戳",
+      auditTrail: "BigQuery 診斷、資料合約、用量帳務",
+      renewal: "依資料供應合約週期檢查",
+      status: warehouseStatus,
+      owner: cleanRiskOwner,
+      evidence: hasBigQueryCredentials ? "BigQuery 憑證與資料診斷可用" : "缺少 BigQuery 憑證",
+      action: warehouseStatus === "pass" ? "可納入授權資料產品" : "先完成資料讀取與授權邊界確認",
+    },
+    {
+      source: "市場價格來源",
+      dataset: "價格、幣別、交易所與商品主檔",
+      licenseScope: "依來源條款限制用途",
+      redistribution: "未確認供應商條款前，不開放外部原始資料下載",
+      clientAccess: "研究畫面可看衍生指標，原始資料需授權",
+      exportPolicy: "外部客戶匯出需遮蔽或轉為分析摘要",
+      auditTrail: "資料產品目錄、API 合約、權限矩陣",
+      renewal: "建立供應商合約台帳",
+      status: productStatus === "pass" ? "watch" : productStatus,
+      owner: cleanRiskOwner,
+      evidence: `API/權限治理：${executionReviewLabel(productStatus)}`,
+      action: productStatus === "pass" ? "補供應商合約欄位後可進入正式授權控管" : "先凍結 API 合約與權限矩陣",
+    },
+    {
+      source: "衍生分析引擎",
+      dataset: "報酬、波動、回撤、分數、配置、交易票",
+      licenseScope: "平台自產衍生資料",
+      redistribution: "可依方案提供，但不得暗示為投資保證",
+      clientAccess: "Pro Plus / Enterprise",
+      exportPolicy: "memo、投組報告與交易前檢核需保留模型口徑",
+      auditTrail: "研究摘要、決策稽核、OpenAPI 藍圖",
+      renewal: "隨模型版本更新",
+      status: apiContractBlueprintDecision,
+      owner: cleanDecisionOwner,
+      evidence: `API 合約狀態：${executionReviewLabel(apiContractBlueprintDecision)}`,
+      action: apiContractBlueprintDecision === "pass" ? "可建立模型版本與責任聲明" : "先凍結 request/response 與模型輸出欄位",
+    },
+    {
+      source: "客戶匯出與下載",
+      dataset: "CSV、Markdown memo、OpenAPI JSON、帳務報表",
+      licenseScope: "依角色、方案與合約限制匯出",
+      redistribution: "企業客戶可內部使用；外部再散布需另簽授權",
+      clientAccess: "依權限矩陣控管",
+      exportPolicy: "所有匯出需帶 workspace、時間戳與資料口徑",
+      auditTrail: "權限矩陣、工作區、用量與帳務",
+      renewal: "每次方案調整檢查",
+      status: commercialStatus,
+      owner: cleanRiskOwner,
+      evidence: `商業化狀態：${executionReviewLabel(commercialStatus)}`,
+      action: commercialStatus === "pass" ? "可接匯出稽核與下載限制" : "先完成工作區與帳務狀態",
+    },
+    {
+      source: "API Key 與外部串接",
+      dataset: "Market API / Portfolio API / Trading API",
+      licenseScope: "依 API key、IP allowlist、SSO 與方案控管",
+      redistribution: "不得將 key 轉交第三方；需可停權與輪替",
+      clientAccess: "Enterprise / Internal",
+      exportPolicy: "API response 不應提供超出授權範圍的原始資料",
+      auditTrail: "API 服務目錄、OpenAPI、權限矩陣",
+      renewal: "API key 每季檢查",
+      status: platformEntitlementDecision,
+      owner: cleanRiskOwner,
+      evidence: `權限矩陣狀態：${executionReviewLabel(platformEntitlementDecision)}`,
+      action: platformEntitlementDecision === "pass" ? "可設計 API key 輪替與停權流程" : "先完成角色與方案邊界",
+    },
+    {
+      source: "企業合約與帳務",
+      dataset: "MRR、年度合約、發票、用量額度",
+      licenseScope: "依合約定義資料包、席位與使用額度",
+      redistribution: "合約需明確約定內部使用與外部再散布",
+      clientAccess: "Enterprise / Add-on",
+      exportPolicy: "帳務報表不可包含敏感客戶明細給非授權角色",
+      auditTrail: "用量與帳務中心、工作區開通中心",
+      renewal: "合約到期前 90 天檢查",
+      status: usageBillingDecision,
+      owner: cleanRiskOwner,
+      evidence: `帳務狀態：${executionReviewLabel(usageBillingDecision)}`,
+      action: usageBillingDecision === "pass" ? "可接合約台帳與續約提醒" : "先完成帳務模式與發票狀態",
+    },
+    {
+      source: "風控與合規監控",
+      dataset: "警示、KRI、SLA、例外、阻斷事件",
+      licenseScope: "平台內控與客戶合約履約證據",
+      redistribution: "僅限合規角色與管理員檢視",
+      clientAccess: "Risk / Admin",
+      exportPolicy: "例外報告需遮蔽敏感資料",
+      auditTrail: "市場警示中心、SLA、營運 KRI",
+      renewal: "月度內控檢查",
+      status: marketAlertDecision,
+      owner: cleanRiskOwner,
+      evidence: `警示狀態：${executionReviewLabel(marketAlertDecision)}`,
+      action: marketAlertDecision === "pass" ? "可作為合規監控基準" : "先關閉阻斷警示",
+    },
+    {
+      source: "授權治理總控",
+      dataset: "資料產品、API、客戶工作區、帳務、匯出",
+      licenseScope: "跨資料、API、商業方案的總控邊界",
+      redistribution: "未通過總控不得對外開放新資料產品",
+      clientAccess: "Admin / Compliance",
+      exportPolicy: "所有資料產品上線前需通過授權檢核",
+      auditTrail: "資料血緣、產品目錄、OpenAPI、權限、帳務",
+      renewal: "每季授權盤點",
+      status: governanceStatus,
+      owner: cleanRiskOwner,
+      evidence: `總控狀態：${executionReviewLabel(governanceStatus)}`,
+      action: governanceStatus === "pass" ? "可進入正式合規工作流設計" : "先補齊資料、API、商業化治理缺口",
+    },
+  ];
+}
+
+function dataLicenseComplianceCsv(rows: DataLicenseComplianceItem[]) {
+  const header = ["source", "dataset", "license_scope", "redistribution", "client_access", "export_policy", "audit_trail", "renewal", "status", "owner", "evidence", "action"];
+  const csvRows = rows.map((row) => [
+    row.source,
+    row.dataset,
+    row.licenseScope,
+    row.redistribution,
+    row.clientAccess,
+    row.exportPolicy,
+    row.auditTrail,
+    row.renewal,
+    executionReviewLabel(row.status),
+    row.owner,
+    row.evidence,
+    row.action,
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
 function buildMarketAlertEvents({
   coverageUniverseItems,
   dataContractItems,
@@ -4470,6 +4649,7 @@ function assetComparisonMemo(
     platformEntitlementItems?: PlatformEntitlementItem[];
     clientWorkspaceProvisioningItems?: ClientWorkspaceProvisioningItem[];
     usageBillingItems?: UsageBillingItem[];
+    dataLicenseComplianceItems?: DataLicenseComplianceItem[];
   },
 ) {
   const candidateRows = rows.filter((row) => row.signal === "candidate");
@@ -4513,6 +4693,7 @@ function assetComparisonMemo(
   const memoPlatformEntitlementItems = (options.platformEntitlementItems ?? []).slice(0, 12);
   const memoClientWorkspaceProvisioningItems = (options.clientWorkspaceProvisioningItems ?? []).slice(0, 12);
   const memoUsageBillingItems = (options.usageBillingItems ?? []).slice(0, 12);
+  const memoDataLicenseComplianceItems = (options.dataLicenseComplianceItems ?? []).slice(0, 12);
   const tableHeader = "| 商品 | 分數 | 訊號 | 年化報酬 | 年化波動 | 最大回撤 | 最新日 | 說明 |";
   const tableDivider = "|---|---:|---|---:|---:|---:|---|---|";
   const tableRows = topRows.map((row) =>
@@ -4879,6 +5060,20 @@ function assetComparisonMemo(
       markdownCell(row.action),
     ].join(" | "),
   );
+  const dataLicenseComplianceTableRows = memoDataLicenseComplianceItems.map((row) =>
+    [
+      markdownCell(row.source),
+      markdownCell(row.dataset),
+      markdownCell(row.licenseScope),
+      markdownCell(row.redistribution),
+      markdownCell(row.clientAccess),
+      markdownCell(row.exportPolicy),
+      markdownCell(row.auditTrail),
+      markdownCell(row.renewal),
+      markdownCell(executionReviewLabel(row.status)),
+      markdownCell(row.action),
+    ].join(" | "),
+  );
 
   return [
     `# ${options.name || "未命名 Watchlist"} 研究摘要`,
@@ -4975,6 +5170,11 @@ function assetComparisonMemo(
     memoUsageBillingItems.length ? "| 工作區 | 方案 | 帳務模式 | 席位用量 | API 用量 | 匯出用量 | 月收入 | 發票/合約狀態 | 狀態 | 動作 |" : "目前沒有可輸出的用量與帳務資料。",
     memoUsageBillingItems.length ? "|---|---|---|---|---|---|---|---|---|---|" : "",
     ...usageBillingTableRows.map((row) => `| ${row} |`),
+    "",
+    "## 資料授權與合規中心",
+    memoDataLicenseComplianceItems.length ? "| 來源 | 資料集 | 授權範圍 | 再散布限制 | 客戶可見範圍 | 匯出政策 | 稽核軌跡 | 續約 | 狀態 | 動作 |" : "目前沒有可輸出的資料授權與合規資料。",
+    memoDataLicenseComplianceItems.length ? "|---|---|---|---|---|---|---|---|---|---|" : "",
+    ...dataLicenseComplianceTableRows.map((row) => `| ${row} |`),
     "",
     "## 篩選概況",
     `- 顯示商品：${rows.length} / ${options.totalRows} 檔`,
@@ -5692,6 +5892,24 @@ export function MarketDataPanel() {
   const usageBillingDecision = usageBillingItems.length
     ? combinedExecutionStatus(usageBillingItems.map((item) => item.status))
     : "watch";
+  const dataLicenseComplianceItems = buildDataLicenseComplianceItems({
+    dataReadinessDecision,
+    apiContractBlueprintDecision,
+    platformEntitlementDecision,
+    clientWorkspaceProvisioningDecision,
+    usageBillingDecision,
+    marketAlertDecision,
+    hasBigQueryCredentials,
+    riskOwner,
+    decisionOwner,
+  });
+  const licenseReadyCount = dataLicenseComplianceItems.filter((item) => item.status === "pass").length;
+  const licenseRestrictedCount = dataLicenseComplianceItems.filter(
+    (item) => item.redistribution.includes("不得") || item.exportPolicy.includes("需"),
+  ).length;
+  const dataLicenseComplianceDecision = dataLicenseComplianceItems.length
+    ? combinedExecutionStatus(dataLicenseComplianceItems.map((item) => item.status))
+    : "watch";
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -5909,6 +6127,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-usage-billing-${resultStamp()}.csv`,
       usageBillingCsv(usageBillingItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportDataLicenseComplianceCsv = () => {
+    if (!dataLicenseComplianceItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-data-license-compliance-${resultStamp()}.csv`,
+      dataLicenseComplianceCsv(dataLicenseComplianceItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -6215,6 +6442,7 @@ export function MarketDataPanel() {
       platformEntitlementItems,
       clientWorkspaceProvisioningItems,
       usageBillingItems,
+      dataLicenseComplianceItems,
     });
   const handleExportAssetComparisonMemo = () => {
     if (!visibleComparisonRows.length) return;
@@ -7402,6 +7630,89 @@ export function MarketDataPanel() {
                 ) : (
                   <div className="rounded-md border border-dashed border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-500">
                     建立客戶工作區後，這裡會顯示用量與帳務資料。
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-slate-800 pt-3 space-y-3">
+                <div className="flex flex-col md:flex-row md:items-end justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="text-xs font-bold text-slate-100">資料授權與合規中心</h4>
+                      <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(dataLicenseComplianceDecision)}`}>
+                        {executionReviewLabel(dataLicenseComplianceDecision)}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-[11px] text-slate-500">
+                      管理資料來源授權、再散布限制、客戶可見範圍、匯出政策、稽核軌跡與續約檢查
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-end gap-2 text-xs">
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        ["可上線", `${licenseReadyCount}`],
+                        ["受限項", `${licenseRestrictedCount}`],
+                      ].map(([label, value]) => (
+                        <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 px-3 py-2 text-right">
+                          <p className="text-[10px] text-slate-600">{label}</p>
+                          <p className="mt-0.5 font-mono font-bold text-slate-100">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      onClick={handleExportDataLicenseComplianceCsv}
+                      disabled={!dataLicenseComplianceItems.length}
+                      className="px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+                    >
+                      授權 CSV
+                    </button>
+                  </div>
+                </div>
+
+                {dataLicenseComplianceItems.length ? (
+                  <div className="overflow-x-auto rounded-lg border border-slate-800">
+                    <table className="w-full min-w-[1600px] text-xs">
+                      <thead className="bg-slate-900/80">
+                        <tr className="text-left text-[11px] text-slate-600">
+                          <th className="py-2 px-3 font-medium">來源</th>
+                          <th className="py-2 px-3 font-medium">資料集</th>
+                          <th className="py-2 px-3 font-medium">授權範圍</th>
+                          <th className="py-2 px-3 font-medium">再散布限制</th>
+                          <th className="py-2 px-3 font-medium">客戶可見範圍</th>
+                          <th className="py-2 px-3 font-medium">匯出政策</th>
+                          <th className="py-2 px-3 font-medium">稽核軌跡</th>
+                          <th className="py-2 px-3 font-medium">續約</th>
+                          <th className="py-2 px-3 font-medium text-right">狀態</th>
+                          <th className="py-2 px-3 font-medium">依據</th>
+                          <th className="py-2 px-3 font-medium">動作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dataLicenseComplianceItems.map((item) => (
+                          <tr key={`${item.source}-${item.dataset}`} className={`border-t ${executionReviewRowClass(item.status)}`}>
+                            <td className="py-2 px-3 font-bold text-slate-100">{item.source}</td>
+                            <td className="py-2 px-3 text-slate-400">{item.dataset}</td>
+                            <td className="py-2 px-3 text-slate-400">{item.licenseScope}</td>
+                            <td className="py-2 px-3 text-slate-500">{item.redistribution}</td>
+                            <td className="py-2 px-3 text-slate-400">{item.clientAccess}</td>
+                            <td className="py-2 px-3 text-slate-500">{item.exportPolicy}</td>
+                            <td className="py-2 px-3 text-slate-500">{item.auditTrail}</td>
+                            <td className="py-2 px-3 text-slate-500">{item.renewal}</td>
+                            <td className="py-2 px-3 text-right">
+                              <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(item.status)}`}>
+                                {executionReviewLabel(item.status)}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-slate-500">{item.evidence}</td>
+                            <td className="py-2 px-3 text-slate-500">{item.action}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-dashed border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-500">
+                    建立用量與帳務資料後，這裡會顯示資料授權與合規清單。
                   </div>
                 )}
               </div>
