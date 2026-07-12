@@ -390,6 +390,21 @@ type IncidentCommandItem = {
   nextAction: string;
 };
 
+type ReleaseStage = "production" | "pilot" | "hold";
+
+type ProductReleaseGateItem = {
+  product: string;
+  audience: string;
+  releaseStage: ReleaseStage;
+  status: ExecutionReviewStatus;
+  owner: string;
+  dependencies: string;
+  evidence: string;
+  blocker: string;
+  decision: string;
+  nextAction: string;
+};
+
 const statusMeta: Record<MarketSourceStatus, { label: string; className: string }> = {
   ready: {
     label: "可接 API",
@@ -4808,6 +4823,226 @@ function incidentCommandCsv(rows: IncidentCommandItem[]) {
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
+function releaseStageFromStatus(status: ExecutionReviewStatus): ReleaseStage {
+  if (status === "pass") return "production";
+  if (status === "watch") return "pilot";
+  return "hold";
+}
+
+function releaseStageLabel(stage: ReleaseStage) {
+  if (stage === "production") return "正式上線";
+  if (stage === "pilot") return "試點";
+  return "暫緩";
+}
+
+function releaseStageClass(stage: ReleaseStage) {
+  if (stage === "production") return "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
+  if (stage === "pilot") return "border-amber-500/40 bg-amber-500/10 text-amber-300";
+  return "border-rose-500/40 bg-rose-500/10 text-rose-300";
+}
+
+function releaseDecisionText(status: ExecutionReviewStatus, productionText: string, pilotText: string, holdText: string) {
+  if (status === "pass") return productionText;
+  if (status === "watch") return pilotText;
+  return holdText;
+}
+
+function buildProductReleaseGateItems({
+  dataPipelineDecision,
+  dataProductCatalogDecision,
+  dataLineageDecision,
+  apiServiceCatalogDecision,
+  apiContractBlueprintDecision,
+  platformEntitlementDecision,
+  clientWorkspaceProvisioningDecision,
+  usageBillingDecision,
+  dataLicenseComplianceDecision,
+  securityAuditDecision,
+  incidentCommandDecision,
+  marketAlertDecision,
+  hasBigQueryCredentials,
+  comparisonRows,
+  activeAllocationRows,
+  tradeTickets,
+  incidentOpenCount,
+  incidentHighPriorityCount,
+  riskOwner,
+  decisionOwner,
+  executionOwner,
+}: {
+  dataPipelineDecision: ExecutionReviewStatus;
+  dataProductCatalogDecision: ExecutionReviewStatus;
+  dataLineageDecision: ExecutionReviewStatus;
+  apiServiceCatalogDecision: ExecutionReviewStatus;
+  apiContractBlueprintDecision: ExecutionReviewStatus;
+  platformEntitlementDecision: ExecutionReviewStatus;
+  clientWorkspaceProvisioningDecision: ExecutionReviewStatus;
+  usageBillingDecision: ExecutionReviewStatus;
+  dataLicenseComplianceDecision: ExecutionReviewStatus;
+  securityAuditDecision: ExecutionReviewStatus;
+  incidentCommandDecision: ExecutionReviewStatus;
+  marketAlertDecision: ExecutionReviewStatus;
+  hasBigQueryCredentials: boolean;
+  comparisonRows: AssetComparisonRow[];
+  activeAllocationRows: AllocationDraftRow[];
+  tradeTickets: TradeTicketRow[];
+  incidentOpenCount: number;
+  incidentHighPriorityCount: number;
+  riskOwner: string;
+  decisionOwner: string;
+  executionOwner: string;
+}): ProductReleaseGateItem[] {
+  const cleanRiskOwner = riskOwner.trim() || "風控";
+  const cleanDecisionOwner = decisionOwner.trim() || "研究";
+  const cleanExecutionOwner = executionOwner.trim() || "交易營運";
+  const dataFoundationStatus: ExecutionReviewStatus = hasBigQueryCredentials
+    ? combinedExecutionStatus([dataPipelineDecision, dataLineageDecision])
+    : "block";
+  const apiFoundationStatus = combinedExecutionStatus([apiServiceCatalogDecision, apiContractBlueprintDecision]);
+  const enterpriseControlStatus = combinedExecutionStatus([
+    platformEntitlementDecision,
+    clientWorkspaceProvisioningDecision,
+    usageBillingDecision,
+    dataLicenseComplianceDecision,
+    securityAuditDecision,
+  ]);
+  const governanceStatus = combinedExecutionStatus([enterpriseControlStatus, incidentCommandDecision, marketAlertDecision]);
+  const researchStatus: ExecutionReviewStatus = comparisonRows.length
+    ? combinedExecutionStatus([dataFoundationStatus, dataProductCatalogDecision])
+    : "watch";
+  const portfolioStatus: ExecutionReviewStatus = activeAllocationRows.length
+    ? combinedExecutionStatus([researchStatus, apiContractBlueprintDecision])
+    : "watch";
+  const tradingStatus: ExecutionReviewStatus = tradeTickets.length
+    ? combinedExecutionStatus([portfolioStatus, marketAlertDecision, incidentCommandDecision])
+    : "watch";
+  const externalApiStatus = combinedExecutionStatus([apiFoundationStatus, platformEntitlementDecision, dataLicenseComplianceDecision, securityAuditDecision]);
+  const releaseRows: Array<Omit<ProductReleaseGateItem, "releaseStage">> = [
+    {
+      product: "Market Data API",
+      audience: "內部研究 / API 客戶",
+      status: dataFoundationStatus,
+      owner: cleanRiskOwner,
+      dependencies: "BigQuery、資料血緣、資料產品目錄",
+      evidence: hasBigQueryCredentials ? `資料 ${executionReviewLabel(dataPipelineDecision)} / 血緣 ${executionReviewLabel(dataLineageDecision)}` : "缺少 BigQuery 環境變數",
+      blocker: dataFoundationStatus === "pass" ? "無主要阻擋" : "資料倉儲、血緣或憑證未完全就緒",
+      decision: releaseDecisionText(dataFoundationStatus, "可作為資料服務底座", "只開放內部試點", "不得對外開放"),
+      nextAction: dataFoundationStatus === "pass" ? "建立 SLA 與版本標籤" : "先修復資料管線與血緣阻擋項",
+    },
+    {
+      product: "Asset Profile Workbench",
+      audience: "研究員 / 顧問",
+      status: researchStatus,
+      owner: cleanDecisionOwner,
+      dependencies: "商品搜尋、商品主檔、研究宇宙",
+      evidence: `${comparisonRows.length} 檔 watchlist 比較資料`,
+      blocker: comparisonRows.length ? "需確認研究宇宙與資料品質" : "尚未載入可比較商品",
+      decision: releaseDecisionText(researchStatus, "可給研究席位使用", "可開放示範與研究試點", "先暫緩研究工作台上線"),
+      nextAction: comparisonRows.length ? "補研究模板與欄位說明" : "先載入 watchlist 比較資料",
+    },
+    {
+      product: "Portfolio Analytics",
+      audience: "投資顧問 / 投委會",
+      status: portfolioStatus,
+      owner: cleanDecisionOwner,
+      dependencies: "配置草案、風險預算、API 合約",
+      evidence: `${activeAllocationRows.length} 檔有效配置 / ${comparisonRows.length} 檔比較`,
+      blocker: activeAllocationRows.length ? "需確認模型口徑與審核軌跡" : "尚未產生有效配置",
+      decision: releaseDecisionText(portfolioStatus, "可進入正式分析流程", "可做顧問試點", "不得作為正式建議"),
+      nextAction: activeAllocationRows.length ? "把模型版本與責任聲明接進 memo" : "先建立配置草案",
+    },
+    {
+      product: "Trading Workflow",
+      audience: "交易營運 / 投後復盤",
+      status: tradingStatus,
+      owner: cleanExecutionOwner,
+      dependencies: "交易票、批次、成交回填、事件中心",
+      evidence: `${tradeTickets.length} 張交易票 / ${incidentOpenCount} 個未結事件`,
+      blocker: tradeTickets.length ? "需確認事件中心沒有高優先阻擋" : "尚未產生交易票",
+      decision: releaseDecisionText(tradingStatus, "可進入交易營運交接", "只做流程演練", "暫緩交易流程上線"),
+      nextAction: tradingStatus === "pass" ? "接入交易前雙人覆核" : "先關閉交易相關警示與事件",
+    },
+    {
+      product: "Enterprise Workspace",
+      audience: "企業客戶 / 家族辦公室",
+      status: enterpriseControlStatus,
+      owner: cleanRiskOwner,
+      dependencies: "權限、工作區、帳務、授權、安全審計",
+      evidence: `權限 ${executionReviewLabel(platformEntitlementDecision)} / 安全 ${executionReviewLabel(securityAuditDecision)}`,
+      blocker: enterpriseControlStatus === "pass" ? "無主要阻擋" : "企業級權限、帳務、授權或安全未完全就緒",
+      decision: releaseDecisionText(enterpriseControlStatus, "可進入企業上線前檢核", "可先開封閉 beta", "不得簽正式企業上線"),
+      nextAction: enterpriseControlStatus === "pass" ? "準備企業 onboarding checklist" : "補齊企業控制項",
+    },
+    {
+      product: "External API / SDK",
+      audience: "企業 API 串接",
+      status: externalApiStatus,
+      owner: cleanRiskOwner,
+      dependencies: "API 服務目錄、OpenAPI、權限矩陣、授權、安全",
+      evidence: `API ${executionReviewLabel(apiFoundationStatus)} / 授權 ${executionReviewLabel(dataLicenseComplianceDecision)}`,
+      blocker: externalApiStatus === "pass" ? "無主要阻擋" : "API 合約、授權或 key 管控未完全就緒",
+      decision: releaseDecisionText(externalApiStatus, "可準備外部 API pilot", "僅限受控客戶試點", "不得發放外部 key"),
+      nextAction: externalApiStatus === "pass" ? "產出 SDK 與 key 輪替規則" : "先凍結 API 合約與授權政策",
+    },
+    {
+      product: "Compliance Evidence Pack",
+      audience: "供應商審查 / 客戶稽核",
+      status: governanceStatus,
+      owner: cleanRiskOwner,
+      dependencies: "授權、合規、安全、事件、警示",
+      evidence: `${incidentHighPriorityCount} 個高優先事件 / ${incidentOpenCount} 個未結事件`,
+      blocker: governanceStatus === "pass" ? "無主要阻擋" : "仍有治理、警示或安全事件未結",
+      decision: releaseDecisionText(governanceStatus, "可作為稽核證據包", "可內部盤點", "不得對客戶承諾通過稽核"),
+      nextAction: governanceStatus === "pass" ? "建立 evidence vault 欄位" : "先清理高優先事件與合規缺口",
+    },
+    {
+      product: "Public Demo Sandbox",
+      audience: "銷售展示 / 初次試用",
+      status: "pass",
+      owner: cleanRiskOwner,
+      dependencies: "公開資料源狀態、平台導覽、非敏感摘要",
+      evidence: "不開放客戶資料與交易流程",
+      blocker: "不得展示未授權原始資料",
+      decision: "可持續作為銷售入口",
+      nextAction: "加入明確 demo 標示與資料延遲說明",
+    },
+    {
+      product: "Revenue Ops Console",
+      audience: "營收營運 / 管理員",
+      status: usageBillingDecision,
+      owner: cleanRiskOwner,
+      dependencies: "用量帳務、工作區、合約台帳",
+      evidence: `帳務 ${executionReviewLabel(usageBillingDecision)} / 工作區 ${executionReviewLabel(clientWorkspaceProvisioningDecision)}`,
+      blocker: usageBillingDecision === "pass" ? "無主要阻擋" : "帳務或合約狀態尚未完整",
+      decision: releaseDecisionText(usageBillingDecision, "可接帳務後台", "可先內部試算", "暫緩正式收費流程"),
+      nextAction: usageBillingDecision === "pass" ? "接 Stripe/發票/合約台帳" : "補齊用量與發票規則",
+    },
+  ];
+
+  return releaseRows.map((row) => ({
+    ...row,
+    releaseStage: releaseStageFromStatus(row.status),
+  }));
+}
+
+function productReleaseGateCsv(rows: ProductReleaseGateItem[]) {
+  const header = ["product", "audience", "release_stage", "status", "owner", "dependencies", "evidence", "blocker", "decision", "next_action"];
+  const csvRows = rows.map((row) => [
+    row.product,
+    row.audience,
+    releaseStageLabel(row.releaseStage),
+    executionReviewLabel(row.status),
+    row.owner,
+    row.dependencies,
+    row.evidence,
+    row.blocker,
+    row.decision,
+    row.nextAction,
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
 function buildMarketAlertEvents({
   coverageUniverseItems,
   dataContractItems,
@@ -5039,6 +5274,7 @@ function assetComparisonMemo(
     dataLicenseComplianceItems?: DataLicenseComplianceItem[];
     securityAuditItems?: SecurityAuditItem[];
     incidentCommandItems?: IncidentCommandItem[];
+    productReleaseGateItems?: ProductReleaseGateItem[];
   },
 ) {
   const candidateRows = rows.filter((row) => row.signal === "candidate");
@@ -5085,6 +5321,7 @@ function assetComparisonMemo(
   const memoDataLicenseComplianceItems = (options.dataLicenseComplianceItems ?? []).slice(0, 12);
   const memoSecurityAuditItems = (options.securityAuditItems ?? []).slice(0, 12);
   const memoIncidentCommandItems = (options.incidentCommandItems ?? []).slice(0, 12);
+  const memoProductReleaseGateItems = (options.productReleaseGateItems ?? []).slice(0, 12);
   const tableHeader = "| 商品 | 分數 | 訊號 | 年化報酬 | 年化波動 | 最大回撤 | 最新日 | 說明 |";
   const tableDivider = "|---|---:|---|---:|---:|---:|---|---|";
   const tableRows = topRows.map((row) =>
@@ -5489,6 +5726,18 @@ function assetComparisonMemo(
       markdownCell(row.nextAction),
     ].join(" | "),
   );
+  const productReleaseGateTableRows = memoProductReleaseGateItems.map((row) =>
+    [
+      markdownCell(row.product),
+      markdownCell(row.audience),
+      markdownCell(releaseStageLabel(row.releaseStage)),
+      markdownCell(executionReviewLabel(row.status)),
+      markdownCell(row.owner),
+      markdownCell(row.evidence),
+      markdownCell(row.decision),
+      markdownCell(row.nextAction),
+    ].join(" | "),
+  );
 
   return [
     `# ${options.name || "未命名 Watchlist"} 研究摘要`,
@@ -5600,6 +5849,11 @@ function assetComparisonMemo(
     memoIncidentCommandItems.length ? "| 事件 | 優先級 | 狀態 | 觸發條件 | 客戶影響 | 負責人 | SLA | 下一步 |" : "目前沒有可輸出的營運事件。",
     memoIncidentCommandItems.length ? "|---|---|---|---|---|---|---|---|" : "",
     ...incidentCommandTableRows.map((row) => `| ${row} |`),
+    "",
+    "## 產品上線閘門",
+    memoProductReleaseGateItems.length ? "| 產品 | 對象 | 上線階段 | 狀態 | 負責人 | 依據 | 決策 | 下一步 |" : "目前沒有可輸出的產品上線閘門。",
+    memoProductReleaseGateItems.length ? "|---|---|---|---|---|---|---|---|" : "",
+    ...productReleaseGateTableRows.map((row) => `| ${row} |`),
     "",
     "## 篩選概況",
     `- 顯示商品：${rows.length} / ${options.totalRows} 檔`,
@@ -6379,6 +6633,35 @@ export function MarketDataPanel() {
   const incidentCommandDecision = incidentCommandItems.length
     ? combinedExecutionStatus(incidentCommandItems.map((item) => item.status))
     : "watch";
+  const productReleaseGateItems = buildProductReleaseGateItems({
+    dataPipelineDecision,
+    dataProductCatalogDecision,
+    dataLineageDecision,
+    apiServiceCatalogDecision,
+    apiContractBlueprintDecision,
+    platformEntitlementDecision,
+    clientWorkspaceProvisioningDecision,
+    usageBillingDecision,
+    dataLicenseComplianceDecision,
+    securityAuditDecision,
+    incidentCommandDecision,
+    marketAlertDecision,
+    hasBigQueryCredentials,
+    comparisonRows,
+    activeAllocationRows: modelAllocationRows,
+    tradeTickets,
+    incidentOpenCount,
+    incidentHighPriorityCount,
+    riskOwner,
+    decisionOwner,
+    executionOwner,
+  });
+  const releaseProductionCount = productReleaseGateItems.filter((item) => item.releaseStage === "production").length;
+  const releasePilotCount = productReleaseGateItems.filter((item) => item.releaseStage === "pilot").length;
+  const releaseHoldCount = productReleaseGateItems.filter((item) => item.releaseStage === "hold").length;
+  const productReleaseGateDecision = productReleaseGateItems.length
+    ? combinedExecutionStatus(productReleaseGateItems.map((item) => item.status))
+    : "watch";
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -6623,6 +6906,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-incident-command-${resultStamp()}.csv`,
       incidentCommandCsv(incidentCommandItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportProductReleaseGateCsv = () => {
+    if (!productReleaseGateItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-product-release-gate-${resultStamp()}.csv`,
+      productReleaseGateCsv(productReleaseGateItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -6932,6 +7224,7 @@ export function MarketDataPanel() {
       dataLicenseComplianceItems,
       securityAuditItems,
       incidentCommandItems,
+      productReleaseGateItems,
     });
   const handleExportAssetComparisonMemo = () => {
     if (!visibleComparisonRows.length) return;
@@ -8362,6 +8655,92 @@ export function MarketDataPanel() {
                 ) : (
                   <div className="rounded-md border border-dashed border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-500">
                     建立安全審計資料後，這裡會顯示營運事件指揮清單。
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-slate-800 pt-3 space-y-3">
+                <div className="flex flex-col md:flex-row md:items-end justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="text-xs font-bold text-slate-100">產品上線閘門</h4>
+                      <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(productReleaseGateDecision)}`}>
+                        {executionReviewLabel(productReleaseGateDecision)}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-[11px] text-slate-500">
+                      彙總資料、API、模型、權限、帳務、授權、安全與事件狀態，判斷每個產品可正式上線、試點或暫緩
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-end gap-2 text-xs">
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        ["正式", `${releaseProductionCount}`],
+                        ["試點", `${releasePilotCount}`],
+                        ["暫緩", `${releaseHoldCount}`],
+                      ].map(([label, value]) => (
+                        <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 px-3 py-2 text-right">
+                          <p className="text-[10px] text-slate-600">{label}</p>
+                          <p className="mt-0.5 font-mono font-bold text-slate-100">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      onClick={handleExportProductReleaseGateCsv}
+                      disabled={!productReleaseGateItems.length}
+                      className="px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+                    >
+                      上線 CSV
+                    </button>
+                  </div>
+                </div>
+
+                {productReleaseGateItems.length ? (
+                  <div className="overflow-x-auto rounded-lg border border-slate-800">
+                    <table className="w-full min-w-[1700px] text-xs">
+                      <thead className="bg-slate-900/80">
+                        <tr className="text-left text-[11px] text-slate-600">
+                          <th className="py-2 px-3 font-medium">產品</th>
+                          <th className="py-2 px-3 font-medium">對象</th>
+                          <th className="py-2 px-3 font-medium">上線階段</th>
+                          <th className="py-2 px-3 font-medium text-right">狀態</th>
+                          <th className="py-2 px-3 font-medium">負責人</th>
+                          <th className="py-2 px-3 font-medium">依賴</th>
+                          <th className="py-2 px-3 font-medium">依據</th>
+                          <th className="py-2 px-3 font-medium">阻擋項</th>
+                          <th className="py-2 px-3 font-medium">決策</th>
+                          <th className="py-2 px-3 font-medium">下一步</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {productReleaseGateItems.map((item) => (
+                          <tr key={`${item.product}-${item.audience}`} className={`border-t ${executionReviewRowClass(item.status)}`}>
+                            <td className="py-2 px-3 font-bold text-slate-100">{item.product}</td>
+                            <td className="py-2 px-3 text-slate-400">{item.audience}</td>
+                            <td className="py-2 px-3">
+                              <span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${releaseStageClass(item.releaseStage)}`}>
+                                {releaseStageLabel(item.releaseStage)}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-right">
+                              <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(item.status)}`}>
+                                {executionReviewLabel(item.status)}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-slate-400">{item.owner}</td>
+                            <td className="py-2 px-3 text-slate-500">{item.dependencies}</td>
+                            <td className="py-2 px-3 text-slate-500">{item.evidence}</td>
+                            <td className="py-2 px-3 text-slate-500">{item.blocker}</td>
+                            <td className="py-2 px-3 text-slate-400">{item.decision}</td>
+                            <td className="py-2 px-3 text-slate-500">{item.nextAction}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-dashed border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-500">
+                    建立營運事件資料後，這裡會顯示產品上線閘門。
                   </div>
                 )}
               </div>
