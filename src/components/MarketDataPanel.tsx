@@ -337,6 +337,21 @@ type ClientWorkspaceProvisioningItem = {
   action: string;
 };
 
+type UsageBillingItem = {
+  workspace: string;
+  plan: string;
+  billingModel: string;
+  seatUsage: string;
+  apiUsage: string;
+  exportUsage: string;
+  monthlyRevenue: string;
+  invoiceStatus: string;
+  status: ExecutionReviewStatus;
+  owner: string;
+  evidence: string;
+  action: string;
+};
+
 const statusMeta: Record<MarketSourceStatus, { label: string; className: string }> = {
   ready: {
     label: "可接 API",
@@ -4058,6 +4073,175 @@ function clientWorkspaceProvisioningCsv(rows: ClientWorkspaceProvisioningItem[])
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
+function buildUsageBillingItems({
+  clientWorkspaceProvisioningItems,
+  apiContractBlueprintDecision,
+  platformEntitlementDecision,
+  riskOwner,
+  decisionOwner,
+}: {
+  clientWorkspaceProvisioningItems: ClientWorkspaceProvisioningItem[];
+  apiContractBlueprintDecision: ExecutionReviewStatus;
+  platformEntitlementDecision: ExecutionReviewStatus;
+  riskOwner: string;
+  decisionOwner: string;
+}): UsageBillingItem[] {
+  const cleanRiskOwner = riskOwner.trim() || "風控";
+  const cleanDecisionOwner = decisionOwner.trim() || "研究";
+  const workspaceStatus = (workspace: string): ExecutionReviewStatus =>
+    clientWorkspaceProvisioningItems.find((item) => item.workspace === workspace)?.status ?? "watch";
+  const governanceStatus = combinedExecutionStatus([apiContractBlueprintDecision, platformEntitlementDecision]);
+
+  return [
+    {
+      workspace: "Demo Sandbox",
+      plan: "Free",
+      billingModel: "免費試用",
+      seatUsage: "公開瀏覽",
+      apiUsage: "0 / 不開放",
+      exportUsage: "0 / 不開放",
+      monthlyRevenue: "NT$0",
+      invoiceStatus: "不開票",
+      status: "pass",
+      owner: cleanRiskOwner,
+      evidence: "不使用付費資料與 API key",
+      action: "保留為銷售入口，不納入 MRR",
+    },
+    {
+      workspace: "Research Desk",
+      plan: "Pro",
+      billingModel: "月付 / 年付",
+      seatUsage: "1-5 / 5",
+      apiUsage: "2,000 / 10,000 calls",
+      exportUsage: "20 / 100 exports",
+      monthlyRevenue: "NT$9,900 / 月",
+      invoiceStatus: workspaceStatus("Research Desk") === "pass" ? "可收款" : "等待資料開通",
+      status: workspaceStatus("Research Desk"),
+      owner: cleanDecisionOwner,
+      evidence: "研究員方案需 BigQuery 商品資料可讀",
+      action: workspaceStatus("Research Desk") === "pass" ? "可接金流與訂閱管理" : "先完成研究工作區開通",
+    },
+    {
+      workspace: "Advisory Team",
+      plan: "Pro Plus",
+      billingModel: "團隊訂閱",
+      seatUsage: "8 / 20",
+      apiUsage: "18,000 / 50,000 calls",
+      exportUsage: "80 / 500 exports",
+      monthlyRevenue: "NT$39,900 / 月",
+      invoiceStatus: workspaceStatus("Advisory Team") === "pass" ? "可收款" : "待配置與顧問流程",
+      status: workspaceStatus("Advisory Team"),
+      owner: cleanDecisionOwner,
+      evidence: "顧問方案依賴 watchlist、配置與 memo 輸出",
+      action: workspaceStatus("Advisory Team") === "pass" ? "可進入團隊帳務與席位管理" : "先完成顧問工作區檢核",
+    },
+    {
+      workspace: "Investment Office",
+      plan: "Enterprise",
+      billingModel: "年度合約",
+      seatUsage: "25+ / 合約",
+      apiUsage: "合約額度",
+      exportUsage: "合約額度",
+      monthlyRevenue: "年度合約",
+      invoiceStatus: workspaceStatus("Investment Office") === "pass" ? "可送合約" : "待企業治理檢核",
+      status: workspaceStatus("Investment Office"),
+      owner: cleanRiskOwner,
+      evidence: "企業方案需 SSO、權限、API 合約與警示治理",
+      action: workspaceStatus("Investment Office") === "pass" ? "可準備企業報價與合約" : "先完成企業上線前檢核",
+    },
+    {
+      workspace: "Data Engineering Lab",
+      plan: "Internal",
+      billingModel: "內部成本中心",
+      seatUsage: "資料團隊",
+      apiUsage: "工程測試額度",
+      exportUsage: "內部匯出",
+      monthlyRevenue: "內部成本",
+      invoiceStatus: "不對外開票",
+      status: apiContractBlueprintDecision,
+      owner: cleanRiskOwner,
+      evidence: `API 合約狀態：${executionReviewLabel(apiContractBlueprintDecision)}`,
+      action: apiContractBlueprintDecision === "pass" ? "可估算資料工程成本" : "先凍結 API 合約",
+    },
+    {
+      workspace: "Risk Control Room",
+      plan: "Enterprise",
+      billingModel: "企業合約內含",
+      seatUsage: "審核席位",
+      apiUsage: "監控唯讀",
+      exportUsage: "例外報告",
+      monthlyRevenue: "包含於企業合約",
+      invoiceStatus: workspaceStatus("Risk Control Room") === "pass" ? "可納入企業包" : "待警示治理",
+      status: workspaceStatus("Risk Control Room"),
+      owner: cleanRiskOwner,
+      evidence: "風控功能依賴警示、KRI、SLA 與例外報告",
+      action: workspaceStatus("Risk Control Room") === "pass" ? "可納入企業報價" : "先關閉阻斷警示",
+    },
+    {
+      workspace: "Platform Admin",
+      plan: "Internal Admin",
+      billingModel: "內部管理",
+      seatUsage: "管理員",
+      apiUsage: "admin service key",
+      exportUsage: "全部內部匯出",
+      monthlyRevenue: "不對外計費",
+      invoiceStatus: "不對外開票",
+      status: platformEntitlementDecision,
+      owner: cleanRiskOwner,
+      evidence: `權限矩陣狀態：${executionReviewLabel(platformEntitlementDecision)}`,
+      action: platformEntitlementDecision === "pass" ? "可進入租戶與帳務後台設計" : "先收斂權限矩陣",
+    },
+    {
+      workspace: "Trading Operations",
+      plan: "Enterprise Add-on",
+      billingModel: "企業加購",
+      seatUsage: "交易席位",
+      apiUsage: "交易流程額度",
+      exportUsage: "交易 CSV / 執行報告",
+      monthlyRevenue: "NT$19,900 / 月起",
+      invoiceStatus: workspaceStatus("Trading Operations") === "pass" ? "可加購" : "待交易票流程",
+      status: workspaceStatus("Trading Operations"),
+      owner: cleanDecisionOwner,
+      evidence: "交易營運加購需交易票與執行交接流程",
+      action: workspaceStatus("Trading Operations") === "pass" ? "可進入企業加購報價" : "先建立交易票與批次規則",
+    },
+    {
+      workspace: "Billing Governance",
+      plan: "Revenue Ops",
+      billingModel: "帳務治理",
+      seatUsage: "平台管理",
+      apiUsage: "用量彙總",
+      exportUsage: "帳務報表",
+      monthlyRevenue: "MRR / 合約彙總",
+      invoiceStatus: governanceStatus === "pass" ? "可建立正式帳務流程" : "待權限與 API 治理",
+      status: governanceStatus,
+      owner: cleanRiskOwner,
+      evidence: `治理狀態：${executionReviewLabel(governanceStatus)}`,
+      action: governanceStatus === "pass" ? "可接 Stripe/發票/合約台帳" : "先完成權限與 API 合約治理",
+    },
+  ];
+}
+
+function usageBillingCsv(rows: UsageBillingItem[]) {
+  const header = ["workspace", "plan", "billing_model", "seat_usage", "api_usage", "export_usage", "monthly_revenue", "invoice_status", "status", "owner", "evidence", "action"];
+  const csvRows = rows.map((row) => [
+    row.workspace,
+    row.plan,
+    row.billingModel,
+    row.seatUsage,
+    row.apiUsage,
+    row.exportUsage,
+    row.monthlyRevenue,
+    row.invoiceStatus,
+    executionReviewLabel(row.status),
+    row.owner,
+    row.evidence,
+    row.action,
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
 function buildMarketAlertEvents({
   coverageUniverseItems,
   dataContractItems,
@@ -4285,6 +4469,7 @@ function assetComparisonMemo(
     apiContractBlueprintItems?: ApiContractBlueprintItem[];
     platformEntitlementItems?: PlatformEntitlementItem[];
     clientWorkspaceProvisioningItems?: ClientWorkspaceProvisioningItem[];
+    usageBillingItems?: UsageBillingItem[];
   },
 ) {
   const candidateRows = rows.filter((row) => row.signal === "candidate");
@@ -4327,6 +4512,7 @@ function assetComparisonMemo(
   const memoApiContractBlueprintItems = (options.apiContractBlueprintItems ?? []).slice(0, 12);
   const memoPlatformEntitlementItems = (options.platformEntitlementItems ?? []).slice(0, 12);
   const memoClientWorkspaceProvisioningItems = (options.clientWorkspaceProvisioningItems ?? []).slice(0, 12);
+  const memoUsageBillingItems = (options.usageBillingItems ?? []).slice(0, 12);
   const tableHeader = "| 商品 | 分數 | 訊號 | 年化報酬 | 年化波動 | 最大回撤 | 最新日 | 說明 |";
   const tableDivider = "|---|---:|---|---:|---:|---:|---|---|";
   const tableRows = topRows.map((row) =>
@@ -4679,6 +4865,20 @@ function assetComparisonMemo(
       markdownCell(row.action),
     ].join(" | "),
   );
+  const usageBillingTableRows = memoUsageBillingItems.map((row) =>
+    [
+      markdownCell(row.workspace),
+      markdownCell(row.plan),
+      markdownCell(row.billingModel),
+      markdownCell(row.seatUsage),
+      markdownCell(row.apiUsage),
+      markdownCell(row.exportUsage),
+      markdownCell(row.monthlyRevenue),
+      markdownCell(row.invoiceStatus),
+      markdownCell(executionReviewLabel(row.status)),
+      markdownCell(row.action),
+    ].join(" | "),
+  );
 
   return [
     `# ${options.name || "未命名 Watchlist"} 研究摘要`,
@@ -4770,6 +4970,11 @@ function assetComparisonMemo(
     memoClientWorkspaceProvisioningItems.length ? "| 工作區 | 客群 | 方案 | 席位 | 資料包 | API Key | SSO | 帳務 | 狀態 | 動作 |" : "目前沒有可輸出的客戶工作區開通清單。",
     memoClientWorkspaceProvisioningItems.length ? "|---|---|---|---|---|---|---|---|---|---|" : "",
     ...clientWorkspaceProvisioningTableRows.map((row) => `| ${row} |`),
+    "",
+    "## 用量與帳務中心",
+    memoUsageBillingItems.length ? "| 工作區 | 方案 | 帳務模式 | 席位用量 | API 用量 | 匯出用量 | 月收入 | 發票/合約狀態 | 狀態 | 動作 |" : "目前沒有可輸出的用量與帳務資料。",
+    memoUsageBillingItems.length ? "|---|---|---|---|---|---|---|---|---|---|" : "",
+    ...usageBillingTableRows.map((row) => `| ${row} |`),
     "",
     "## 篩選概況",
     `- 顯示商品：${rows.length} / ${options.totalRows} 檔`,
@@ -5475,6 +5680,18 @@ export function MarketDataPanel() {
   const clientWorkspaceProvisioningDecision = clientWorkspaceProvisioningItems.length
     ? combinedExecutionStatus(clientWorkspaceProvisioningItems.map((item) => item.status))
     : "watch";
+  const usageBillingItems = buildUsageBillingItems({
+    clientWorkspaceProvisioningItems,
+    apiContractBlueprintDecision,
+    platformEntitlementDecision,
+    riskOwner,
+    decisionOwner,
+  });
+  const billableWorkspaceCount = usageBillingItems.filter((item) => item.monthlyRevenue.startsWith("NT$") || item.monthlyRevenue.includes("合約")).length;
+  const billingReadyCount = usageBillingItems.filter((item) => item.status === "pass").length;
+  const usageBillingDecision = usageBillingItems.length
+    ? combinedExecutionStatus(usageBillingItems.map((item) => item.status))
+    : "watch";
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -5683,6 +5900,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-client-workspaces-${resultStamp()}.csv`,
       clientWorkspaceProvisioningCsv(clientWorkspaceProvisioningItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportUsageBillingCsv = () => {
+    if (!usageBillingItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-usage-billing-${resultStamp()}.csv`,
+      usageBillingCsv(usageBillingItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -5988,6 +6214,7 @@ export function MarketDataPanel() {
       apiContractBlueprintItems,
       platformEntitlementItems,
       clientWorkspaceProvisioningItems,
+      usageBillingItems,
     });
   const handleExportAssetComparisonMemo = () => {
     if (!visibleComparisonRows.length) return;
@@ -7088,6 +7315,93 @@ export function MarketDataPanel() {
                 ) : (
                   <div className="rounded-md border border-dashed border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-500">
                     建立權限矩陣後，這裡會顯示客戶工作區開通清單。
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-slate-800 pt-3 space-y-3">
+                <div className="flex flex-col md:flex-row md:items-end justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="text-xs font-bold text-slate-100">用量與帳務中心</h4>
+                      <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(usageBillingDecision)}`}>
+                        {executionReviewLabel(usageBillingDecision)}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-[11px] text-slate-500">
+                      追蹤席位、API call、匯出量、月費/合約、發票狀態與下一步收款動作
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-end gap-2 text-xs">
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        ["可收費", `${billableWorkspaceCount}`],
+                        ["就緒", `${billingReadyCount}`],
+                      ].map(([label, value]) => (
+                        <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 px-3 py-2 text-right">
+                          <p className="text-[10px] text-slate-600">{label}</p>
+                          <p className="mt-0.5 font-mono font-bold text-slate-100">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      onClick={handleExportUsageBillingCsv}
+                      disabled={!usageBillingItems.length}
+                      className="px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+                    >
+                      帳務 CSV
+                    </button>
+                  </div>
+                </div>
+
+                {usageBillingItems.length ? (
+                  <div className="overflow-x-auto rounded-lg border border-slate-800">
+                    <table className="w-full min-w-[1500px] text-xs">
+                      <thead className="bg-slate-900/80">
+                        <tr className="text-left text-[11px] text-slate-600">
+                          <th className="py-2 px-3 font-medium">工作區</th>
+                          <th className="py-2 px-3 font-medium">方案</th>
+                          <th className="py-2 px-3 font-medium">帳務模式</th>
+                          <th className="py-2 px-3 font-medium">席位用量</th>
+                          <th className="py-2 px-3 font-medium">API 用量</th>
+                          <th className="py-2 px-3 font-medium">匯出用量</th>
+                          <th className="py-2 px-3 font-medium">月收入</th>
+                          <th className="py-2 px-3 font-medium">發票/合約</th>
+                          <th className="py-2 px-3 font-medium text-right">狀態</th>
+                          <th className="py-2 px-3 font-medium">依據</th>
+                          <th className="py-2 px-3 font-medium">動作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {usageBillingItems.map((item) => (
+                          <tr key={`${item.plan}-${item.workspace}`} className={`border-t ${executionReviewRowClass(item.status)}`}>
+                            <td className="py-2 px-3 font-bold text-slate-100">{item.workspace}</td>
+                            <td className="py-2 px-3">
+                              <span className="rounded border border-slate-700 bg-slate-950 px-2 py-0.5 text-[10px] font-bold text-slate-300">
+                                {item.plan}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-slate-400">{item.billingModel}</td>
+                            <td className="py-2 px-3 text-slate-400">{item.seatUsage}</td>
+                            <td className="py-2 px-3 text-slate-400">{item.apiUsage}</td>
+                            <td className="py-2 px-3 text-slate-400">{item.exportUsage}</td>
+                            <td className="py-2 px-3 font-mono text-[11px] text-slate-300">{item.monthlyRevenue}</td>
+                            <td className="py-2 px-3 text-slate-500">{item.invoiceStatus}</td>
+                            <td className="py-2 px-3 text-right">
+                              <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(item.status)}`}>
+                                {executionReviewLabel(item.status)}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-slate-500">{item.evidence}</td>
+                            <td className="py-2 px-3 text-slate-500">{item.action}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-dashed border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-500">
+                    建立客戶工作區後，這裡會顯示用量與帳務資料。
                   </div>
                 )}
               </div>
