@@ -267,6 +267,19 @@ type DataLineageItem = {
   action: string;
 };
 
+type DataProductCatalogItem = {
+  product: string;
+  category: string;
+  status: ExecutionReviewStatus;
+  owner: string;
+  consumer: string;
+  input: string;
+  output: string;
+  serviceLevel: string;
+  evidence: string;
+  action: string;
+};
+
 const statusMeta: Record<MarketSourceStatus, { label: string; className: string }> = {
   ready: {
     label: "可接 API",
@@ -3159,6 +3172,153 @@ function dataLineageCsv(rows: DataLineageItem[]) {
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
+function buildDataProductCatalogItems({
+  dataReadinessDecision,
+  coverageUniverseDecision,
+  dataRemediationDecision,
+  dataLineageDecision,
+  marketAlertDecision,
+  comparisonRows,
+  visibleComparisonRows,
+  activeAllocationRows,
+  tradeTickets,
+  dataRemediationItems,
+  riskOwner,
+  decisionOwner,
+}: {
+  dataReadinessDecision: ExecutionReviewStatus;
+  coverageUniverseDecision: ExecutionReviewStatus;
+  dataRemediationDecision: ExecutionReviewStatus;
+  dataLineageDecision: ExecutionReviewStatus;
+  marketAlertDecision: ExecutionReviewStatus;
+  comparisonRows: AssetComparisonRow[];
+  visibleComparisonRows: AssetComparisonRow[];
+  activeAllocationRows: AllocationDraftRow[];
+  tradeTickets: TradeTicketRow[];
+  dataRemediationItems: DataRemediationItem[];
+  riskOwner: string;
+  decisionOwner: string;
+}): DataProductCatalogItem[] {
+  const cleanRiskOwner = riskOwner.trim() || "風控";
+  const cleanDecisionOwner = decisionOwner.trim() || "研究";
+  const researchStatus: ExecutionReviewStatus = comparisonRows.length
+    ? combinedExecutionStatus([dataReadinessDecision, coverageUniverseDecision])
+    : "watch";
+  const portfolioStatus: ExecutionReviewStatus = activeAllocationRows.length
+    ? combinedExecutionStatus([researchStatus, dataLineageDecision])
+    : "watch";
+  const operationsStatus: ExecutionReviewStatus = dataRemediationItems.some((item) => item.priority === "high")
+    ? "block"
+    : dataRemediationItems.length
+      ? "watch"
+      : "pass";
+
+  return [
+    {
+      product: "市場資料 API",
+      category: "資料服務",
+      status: dataReadinessDecision,
+      owner: cleanRiskOwner,
+      consumer: "前端分析 / 投組引擎",
+      input: "BigQuery daily_prices / daily_fx",
+      output: "商品搜尋、商品主檔、價格序列",
+      serviceLevel: "T+1 更新，schema 必要欄位完整",
+      evidence: `資料準備狀態：${executionReviewLabel(dataReadinessDecision)}`,
+      action: dataReadinessDecision === "pass" ? "可支援前端資料讀取" : "先處理資料管線與合約缺口",
+    },
+    {
+      product: "商品主檔分析",
+      category: "研究工具",
+      status: dataReadinessDecision,
+      owner: cleanDecisionOwner,
+      consumer: "研究 / 顧問",
+      input: "市場資料 API",
+      output: "報酬、波動、回撤、近期價格",
+      serviceLevel: "單商品即時查詢，使用 BigQuery 歷史價格",
+      evidence: "支援 adjusted / raw 價格口徑",
+      action: dataReadinessDecision === "pass" ? "可擴充估值、配息與基本面欄位" : "先確保價格資料可讀取",
+    },
+    {
+      product: "Watchlist 研究摘要",
+      category: "研究產品",
+      status: researchStatus,
+      owner: cleanDecisionOwner,
+      consumer: "投委會 / 客戶報告",
+      input: "商品主檔分析 + 研究宇宙",
+      output: "候選名單、風險摘要、Markdown memo",
+      serviceLevel: "研究清單需有可比較商品",
+      evidence: `${visibleComparisonRows.length}/${comparisonRows.length} 檔符合目前篩選`,
+      action: comparisonRows.length ? "可依研究模板匯出 memo" : "先載入 watchlist 商品比較",
+    },
+    {
+      product: "投組分析與最佳化",
+      category: "投組工具",
+      status: portfolioStatus,
+      owner: cleanDecisionOwner,
+      consumer: "投資決策 / 再平衡",
+      input: "Watchlist 研究摘要",
+      output: "配置草案、風險預算、交易清單",
+      serviceLevel: "至少一檔有效配置才能產生投組輸出",
+      evidence: `${activeAllocationRows.length} 檔配置 / ${tradeTickets.length} 張交易票`,
+      action: activeAllocationRows.length ? "可進入簽核與交易流程" : "先產生有效配置",
+    },
+    {
+      product: "市場警示中心",
+      category: "營運監控",
+      status: marketAlertDecision,
+      owner: cleanRiskOwner,
+      consumer: "資料營運 / 風控",
+      input: "資料品質、KRI、SLA、例外、血緣",
+      output: "可分派警示事件",
+      serviceLevel: "高優先事件需先關閉",
+      evidence: `警示狀態：${executionReviewLabel(marketAlertDecision)}`,
+      action: marketAlertDecision === "pass" ? "維持日常監控" : "依優先級關閉警示",
+    },
+    {
+      product: "資料營運控制台",
+      category: "平台治理",
+      status: operationsStatus,
+      owner: cleanRiskOwner,
+      consumer: "資料工程 / 平台管理",
+      input: "管線、合約、研究宇宙、血緣",
+      output: "修復佇列、血緣 CSV、營運 CSV",
+      serviceLevel: "高優先缺口不得進入正式分析",
+      evidence: `${dataRemediationItems.length} 項資料缺口`,
+      action: dataRemediationDecision === "pass" ? "可進入資料產品擴充" : "先清理資料缺口修復佇列",
+    },
+    {
+      product: "資料血緣與產品目錄",
+      category: "平台治理",
+      status: dataLineageDecision,
+      owner: cleanRiskOwner,
+      consumer: "內部審計 / 平台管理",
+      input: "資料血緣地圖",
+      output: "資料產品清單、依賴與服務等級",
+      serviceLevel: "每個資料產品需有 owner、輸入、輸出與動作",
+      evidence: `血緣狀態：${executionReviewLabel(dataLineageDecision)}`,
+      action: dataLineageDecision === "pass" ? "可作為平台治理基準" : "先修復阻斷或觀察節點",
+    },
+  ];
+}
+
+function dataProductCatalogCsv(rows: DataProductCatalogItem[]) {
+  const header = ["product", "category", "status", "owner", "consumer", "input", "output", "service_level", "evidence", "action"];
+  const csvRows = rows.map((row) => [
+    row.product,
+    row.category,
+    executionReviewLabel(row.status),
+    row.owner,
+    row.consumer,
+    row.input,
+    row.output,
+    row.serviceLevel,
+    row.evidence,
+    row.action,
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
 function buildMarketAlertEvents({
   coverageUniverseItems,
   dataContractItems,
@@ -3381,6 +3541,7 @@ function assetComparisonMemo(
     coverageUniverseItems?: CoverageUniverseItem[];
     dataRemediationItems?: DataRemediationItem[];
     dataLineageItems?: DataLineageItem[];
+    dataProductCatalogItems?: DataProductCatalogItem[];
   },
 ) {
   const candidateRows = rows.filter((row) => row.signal === "candidate");
@@ -3418,6 +3579,7 @@ function assetComparisonMemo(
   const memoCoverageUniverseItems = (options.coverageUniverseItems ?? []).slice(0, 8);
   const memoDataRemediationItems = (options.dataRemediationItems ?? []).slice(0, 12);
   const memoDataLineageItems = (options.dataLineageItems ?? []).slice(0, 14);
+  const memoDataProductCatalogItems = (options.dataProductCatalogItems ?? []).slice(0, 10);
   const tableHeader = "| 商品 | 分數 | 訊號 | 年化報酬 | 年化波動 | 最大回撤 | 最新日 | 說明 |";
   const tableDivider = "|---|---:|---|---:|---:|---:|---|---|";
   const tableRows = topRows.map((row) =>
@@ -3703,6 +3865,19 @@ function assetComparisonMemo(
       markdownCell(row.action),
     ].join(" | "),
   );
+  const dataProductCatalogTableRows = memoDataProductCatalogItems.map((row) =>
+    [
+      markdownCell(row.product),
+      markdownCell(row.category),
+      markdownCell(executionReviewLabel(row.status)),
+      markdownCell(row.owner),
+      markdownCell(row.consumer),
+      markdownCell(row.input),
+      markdownCell(row.output),
+      markdownCell(row.serviceLevel),
+      markdownCell(row.action),
+    ].join(" | "),
+  );
 
   return [
     `# ${options.name || "未命名 Watchlist"} 研究摘要`,
@@ -3769,6 +3944,11 @@ function assetComparisonMemo(
     memoDataLineageItems.length ? "| 階段 | 節點 | 狀態 | 輸入 | 輸出 | 負責人 | 依據 | 動作 |" : "目前沒有可輸出的資料血緣。",
     memoDataLineageItems.length ? "|---|---|---|---|---|---|---|---|" : "",
     ...dataLineageTableRows.map((row) => `| ${row} |`),
+    "",
+    "## 資料產品目錄",
+    memoDataProductCatalogItems.length ? "| 產品 | 類別 | 狀態 | 負責人 | 使用者 | 輸入 | 輸出 | 服務等級 | 動作 |" : "目前沒有可輸出的資料產品目錄。",
+    memoDataProductCatalogItems.length ? "|---|---|---|---|---|---|---|---|---|" : "",
+    ...dataProductCatalogTableRows.map((row) => `| ${row} |`),
     "",
     "## 篩選概況",
     `- 顯示商品：${rows.length} / ${options.totalRows} 檔`,
@@ -4393,6 +4573,25 @@ export function MarketDataPanel() {
   const marketAlertDecision = marketAlertEvents.length
     ? combinedExecutionStatus(marketAlertEvents.map((event) => event.status))
     : "pass";
+  const dataProductCatalogItems = buildDataProductCatalogItems({
+    dataReadinessDecision,
+    coverageUniverseDecision,
+    dataRemediationDecision,
+    dataLineageDecision,
+    marketAlertDecision,
+    comparisonRows,
+    visibleComparisonRows,
+    activeAllocationRows,
+    tradeTickets,
+    dataRemediationItems,
+    riskOwner,
+    decisionOwner,
+  });
+  const dataProductReadyCount = dataProductCatalogItems.filter((item) => item.status === "pass").length;
+  const dataProductWatchCount = dataProductCatalogItems.filter((item) => item.status === "watch").length;
+  const dataProductCatalogDecision = dataProductCatalogItems.length
+    ? combinedExecutionStatus(dataProductCatalogItems.map((item) => item.status))
+    : "watch";
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -4556,6 +4755,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `bigquery-data-lineage-${resultStamp()}.csv`,
       dataLineageCsv(dataLineageItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportDataProductCatalogCsv = () => {
+    if (!dataProductCatalogItems.length) return;
+
+    downloadTextFile(
+      `bigquery-data-product-catalog-${resultStamp()}.csv`,
+      dataProductCatalogCsv(dataProductCatalogItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -4856,6 +5064,7 @@ export function MarketDataPanel() {
       coverageUniverseItems,
       dataRemediationItems,
       dataLineageItems,
+      dataProductCatalogItems,
     });
   const handleExportAssetComparisonMemo = () => {
     if (!visibleComparisonRows.length) return;
@@ -5523,6 +5732,83 @@ export function MarketDataPanel() {
                 ) : (
                   <div className="rounded-md border border-dashed border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-500">
                     讀取資料診斷後，這裡會顯示資料血緣。
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-slate-800 pt-3 space-y-3">
+                <div className="flex flex-col md:flex-row md:items-end justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="text-xs font-bold text-slate-100">資料產品目錄</h4>
+                      <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(dataProductCatalogDecision)}`}>
+                        {executionReviewLabel(dataProductCatalogDecision)}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-[11px] text-slate-500">
+                      定義每個資料產品的使用者、輸入、輸出、服務等級與下一步
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-end gap-2 text-xs">
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        ["可用", `${dataProductReadyCount}`],
+                        ["觀察", `${dataProductWatchCount}`],
+                      ].map(([label, value]) => (
+                        <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 px-3 py-2 text-right">
+                          <p className="text-[10px] text-slate-600">{label}</p>
+                          <p className="mt-0.5 font-mono font-bold text-slate-100">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      onClick={handleExportDataProductCatalogCsv}
+                      disabled={!dataProductCatalogItems.length}
+                      className="px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+                    >
+                      產品 CSV
+                    </button>
+                  </div>
+                </div>
+
+                {dataProductCatalogItems.length ? (
+                  <div className="overflow-x-auto rounded-lg border border-slate-800">
+                    <table className="w-full min-w-[1280px] text-xs">
+                      <thead className="bg-slate-900/80">
+                        <tr className="text-left text-[11px] text-slate-600">
+                          <th className="py-2 px-3 font-medium">產品</th>
+                          <th className="py-2 px-3 font-medium">類別</th>
+                          <th className="py-2 px-3 font-medium text-right">狀態</th>
+                          <th className="py-2 px-3 font-medium">使用者</th>
+                          <th className="py-2 px-3 font-medium">輸入</th>
+                          <th className="py-2 px-3 font-medium">輸出</th>
+                          <th className="py-2 px-3 font-medium">服務等級</th>
+                          <th className="py-2 px-3 font-medium">動作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dataProductCatalogItems.map((item) => (
+                          <tr key={item.product} className={`border-t ${executionReviewRowClass(item.status)}`}>
+                            <td className="py-2 px-3 font-bold text-slate-100">{item.product}</td>
+                            <td className="py-2 px-3 text-slate-400">{item.category}</td>
+                            <td className="py-2 px-3 text-right">
+                              <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(item.status)}`}>
+                                {executionReviewLabel(item.status)}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-slate-400">{item.consumer}</td>
+                            <td className="py-2 px-3 text-slate-400">{item.input}</td>
+                            <td className="py-2 px-3 text-slate-400">{item.output}</td>
+                            <td className="py-2 px-3 text-slate-500">{item.serviceLevel}</td>
+                            <td className="py-2 px-3 text-slate-500">{item.action}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-dashed border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-500">
+                    讀取資料診斷後，這裡會顯示資料產品目錄。
                   </div>
                 )}
               </div>
