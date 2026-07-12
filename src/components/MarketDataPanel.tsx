@@ -322,6 +322,21 @@ type PlatformEntitlementItem = {
   action: string;
 };
 
+type ClientWorkspaceProvisioningItem = {
+  workspace: string;
+  segment: string;
+  plan: string;
+  seats: string;
+  dataPackages: string;
+  apiKeys: string;
+  sso: string;
+  billing: string;
+  status: ExecutionReviewStatus;
+  owner: string;
+  evidence: string;
+  action: string;
+};
+
 const statusMeta: Record<MarketSourceStatus, { label: string; className: string }> = {
   ready: {
     label: "可接 API",
@@ -3877,6 +3892,172 @@ function platformEntitlementCsv(rows: PlatformEntitlementItem[]) {
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
+function buildClientWorkspaceProvisioningItems({
+  dataReadinessDecision,
+  apiContractBlueprintDecision,
+  platformEntitlementDecision,
+  marketAlertDecision,
+  hasBigQueryCredentials,
+  comparisonRows,
+  activeAllocationRows,
+  tradeTickets,
+  riskOwner,
+  decisionOwner,
+}: {
+  dataReadinessDecision: ExecutionReviewStatus;
+  apiContractBlueprintDecision: ExecutionReviewStatus;
+  platformEntitlementDecision: ExecutionReviewStatus;
+  marketAlertDecision: ExecutionReviewStatus;
+  hasBigQueryCredentials: boolean;
+  comparisonRows: AssetComparisonRow[];
+  activeAllocationRows: AllocationDraftRow[];
+  tradeTickets: TradeTicketRow[];
+  riskOwner: string;
+  decisionOwner: string;
+}): ClientWorkspaceProvisioningItem[] {
+  const cleanRiskOwner = riskOwner.trim() || "風控";
+  const cleanDecisionOwner = decisionOwner.trim() || "研究";
+  const marketDataStatus: ExecutionReviewStatus = hasBigQueryCredentials ? dataReadinessDecision : "block";
+  const advisoryStatus: ExecutionReviewStatus =
+    comparisonRows.length && activeAllocationRows.length ? combinedExecutionStatus([marketDataStatus, apiContractBlueprintDecision]) : "watch";
+  const enterpriseStatus = combinedExecutionStatus([platformEntitlementDecision, apiContractBlueprintDecision, marketAlertDecision]);
+
+  return [
+    {
+      workspace: "Demo Sandbox",
+      segment: "公開試用",
+      plan: "Free",
+      seats: "公開瀏覽",
+      dataPackages: "資料源狀態、平台能力摘要",
+      apiKeys: "不開放",
+      sso: "不需要",
+      billing: "無",
+      status: "pass",
+      owner: cleanRiskOwner,
+      evidence: "不讀取客戶資料與 BigQuery 明細",
+      action: "可作為銷售入口與產品展示",
+    },
+    {
+      workspace: "Research Desk",
+      segment: "個人研究員",
+      plan: "Pro",
+      seats: "1-5",
+      dataPackages: "daily_prices / daily_fx / 商品主檔",
+      apiKeys: hasBigQueryCredentials ? "可核發唯讀 key" : "等待資料憑證",
+      sso: "Email login",
+      billing: "月付 / 年付",
+      status: marketDataStatus,
+      owner: cleanDecisionOwner,
+      evidence: hasBigQueryCredentials ? "BigQuery 已可讀取" : "缺少 BigQuery 憑證",
+      action: marketDataStatus === "pass" ? "可開通研究工作區" : "先補齊 BigQuery 環境變數",
+    },
+    {
+      workspace: "Advisory Team",
+      segment: "投資顧問團隊",
+      plan: "Pro Plus",
+      seats: "5-20",
+      dataPackages: "研究宇宙、投組分析、再平衡草案",
+      apiKeys: "團隊唯讀 key + memo export",
+      sso: "Email / Google Workspace",
+      billing: "團隊訂閱",
+      status: advisoryStatus,
+      owner: cleanDecisionOwner,
+      evidence: `${comparisonRows.length} 檔比較 / ${activeAllocationRows.length} 檔配置`,
+      action: advisoryStatus === "pass" ? "可開通顧問工作區" : "先建立有效 watchlist 與配置草案",
+    },
+    {
+      workspace: "Investment Office",
+      segment: "家族辦公室 / 投資委員會",
+      plan: "Enterprise",
+      seats: "20+",
+      dataPackages: "投組分析、交易票、審核軌跡、SLA",
+      apiKeys: "分權 key + IP allowlist",
+      sso: "SAML / OIDC",
+      billing: "年度合約",
+      status: enterpriseStatus,
+      owner: cleanRiskOwner,
+      evidence: `治理狀態：${executionReviewLabel(enterpriseStatus)}`,
+      action: enterpriseStatus === "pass" ? "可進入企業上線前檢核" : "先完成 API 合約、權限與警示治理",
+    },
+    {
+      workspace: "Data Engineering Lab",
+      segment: "內部資料工程",
+      plan: "Internal",
+      seats: "資料團隊",
+      dataPackages: "資料管線、資料合約、OpenAPI 藍圖",
+      apiKeys: "service key",
+      sso: "內部帳號",
+      billing: "內部成本中心",
+      status: apiContractBlueprintDecision,
+      owner: cleanRiskOwner,
+      evidence: `API 合約狀態：${executionReviewLabel(apiContractBlueprintDecision)}`,
+      action: apiContractBlueprintDecision === "pass" ? "可進入 API 文件與 SDK 規劃" : "先凍結 request/response",
+    },
+    {
+      workspace: "Risk Control Room",
+      segment: "風控 / 合規",
+      plan: "Enterprise",
+      seats: "審核席位",
+      dataPackages: "警示、KRI、SLA、例外報告",
+      apiKeys: "監控唯讀 key",
+      sso: "SAML / OIDC",
+      billing: "包含於企業合約",
+      status: marketAlertDecision,
+      owner: cleanRiskOwner,
+      evidence: `警示狀態：${executionReviewLabel(marketAlertDecision)}`,
+      action: marketAlertDecision === "pass" ? "可開放風控檢視" : "先處理阻斷警示",
+    },
+    {
+      workspace: "Platform Admin",
+      segment: "內部平台管理",
+      plan: "Internal Admin",
+      seats: "管理員",
+      dataPackages: "全部資料產品、權限、API 合約",
+      apiKeys: "admin service key",
+      sso: "內部 SSO",
+      billing: "不對外計費",
+      status: platformEntitlementDecision,
+      owner: cleanRiskOwner,
+      evidence: `權限矩陣狀態：${executionReviewLabel(platformEntitlementDecision)}`,
+      action: platformEntitlementDecision === "pass" ? "可進入正式租戶管理設計" : "先收斂角色與方案控管",
+    },
+    {
+      workspace: "Trading Operations",
+      segment: "交易營運",
+      plan: "Enterprise Add-on",
+      seats: "交易席位",
+      dataPackages: "交易票、批次、執行交接",
+      apiKeys: "交易流程 key",
+      sso: "SAML / OIDC",
+      billing: "企業加購",
+      status: tradeTickets.length ? advisoryStatus : "watch",
+      owner: cleanDecisionOwner,
+      evidence: `${tradeTickets.length} 張交易票`,
+      action: tradeTickets.length ? "可接交易執行流程" : "先建立交易票與批次規則",
+    },
+  ];
+}
+
+function clientWorkspaceProvisioningCsv(rows: ClientWorkspaceProvisioningItem[]) {
+  const header = ["workspace", "segment", "plan", "seats", "data_packages", "api_keys", "sso", "billing", "status", "owner", "evidence", "action"];
+  const csvRows = rows.map((row) => [
+    row.workspace,
+    row.segment,
+    row.plan,
+    row.seats,
+    row.dataPackages,
+    row.apiKeys,
+    row.sso,
+    row.billing,
+    executionReviewLabel(row.status),
+    row.owner,
+    row.evidence,
+    row.action,
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
 function buildMarketAlertEvents({
   coverageUniverseItems,
   dataContractItems,
@@ -4103,6 +4284,7 @@ function assetComparisonMemo(
     apiServiceCatalogItems?: ApiServiceCatalogItem[];
     apiContractBlueprintItems?: ApiContractBlueprintItem[];
     platformEntitlementItems?: PlatformEntitlementItem[];
+    clientWorkspaceProvisioningItems?: ClientWorkspaceProvisioningItem[];
   },
 ) {
   const candidateRows = rows.filter((row) => row.signal === "candidate");
@@ -4144,6 +4326,7 @@ function assetComparisonMemo(
   const memoApiServiceCatalogItems = (options.apiServiceCatalogItems ?? []).slice(0, 12);
   const memoApiContractBlueprintItems = (options.apiContractBlueprintItems ?? []).slice(0, 12);
   const memoPlatformEntitlementItems = (options.platformEntitlementItems ?? []).slice(0, 12);
+  const memoClientWorkspaceProvisioningItems = (options.clientWorkspaceProvisioningItems ?? []).slice(0, 12);
   const tableHeader = "| 商品 | 分數 | 訊號 | 年化報酬 | 年化波動 | 最大回撤 | 最新日 | 說明 |";
   const tableDivider = "|---|---:|---|---:|---:|---:|---|---|";
   const tableRows = topRows.map((row) =>
@@ -4482,6 +4665,20 @@ function assetComparisonMemo(
       markdownCell(row.action),
     ].join(" | "),
   );
+  const clientWorkspaceProvisioningTableRows = memoClientWorkspaceProvisioningItems.map((row) =>
+    [
+      markdownCell(row.workspace),
+      markdownCell(row.segment),
+      markdownCell(row.plan),
+      markdownCell(row.seats),
+      markdownCell(row.dataPackages),
+      markdownCell(row.apiKeys),
+      markdownCell(row.sso),
+      markdownCell(row.billing),
+      markdownCell(executionReviewLabel(row.status)),
+      markdownCell(row.action),
+    ].join(" | "),
+  );
 
   return [
     `# ${options.name || "未命名 Watchlist"} 研究摘要`,
@@ -4568,6 +4765,11 @@ function assetComparisonMemo(
     memoPlatformEntitlementItems.length ? "| 角色 | 方案 | 資料範圍 | API 權限 | 工具 | 匯出權限 | 簽核限制 | 狀態 | 動作 |" : "目前沒有可輸出的權限矩陣。",
     memoPlatformEntitlementItems.length ? "|---|---|---|---|---|---|---|---|---|" : "",
     ...platformEntitlementTableRows.map((row) => `| ${row} |`),
+    "",
+    "## 客戶工作區開通中心",
+    memoClientWorkspaceProvisioningItems.length ? "| 工作區 | 客群 | 方案 | 席位 | 資料包 | API Key | SSO | 帳務 | 狀態 | 動作 |" : "目前沒有可輸出的客戶工作區開通清單。",
+    memoClientWorkspaceProvisioningItems.length ? "|---|---|---|---|---|---|---|---|---|---|" : "",
+    ...clientWorkspaceProvisioningTableRows.map((row) => `| ${row} |`),
     "",
     "## 篩選概況",
     `- 顯示商品：${rows.length} / ${options.totalRows} 檔`,
@@ -5256,6 +5458,23 @@ export function MarketDataPanel() {
   const platformEntitlementDecision = platformEntitlementItems.length
     ? combinedExecutionStatus(platformEntitlementItems.map((item) => item.status))
     : "watch";
+  const clientWorkspaceProvisioningItems = buildClientWorkspaceProvisioningItems({
+    dataReadinessDecision,
+    apiContractBlueprintDecision,
+    platformEntitlementDecision,
+    marketAlertDecision,
+    hasBigQueryCredentials,
+    comparisonRows,
+    activeAllocationRows: modelAllocationRows,
+    tradeTickets,
+    riskOwner,
+    decisionOwner,
+  });
+  const workspaceReadyCount = clientWorkspaceProvisioningItems.filter((item) => item.status === "pass").length;
+  const workspaceBlockedCount = clientWorkspaceProvisioningItems.filter((item) => item.status === "block").length;
+  const clientWorkspaceProvisioningDecision = clientWorkspaceProvisioningItems.length
+    ? combinedExecutionStatus(clientWorkspaceProvisioningItems.map((item) => item.status))
+    : "watch";
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -5455,6 +5674,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-entitlement-matrix-${resultStamp()}.csv`,
       platformEntitlementCsv(platformEntitlementItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportClientWorkspaceCsv = () => {
+    if (!clientWorkspaceProvisioningItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-client-workspaces-${resultStamp()}.csv`,
+      clientWorkspaceProvisioningCsv(clientWorkspaceProvisioningItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -5759,6 +5987,7 @@ export function MarketDataPanel() {
       apiServiceCatalogItems,
       apiContractBlueprintItems,
       platformEntitlementItems,
+      clientWorkspaceProvisioningItems,
     });
   const handleExportAssetComparisonMemo = () => {
     if (!visibleComparisonRows.length) return;
@@ -6772,6 +7001,93 @@ export function MarketDataPanel() {
                 ) : (
                   <div className="rounded-md border border-dashed border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-500">
                     建立 API 合約後，這裡會顯示角色與方案權限矩陣。
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-slate-800 pt-3 space-y-3">
+                <div className="flex flex-col md:flex-row md:items-end justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="text-xs font-bold text-slate-100">客戶工作區開通中心</h4>
+                      <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(clientWorkspaceProvisioningDecision)}`}>
+                        {executionReviewLabel(clientWorkspaceProvisioningDecision)}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-[11px] text-slate-500">
+                      將方案與權限落到可開通的工作區、席位、資料包、API key、SSO 與帳務狀態
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-end gap-2 text-xs">
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        ["可開通", `${workspaceReadyCount}`],
+                        ["阻擋", `${workspaceBlockedCount}`],
+                      ].map(([label, value]) => (
+                        <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 px-3 py-2 text-right">
+                          <p className="text-[10px] text-slate-600">{label}</p>
+                          <p className="mt-0.5 font-mono font-bold text-slate-100">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      onClick={handleExportClientWorkspaceCsv}
+                      disabled={!clientWorkspaceProvisioningItems.length}
+                      className="px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+                    >
+                      工作區 CSV
+                    </button>
+                  </div>
+                </div>
+
+                {clientWorkspaceProvisioningItems.length ? (
+                  <div className="overflow-x-auto rounded-lg border border-slate-800">
+                    <table className="w-full min-w-[1500px] text-xs">
+                      <thead className="bg-slate-900/80">
+                        <tr className="text-left text-[11px] text-slate-600">
+                          <th className="py-2 px-3 font-medium">工作區</th>
+                          <th className="py-2 px-3 font-medium">客群</th>
+                          <th className="py-2 px-3 font-medium">方案</th>
+                          <th className="py-2 px-3 font-medium">席位</th>
+                          <th className="py-2 px-3 font-medium">資料包</th>
+                          <th className="py-2 px-3 font-medium">API Key</th>
+                          <th className="py-2 px-3 font-medium">SSO</th>
+                          <th className="py-2 px-3 font-medium">帳務</th>
+                          <th className="py-2 px-3 font-medium text-right">狀態</th>
+                          <th className="py-2 px-3 font-medium">依據</th>
+                          <th className="py-2 px-3 font-medium">動作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {clientWorkspaceProvisioningItems.map((item) => (
+                          <tr key={`${item.plan}-${item.workspace}`} className={`border-t ${executionReviewRowClass(item.status)}`}>
+                            <td className="py-2 px-3 font-bold text-slate-100">{item.workspace}</td>
+                            <td className="py-2 px-3 text-slate-400">{item.segment}</td>
+                            <td className="py-2 px-3">
+                              <span className="rounded border border-slate-700 bg-slate-950 px-2 py-0.5 text-[10px] font-bold text-slate-300">
+                                {item.plan}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-slate-400">{item.seats}</td>
+                            <td className="py-2 px-3 text-slate-400">{item.dataPackages}</td>
+                            <td className="py-2 px-3 text-slate-400">{item.apiKeys}</td>
+                            <td className="py-2 px-3 text-slate-400">{item.sso}</td>
+                            <td className="py-2 px-3 text-slate-500">{item.billing}</td>
+                            <td className="py-2 px-3 text-right">
+                              <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(item.status)}`}>
+                                {executionReviewLabel(item.status)}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-slate-500">{item.evidence}</td>
+                            <td className="py-2 px-3 text-slate-500">{item.action}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-dashed border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-500">
+                    建立權限矩陣後，這裡會顯示客戶工作區開通清單。
                   </div>
                 )}
               </div>
