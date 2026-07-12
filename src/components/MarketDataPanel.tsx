@@ -256,6 +256,17 @@ type DataRemediationItem = {
   action: string;
 };
 
+type DataLineageItem = {
+  stage: string;
+  node: string;
+  status: ExecutionReviewStatus;
+  input: string;
+  output: string;
+  owner: string;
+  evidence: string;
+  action: string;
+};
+
 const statusMeta: Record<MarketSourceStatus, { label: string; className: string }> = {
   ready: {
     label: "可接 API",
@@ -3041,6 +3052,113 @@ function dataRemediationCsv(rows: DataRemediationItem[]) {
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
+function buildDataLineageItems({
+  sources,
+  dataPipelineTableSnapshots,
+  dataContractItems,
+  coverageUniverseItems,
+  dataRemediationItems,
+  riskOwner,
+  decisionOwner,
+}: {
+  sources: MarketSource[];
+  dataPipelineTableSnapshots: DataPipelineTableSnapshot[];
+  dataContractItems: DataContractItem[];
+  coverageUniverseItems: CoverageUniverseItem[];
+  dataRemediationItems: DataRemediationItem[];
+  riskOwner: string;
+  decisionOwner: string;
+}): DataLineageItem[] {
+  const cleanRiskOwner = riskOwner.trim() || "風控";
+  const cleanDecisionOwner = decisionOwner.trim() || "研究";
+  const sourceStatuses = sources.map((source) => sourceRemediationStatus(source.status));
+  const sourceDecision = sourceStatuses.length ? combinedExecutionStatus(sourceStatuses) : "watch";
+  const readySourceCount = sources.filter((source) => source.status === "ready").length;
+  const highRemediationCount = dataRemediationItems.filter((item) => item.priority === "high").length;
+  const mediumRemediationCount = dataRemediationItems.filter((item) => item.priority === "medium").length;
+  const productStatus: ExecutionReviewStatus =
+    highRemediationCount > 0 ? "block" : mediumRemediationCount > 0 ? "watch" : "pass";
+
+  const sourceNode: DataLineageItem = {
+    stage: "來源接線",
+    node: "外部資料源",
+    status: sourceDecision,
+    input: `${sources.length} sources`,
+    output: `${readySourceCount}/${sources.length} ready`,
+    owner: cleanRiskOwner,
+    evidence: sources.length ? sources.map((source) => `${source.name}:${statusMeta[source.status].label}`).join(" / ") : "--",
+    action: sourceDecision === "pass" ? "維持資料源憑證與批次紀錄" : "優先處理需環境變數或批次接線的資料源",
+  };
+  const warehouseNodes = dataPipelineTableSnapshots.map((item) => ({
+    stage: "倉儲表",
+    node: item.table,
+    status: item.status,
+    input: "BigQuery dataset",
+    output: `${item.rowCount} / ${item.coverage}`,
+    owner: item.owner,
+    evidence: `${item.latestDate} / ${item.freshness}`,
+    action: item.action,
+  }));
+  const contractNodes = dataContractItems.map((item) => ({
+    stage: "資料合約",
+    node: item.table,
+    status: item.status,
+    input: item.layer,
+    output: `${item.presentColumns.length}/${item.requiredColumns.length} columns`,
+    owner: item.owner,
+    evidence: item.missingColumns.length ? `缺 ${item.missingColumns.join(", ")}` : item.freshness,
+    action: item.action,
+  }));
+  const universeNodes = coverageUniverseItems.map((item) => ({
+    stage: "研究宇宙",
+    node: item.label,
+    status: item.status,
+    input: item.target,
+    output: item.count,
+    owner: item.owner,
+    evidence: item.coverage,
+    action: item.action,
+  }));
+  const remediationNode: DataLineageItem = {
+    stage: "營運修復",
+    node: "資料缺口佇列",
+    status: dataRemediationItems.length ? combinedExecutionStatus(dataRemediationItems.map((item) => item.status)) : "pass",
+    input: "來源 / 管線 / 合約 / 研究宇宙",
+    output: `高 ${highRemediationCount} / 中 ${mediumRemediationCount}`,
+    owner: cleanRiskOwner,
+    evidence: dataRemediationItems.length ? `${dataRemediationItems.length} 項待處理` : "無待處理缺口",
+    action: dataRemediationItems.length ? "依優先級關閉資料缺口" : "維持每日監控",
+  };
+  const productNode: DataLineageItem = {
+    stage: "分析產品",
+    node: "商品主檔 / Watchlist / 投組引擎",
+    status: productStatus,
+    input: "資料合約 + 研究宇宙",
+    output: "商品分析、研究摘要、投組分析",
+    owner: cleanDecisionOwner,
+    evidence: productStatus === "pass" ? "資料鏈可支援前端分析" : "仍有資料缺口影響產品輸出",
+    action: productStatus === "pass" ? "可進入模型與客戶視圖擴充" : "先處理高 / 中優先資料缺口",
+  };
+
+  return [sourceNode, ...warehouseNodes, ...contractNodes, ...universeNodes, remediationNode, productNode];
+}
+
+function dataLineageCsv(rows: DataLineageItem[]) {
+  const header = ["stage", "node", "status", "input", "output", "owner", "evidence", "action"];
+  const csvRows = rows.map((row) => [
+    row.stage,
+    row.node,
+    executionReviewLabel(row.status),
+    row.input,
+    row.output,
+    row.owner,
+    row.evidence,
+    row.action,
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
 function buildMarketAlertEvents({
   coverageUniverseItems,
   dataContractItems,
@@ -3262,6 +3380,7 @@ function assetComparisonMemo(
     dataContractItems?: DataContractItem[];
     coverageUniverseItems?: CoverageUniverseItem[];
     dataRemediationItems?: DataRemediationItem[];
+    dataLineageItems?: DataLineageItem[];
   },
 ) {
   const candidateRows = rows.filter((row) => row.signal === "candidate");
@@ -3298,6 +3417,7 @@ function assetComparisonMemo(
   const memoDataContractItems = (options.dataContractItems ?? []).slice(0, 8);
   const memoCoverageUniverseItems = (options.coverageUniverseItems ?? []).slice(0, 8);
   const memoDataRemediationItems = (options.dataRemediationItems ?? []).slice(0, 12);
+  const memoDataLineageItems = (options.dataLineageItems ?? []).slice(0, 14);
   const tableHeader = "| 商品 | 分數 | 訊號 | 年化報酬 | 年化波動 | 最大回撤 | 最新日 | 說明 |";
   const tableDivider = "|---|---:|---|---:|---:|---:|---|---|";
   const tableRows = topRows.map((row) =>
@@ -3571,6 +3691,18 @@ function assetComparisonMemo(
       markdownCell(row.action),
     ].join(" | "),
   );
+  const dataLineageTableRows = memoDataLineageItems.map((row) =>
+    [
+      markdownCell(row.stage),
+      markdownCell(row.node),
+      markdownCell(executionReviewLabel(row.status)),
+      markdownCell(row.input),
+      markdownCell(row.output),
+      markdownCell(row.owner),
+      markdownCell(row.evidence),
+      markdownCell(row.action),
+    ].join(" | "),
+  );
 
   return [
     `# ${options.name || "未命名 Watchlist"} 研究摘要`,
@@ -3632,6 +3764,11 @@ function assetComparisonMemo(
     memoDataRemediationItems.length ? "| 來源 | 項目 | 優先級 | 狀態 | 負責人 | 依據 | 影響 | 動作 |" : "目前沒有待處理資料缺口。",
     memoDataRemediationItems.length ? "|---|---|---|---|---|---|---|---|" : "",
     ...dataRemediationTableRows.map((row) => `| ${row} |`),
+    "",
+    "## 資料血緣地圖",
+    memoDataLineageItems.length ? "| 階段 | 節點 | 狀態 | 輸入 | 輸出 | 負責人 | 依據 | 動作 |" : "目前沒有可輸出的資料血緣。",
+    memoDataLineageItems.length ? "|---|---|---|---|---|---|---|---|" : "",
+    ...dataLineageTableRows.map((row) => `| ${row} |`),
     "",
     "## 篩選概況",
     `- 顯示商品：${rows.length} / ${options.totalRows} 檔`,
@@ -4152,6 +4289,20 @@ export function MarketDataPanel() {
   const dataRemediationDecision = dataRemediationItems.length
     ? combinedExecutionStatus(dataRemediationItems.map((item) => item.status))
     : "pass";
+  const dataLineageItems = buildDataLineageItems({
+    sources,
+    dataPipelineTableSnapshots,
+    dataContractItems,
+    coverageUniverseItems,
+    dataRemediationItems,
+    riskOwner,
+    decisionOwner,
+  });
+  const dataLineageBlockCount = dataLineageItems.filter((item) => item.status === "block").length;
+  const dataLineageWatchCount = dataLineageItems.filter((item) => item.status === "watch").length;
+  const dataLineageDecision = dataLineageItems.length
+    ? combinedExecutionStatus(dataLineageItems.map((item) => item.status))
+    : "watch";
   const candidateVisibleCount = visibleComparisonRows.filter((row) => row.signal === "candidate").length;
   const cioOperatingBriefItems = buildCioOperatingBriefItems({
     dataStatus: dataReadinessDecision,
@@ -4396,6 +4547,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `bigquery-data-remediation-${resultStamp()}.csv`,
       dataRemediationCsv(dataRemediationItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportDataLineageCsv = () => {
+    if (!dataLineageItems.length) return;
+
+    downloadTextFile(
+      `bigquery-data-lineage-${resultStamp()}.csv`,
+      dataLineageCsv(dataLineageItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -4695,6 +4855,7 @@ export function MarketDataPanel() {
       dataContractItems,
       coverageUniverseItems,
       dataRemediationItems,
+      dataLineageItems,
     });
   const handleExportAssetComparisonMemo = () => {
     if (!visibleComparisonRows.length) return;
@@ -5287,6 +5448,81 @@ export function MarketDataPanel() {
                 ) : (
                   <div className="rounded-md border border-dashed border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-500">
                     目前沒有待處理資料缺口。
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-slate-800 pt-3 space-y-3">
+                <div className="flex flex-col md:flex-row md:items-end justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="text-xs font-bold text-slate-100">資料血緣地圖</h4>
+                      <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(dataLineageDecision)}`}>
+                        {executionReviewLabel(dataLineageDecision)}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-[11px] text-slate-500">
+                      從外部資料源、BigQuery 倉儲、合約、研究宇宙一路追到前端分析產品
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-end gap-2 text-xs">
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        ["阻斷", `${dataLineageBlockCount}`],
+                        ["觀察", `${dataLineageWatchCount}`],
+                      ].map(([label, value]) => (
+                        <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 px-3 py-2 text-right">
+                          <p className="text-[10px] text-slate-600">{label}</p>
+                          <p className="mt-0.5 font-mono font-bold text-slate-100">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      onClick={handleExportDataLineageCsv}
+                      disabled={!dataLineageItems.length}
+                      className="px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+                    >
+                      血緣 CSV
+                    </button>
+                  </div>
+                </div>
+
+                {dataLineageItems.length ? (
+                  <div className="overflow-x-auto rounded-lg border border-slate-800">
+                    <table className="w-full min-w-[1180px] text-xs">
+                      <thead className="bg-slate-900/80">
+                        <tr className="text-left text-[11px] text-slate-600">
+                          <th className="py-2 px-3 font-medium">階段</th>
+                          <th className="py-2 px-3 font-medium">節點</th>
+                          <th className="py-2 px-3 font-medium text-right">狀態</th>
+                          <th className="py-2 px-3 font-medium">輸入</th>
+                          <th className="py-2 px-3 font-medium">輸出</th>
+                          <th className="py-2 px-3 font-medium">依據</th>
+                          <th className="py-2 px-3 font-medium">動作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dataLineageItems.map((item) => (
+                          <tr key={`${item.stage}-${item.node}`} className={`border-t ${executionReviewRowClass(item.status)}`}>
+                            <td className="py-2 px-3 text-slate-400">{item.stage}</td>
+                            <td className="py-2 px-3 font-bold text-slate-100">{item.node}</td>
+                            <td className="py-2 px-3 text-right">
+                              <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(item.status)}`}>
+                                {executionReviewLabel(item.status)}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-slate-400">{item.input}</td>
+                            <td className="py-2 px-3 text-slate-400">{item.output}</td>
+                            <td className="py-2 px-3 text-slate-500">{item.evidence}</td>
+                            <td className="py-2 px-3 text-slate-500">{item.action}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-dashed border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-500">
+                    讀取資料診斷後，這裡會顯示資料血緣。
                   </div>
                 )}
               </div>
