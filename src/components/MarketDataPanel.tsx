@@ -280,6 +280,19 @@ type DataProductCatalogItem = {
   action: string;
 };
 
+type ApiServiceCatalogItem = {
+  endpoint: string;
+  method: "GET" | "POST";
+  product: string;
+  status: ExecutionReviewStatus;
+  owner: string;
+  consumer: string;
+  input: string;
+  output: string;
+  serviceLevel: string;
+  action: string;
+};
+
 const statusMeta: Record<MarketSourceStatus, { label: string; className: string }> = {
   ready: {
     label: "可接 API",
@@ -3319,6 +3332,167 @@ function dataProductCatalogCsv(rows: DataProductCatalogItem[]) {
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
+function buildApiServiceCatalogItems({
+  dataReadinessDecision,
+  dataProductCatalogDecision,
+  dataLineageDecision,
+  dataRemediationDecision,
+  hasBigQueryCredentials,
+  comparisonRows,
+  activeAllocationRows,
+  tradeTickets,
+  riskOwner,
+  decisionOwner,
+}: {
+  dataReadinessDecision: ExecutionReviewStatus;
+  dataProductCatalogDecision: ExecutionReviewStatus;
+  dataLineageDecision: ExecutionReviewStatus;
+  dataRemediationDecision: ExecutionReviewStatus;
+  hasBigQueryCredentials: boolean;
+  comparisonRows: AssetComparisonRow[];
+  activeAllocationRows: AllocationDraftRow[];
+  tradeTickets: TradeTicketRow[];
+  riskOwner: string;
+  decisionOwner: string;
+}): ApiServiceCatalogItem[] {
+  const cleanRiskOwner = riskOwner.trim() || "風控";
+  const cleanDecisionOwner = decisionOwner.trim() || "研究";
+  const warehouseStatus: ExecutionReviewStatus = hasBigQueryCredentials ? dataReadinessDecision : "block";
+  const portfolioStatus: ExecutionReviewStatus = activeAllocationRows.length
+    ? combinedExecutionStatus([dataReadinessDecision, dataLineageDecision])
+    : "watch";
+  const productStatus: ExecutionReviewStatus = combinedExecutionStatus([dataProductCatalogDecision, dataRemediationDecision]);
+
+  return [
+    {
+      method: "GET",
+      endpoint: "/api/v1/market/sources",
+      product: "資料源狀態",
+      status: "pass",
+      owner: cleanRiskOwner,
+      consumer: "平台管理 / 前端",
+      input: "Market source 設定",
+      output: "資料源清單、接入方式、缺少金鑰",
+      serviceLevel: "每次載入平台時可讀",
+      action: "維持資料源盤點與金鑰狀態同步",
+    },
+    {
+      method: "GET",
+      endpoint: "/api/v1/market/bigquery/status",
+      product: "BigQuery 連線狀態",
+      status: hasBigQueryCredentials ? "pass" : "block",
+      owner: cleanRiskOwner,
+      consumer: "平台管理 / 資料工程",
+      input: "Vercel 環境變數",
+      output: "project、dataset、table、credential 狀態",
+      serviceLevel: "部署後需立即可檢查",
+      action: hasBigQueryCredentials ? "可進入資料表診斷" : "先補齊 GCP_SERVICE_ACCOUNT_JSON 與 BigQuery 變數",
+    },
+    {
+      method: "GET",
+      endpoint: "/api/v1/market/bigquery/diagnostics",
+      product: "資料倉儲診斷",
+      status: warehouseStatus,
+      owner: cleanRiskOwner,
+      consumer: "資料營運 / 風控",
+      input: "daily_prices / daily_fx",
+      output: "schema、freshness、coverage、stale symbols",
+      serviceLevel: "每日批次完成後更新",
+      action: warehouseStatus === "pass" ? "可作為分析前健康檢查" : "先排除 BigQuery 憑證或資料品質問題",
+    },
+    {
+      method: "GET",
+      endpoint: "/api/v1/market/bigquery/assets",
+      product: "商品搜尋",
+      status: warehouseStatus,
+      owner: cleanDecisionOwner,
+      consumer: "研究 / 顧問",
+      input: "查詢文字、limit",
+      output: "商品代碼、名稱、交易所、幣別、最新日",
+      serviceLevel: "互動查詢需穩定回應",
+      action: warehouseStatus === "pass" ? "可擴充資產類別與地區篩選" : "先確保商品資料可讀",
+    },
+    {
+      method: "GET",
+      endpoint: "/api/v1/market/bigquery/assets/:symbol",
+      product: "商品主檔分析",
+      status: warehouseStatus,
+      owner: cleanDecisionOwner,
+      consumer: "研究 / 投委會",
+      input: "symbol、price_basis、lookback",
+      output: "報酬、波動、回撤、價格序列",
+      serviceLevel: "單商品查詢需回傳可解釋品質欄位",
+      action: warehouseStatus === "pass" ? "可接基本面與配息欄位" : "先補齊價格序列",
+    },
+    {
+      method: "POST",
+      endpoint: "/api/v1/portfolio/analyze-bigquery",
+      product: "投組分析",
+      status: comparisonRows.length ? portfolioStatus : "watch",
+      owner: cleanDecisionOwner,
+      consumer: "投資決策 / 顧問",
+      input: "watchlist、權重、價格口徑",
+      output: "投組風險、績效、商品比較、決策摘要",
+      serviceLevel: "至少一組可比較商品才能產生有效分析",
+      action: comparisonRows.length ? "可進入模型配置與 memo 輸出" : "先載入 watchlist 比較資料",
+    },
+    {
+      method: "POST",
+      endpoint: "/api/v1/portfolio/optimize-bigquery",
+      product: "AI 調倉最佳化",
+      status: activeAllocationRows.length ? portfolioStatus : "watch",
+      owner: cleanDecisionOwner,
+      consumer: "再平衡 / 投委會",
+      input: "候選商品、風險限制、本金、單檔上限",
+      output: "最佳化權重、交易票、風險預算",
+      serviceLevel: "阻斷資料缺口不得產生正式建議",
+      action: activeAllocationRows.length ? "可進入交易前審查" : "先產生有效配置草案",
+    },
+    {
+      method: "GET",
+      endpoint: "/api/v1/platform/data-products",
+      product: "資料產品目錄",
+      status: productStatus,
+      owner: cleanRiskOwner,
+      consumer: "平台管理 / 內部審計",
+      input: "資料產品、血緣、修復佇列",
+      output: "產品 owner、使用者、輸入輸出、SLA",
+      serviceLevel: "每次資料產品變更後更新",
+      action: productStatus === "pass" ? "可作為平台治理基準" : "先處理資料目錄或修復佇列缺口",
+    },
+    {
+      method: "GET",
+      endpoint: "/api/v1/trading/tickets",
+      product: "交易票查詢",
+      status: tradeTickets.length ? portfolioStatus : "watch",
+      owner: cleanDecisionOwner,
+      consumer: "交易 / 營運",
+      input: "配置草案、再平衡門檻、最小交易金額",
+      output: "交易方向、金額、現金影響、批次",
+      serviceLevel: "送交交易前需有審核軌跡",
+      action: tradeTickets.length ? "可進入執行交接" : "先建立交易票與批次規則",
+    },
+  ];
+}
+
+function apiServiceCatalogCsv(rows: ApiServiceCatalogItem[]) {
+  const header = ["method", "endpoint", "product", "status", "owner", "consumer", "input", "output", "service_level", "action"];
+  const csvRows = rows.map((row) => [
+    row.method,
+    row.endpoint,
+    row.product,
+    executionReviewLabel(row.status),
+    row.owner,
+    row.consumer,
+    row.input,
+    row.output,
+    row.serviceLevel,
+    row.action,
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
 function buildMarketAlertEvents({
   coverageUniverseItems,
   dataContractItems,
@@ -3542,6 +3716,7 @@ function assetComparisonMemo(
     dataRemediationItems?: DataRemediationItem[];
     dataLineageItems?: DataLineageItem[];
     dataProductCatalogItems?: DataProductCatalogItem[];
+    apiServiceCatalogItems?: ApiServiceCatalogItem[];
   },
 ) {
   const candidateRows = rows.filter((row) => row.signal === "candidate");
@@ -3580,6 +3755,7 @@ function assetComparisonMemo(
   const memoDataRemediationItems = (options.dataRemediationItems ?? []).slice(0, 12);
   const memoDataLineageItems = (options.dataLineageItems ?? []).slice(0, 14);
   const memoDataProductCatalogItems = (options.dataProductCatalogItems ?? []).slice(0, 10);
+  const memoApiServiceCatalogItems = (options.apiServiceCatalogItems ?? []).slice(0, 12);
   const tableHeader = "| 商品 | 分數 | 訊號 | 年化報酬 | 年化波動 | 最大回撤 | 最新日 | 說明 |";
   const tableDivider = "|---|---:|---|---:|---:|---:|---|---|";
   const tableRows = topRows.map((row) =>
@@ -3878,6 +4054,20 @@ function assetComparisonMemo(
       markdownCell(row.action),
     ].join(" | "),
   );
+  const apiServiceCatalogTableRows = memoApiServiceCatalogItems.map((row) =>
+    [
+      markdownCell(row.method),
+      markdownCell(row.endpoint),
+      markdownCell(row.product),
+      markdownCell(executionReviewLabel(row.status)),
+      markdownCell(row.owner),
+      markdownCell(row.consumer),
+      markdownCell(row.input),
+      markdownCell(row.output),
+      markdownCell(row.serviceLevel),
+      markdownCell(row.action),
+    ].join(" | "),
+  );
 
   return [
     `# ${options.name || "未命名 Watchlist"} 研究摘要`,
@@ -3949,6 +4139,11 @@ function assetComparisonMemo(
     memoDataProductCatalogItems.length ? "| 產品 | 類別 | 狀態 | 負責人 | 使用者 | 輸入 | 輸出 | 服務等級 | 動作 |" : "目前沒有可輸出的資料產品目錄。",
     memoDataProductCatalogItems.length ? "|---|---|---|---|---|---|---|---|---|" : "",
     ...dataProductCatalogTableRows.map((row) => `| ${row} |`),
+    "",
+    "## API 服務目錄",
+    memoApiServiceCatalogItems.length ? "| Method | Endpoint | 產品 | 狀態 | 負責人 | 使用者 | 輸入 | 輸出 | 服務等級 | 動作 |" : "目前沒有可輸出的 API 服務目錄。",
+    memoApiServiceCatalogItems.length ? "|---|---|---|---|---|---|---|---|---|---|" : "",
+    ...apiServiceCatalogTableRows.map((row) => `| ${row} |`),
     "",
     "## 篩選概況",
     `- 顯示商品：${rows.length} / ${options.totalRows} 檔`,
@@ -4592,6 +4787,23 @@ export function MarketDataPanel() {
   const dataProductCatalogDecision = dataProductCatalogItems.length
     ? combinedExecutionStatus(dataProductCatalogItems.map((item) => item.status))
     : "watch";
+  const apiServiceCatalogItems = buildApiServiceCatalogItems({
+    dataReadinessDecision,
+    dataProductCatalogDecision,
+    dataLineageDecision,
+    dataRemediationDecision,
+    hasBigQueryCredentials,
+    comparisonRows,
+    activeAllocationRows: modelAllocationRows,
+    tradeTickets,
+    riskOwner,
+    decisionOwner,
+  });
+  const apiServiceReadyCount = apiServiceCatalogItems.filter((item) => item.status === "pass").length;
+  const apiServiceWatchCount = apiServiceCatalogItems.filter((item) => item.status === "watch").length;
+  const apiServiceCatalogDecision = apiServiceCatalogItems.length
+    ? combinedExecutionStatus(apiServiceCatalogItems.map((item) => item.status))
+    : "watch";
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -4764,6 +4976,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `bigquery-data-product-catalog-${resultStamp()}.csv`,
       dataProductCatalogCsv(dataProductCatalogItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportApiServiceCatalogCsv = () => {
+    if (!apiServiceCatalogItems.length) return;
+
+    downloadTextFile(
+      `bigquery-api-service-catalog-${resultStamp()}.csv`,
+      apiServiceCatalogCsv(apiServiceCatalogItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -5065,6 +5286,7 @@ export function MarketDataPanel() {
       dataRemediationItems,
       dataLineageItems,
       dataProductCatalogItems,
+      apiServiceCatalogItems,
     });
   const handleExportAssetComparisonMemo = () => {
     if (!visibleComparisonRows.length) return;
@@ -5809,6 +6031,95 @@ export function MarketDataPanel() {
                 ) : (
                   <div className="rounded-md border border-dashed border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-500">
                     讀取資料診斷後，這裡會顯示資料產品目錄。
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-slate-800 pt-3 space-y-3">
+                <div className="flex flex-col md:flex-row md:items-end justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="text-xs font-bold text-slate-100">API 服務目錄</h4>
+                      <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(apiServiceCatalogDecision)}`}>
+                        {executionReviewLabel(apiServiceCatalogDecision)}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-[11px] text-slate-500">
+                      盤點資料服務與分析服務的 endpoint、使用者、輸入輸出、服務等級與動作
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-end gap-2 text-xs">
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        ["可用", `${apiServiceReadyCount}`],
+                        ["觀察", `${apiServiceWatchCount}`],
+                      ].map(([label, value]) => (
+                        <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 px-3 py-2 text-right">
+                          <p className="text-[10px] text-slate-600">{label}</p>
+                          <p className="mt-0.5 font-mono font-bold text-slate-100">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      onClick={handleExportApiServiceCatalogCsv}
+                      disabled={!apiServiceCatalogItems.length}
+                      className="px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+                    >
+                      API CSV
+                    </button>
+                  </div>
+                </div>
+
+                {apiServiceCatalogItems.length ? (
+                  <div className="overflow-x-auto rounded-lg border border-slate-800">
+                    <table className="w-full min-w-[1360px] text-xs">
+                      <thead className="bg-slate-900/80">
+                        <tr className="text-left text-[11px] text-slate-600">
+                          <th className="py-2 px-3 font-medium">Method</th>
+                          <th className="py-2 px-3 font-medium">Endpoint</th>
+                          <th className="py-2 px-3 font-medium">產品</th>
+                          <th className="py-2 px-3 font-medium text-right">狀態</th>
+                          <th className="py-2 px-3 font-medium">使用者</th>
+                          <th className="py-2 px-3 font-medium">輸入</th>
+                          <th className="py-2 px-3 font-medium">輸出</th>
+                          <th className="py-2 px-3 font-medium">服務等級</th>
+                          <th className="py-2 px-3 font-medium">動作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {apiServiceCatalogItems.map((item) => (
+                          <tr key={item.endpoint} className={`border-t ${executionReviewRowClass(item.status)}`}>
+                            <td className="py-2 px-3">
+                              <span
+                                className={`rounded px-2 py-0.5 text-[10px] font-bold ${
+                                  item.method === "GET"
+                                    ? "border border-sky-500/40 bg-sky-500/10 text-sky-300"
+                                    : "border border-violet-500/40 bg-violet-500/10 text-violet-300"
+                                }`}
+                              >
+                                {item.method}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 font-mono text-[11px] text-slate-300">{item.endpoint}</td>
+                            <td className="py-2 px-3 font-bold text-slate-100">{item.product}</td>
+                            <td className="py-2 px-3 text-right">
+                              <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(item.status)}`}>
+                                {executionReviewLabel(item.status)}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-slate-400">{item.consumer}</td>
+                            <td className="py-2 px-3 text-slate-400">{item.input}</td>
+                            <td className="py-2 px-3 text-slate-400">{item.output}</td>
+                            <td className="py-2 px-3 text-slate-500">{item.serviceLevel}</td>
+                            <td className="py-2 px-3 text-slate-500">{item.action}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-dashed border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-500">
+                    讀取資料診斷後，這裡會顯示 API 服務目錄。
                   </div>
                 )}
               </div>
