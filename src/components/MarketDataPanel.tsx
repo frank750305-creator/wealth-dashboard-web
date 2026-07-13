@@ -125,8 +125,6 @@ import {
   buildDecisionAuditRecords,
   committeeApprovalChecklist,
   committeeDecisionFromItems,
-  committeeDecisionLabel,
-  committeeDecisionStatus,
   decisionAuditCsv,
   formatDecisionAuditTime,
   investmentPolicyLimitItems,
@@ -148,6 +146,7 @@ import type {
 import { AllocationDraftSection } from "./AllocationDraftSection";
 import { BigQueryPortfolioPanel } from "./BigQueryPortfolioPanel";
 import { AssetProfileSection } from "./AssetProfileSection";
+import { CommitteeApprovalSection } from "./CommitteeApprovalSection";
 import { CommercializationSection } from "./CommercializationSection";
 import { DataOperationsSection } from "./DataOperationsSection";
 import { EnterpriseReadinessSection } from "./EnterpriseReadinessSection";
@@ -2245,73 +2244,15 @@ export function MarketDataPanel() {
                             monitoringRules={monitoringRules}
                           />
 
-                          <div className="border-t border-slate-800 pt-3 space-y-3">
-                            <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-3">
-                              <div>
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <h5 className="text-xs font-bold text-slate-100">投委會簽核摘要</h5>
-                                  <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(committeeDecisionStatus(committeeDecision))}`}>
-                                    {committeeDecisionLabel(committeeDecision)}
-                                  </span>
-                                </div>
-                                <p className="text-[11px] text-slate-500 mt-0.5">
-                                  將交易前檢核與交易後監控合併成可送簽的最終決策摘要
-                                </p>
-                              </div>
-                              <button
-                                onClick={handleExportCommitteeApprovalCsv}
-                                disabled={!rebalanceRows.length}
-                                className="px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
-                              >
-                                簽核 CSV
-                              </button>
-                            </div>
-
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-                              {[
-                                ["簽核建議", committeeDecisionLabel(committeeDecision)],
-                                ["暫停項目", `${committeeBlockCount} 項`],
-                                ["觀察項目", `${committeeWatchCount} 項`],
-                                ["送簽交易", `${tradeTickets.length} 檔`],
-                              ].map(([label, value]) => (
-                                <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 p-3 min-w-0">
-                                  <p className="text-[11px] text-slate-600 truncate">{label}</p>
-                                  <p className="mt-1 font-mono text-sm font-bold text-slate-100 truncate" title={value}>
-                                    {value}
-                                  </p>
-                                </div>
-                              ))}
-                            </div>
-
-                            <div className="overflow-x-auto">
-                              <table className="w-full min-w-[920px] text-xs">
-                                <thead>
-                                  <tr className="text-left text-[11px] text-slate-600">
-                                    <th className="py-2 px-3 font-medium">項目</th>
-                                    <th className="py-2 px-3 font-medium text-right">狀態</th>
-                                    <th className="py-2 px-3 font-medium text-right">目前值</th>
-                                    <th className="py-2 px-3 font-medium">門檻</th>
-                                    <th className="py-2 px-3 font-medium">說明</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {committeeApprovalItems.map((item) => (
-                                    <tr key={item.label} className={`border-t ${executionReviewRowClass(item.status)}`}>
-                                      <td className="py-2 px-3 font-bold text-slate-100">{item.label}</td>
-                                      <td className="py-2 px-3 text-right">
-                                        <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(item.status)}`}>
-                                          {executionReviewLabel(item.status)}
-                                        </span>
-                                      </td>
-                                      <td className="py-2 px-3 text-right font-mono text-slate-200">{item.value}</td>
-                                      <td className="py-2 px-3 text-slate-400">{item.threshold}</td>
-                                      <td className="py-2 px-3 text-slate-500">{item.note}</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                          </div>
+                          <CommitteeApprovalSection
+                            committeeDecision={committeeDecision}
+                            onExportCommitteeApprovalCsv={handleExportCommitteeApprovalCsv}
+                            canExport={Boolean(rebalanceRows.length)}
+                            committeeBlockCount={committeeBlockCount}
+                            committeeWatchCount={committeeWatchCount}
+                            tradeTicketCount={tradeTickets.length}
+                            committeeApprovalItems={committeeApprovalItems}
+                          />
 
                           <div className="border-t border-slate-800 pt-3 space-y-3">
                             <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-3">
