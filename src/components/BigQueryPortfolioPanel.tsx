@@ -4,6 +4,7 @@ import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Bar, BarChart, CartesianGrid, ComposedChart, Line, LineChart, ResponsiveContainer, Scatter, Tooltip, XAxis, YAxis } from "recharts";
 import { analyzePortfolioFromBigQuery, fetchBigQueryAssets, optimizePortfolioFromBigQuery } from "@/lib/marketApi";
 import type { BigQueryAsset, PortfolioAnalysisResponse, PortfolioOptimizationResponse } from "@/types/market";
+import { BigQueryPortfolioHeader } from "./BigQueryPortfolioHeader";
 
 type AssetRow = {
   id: string;
@@ -2445,35 +2446,15 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
 
   return (
     <section className="bg-slate-900 border border-slate-800 p-4 md:p-6 rounded-xl shadow-2xl space-y-5">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
-        <div>
-          <h3 className="text-sm font-bold text-cyan-300">▍ BigQuery 投組分析工作台</h3>
-          <p className="text-[11px] text-slate-500 mt-1">daily_prices / daily_fx</p>
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={handleAnalyze}
-            disabled={!canSubmit}
-            className="px-3 py-2 text-xs font-bold rounded-md bg-emerald-600 hover:bg-emerald-500 text-white transition-colors disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
-          >
-            {isAnalyzing ? "分析中" : "執行分析"}
-          </button>
-          <button
-            onClick={handleOptimize}
-            disabled={!canSubmit}
-            className="px-3 py-2 text-xs font-bold rounded-md bg-cyan-600 hover:bg-cyan-500 text-white transition-colors disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
-          >
-            {isOptimizing ? "調倉中" : "AI 調倉"}
-          </button>
-          <button
-            onClick={handleCompareModes}
-            disabled={!canSubmit}
-            className="px-3 py-2 text-xs font-bold rounded-md bg-slate-700 hover:bg-slate-600 text-white transition-colors disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
-          >
-            {isComparingModes ? "比較中" : "比較模式"}
-          </button>
-        </div>
-      </div>
+      <BigQueryPortfolioHeader
+        canSubmit={canSubmit}
+        isAnalyzing={isAnalyzing}
+        isOptimizing={isOptimizing}
+        isComparingModes={isComparingModes}
+        onAnalyze={handleAnalyze}
+        onOptimize={handleOptimize}
+        onCompareModes={handleCompareModes}
+      />
 
       <div className="grid grid-cols-1 xl:grid-cols-[0.8fr_1.2fr] gap-3 bg-slate-950 border border-slate-800 rounded-lg p-3">
         <input ref={importInputRef} type="file" accept="application/json,.json" hidden onChange={handleImportJson} />
