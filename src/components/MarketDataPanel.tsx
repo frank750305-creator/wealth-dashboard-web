@@ -145,6 +145,7 @@ import type {
 import { AllocationDraftSection } from "./AllocationDraftSection";
 import { BigQueryPortfolioPanel } from "./BigQueryPortfolioPanel";
 import { AssetProfileSection } from "./AssetProfileSection";
+import { CioOperatingBriefSection } from "./CioOperatingBriefSection";
 import { CommitteeApprovalSection } from "./CommitteeApprovalSection";
 import { CommercializationSection } from "./CommercializationSection";
 import { DataOperationsSection } from "./DataOperationsSection";
@@ -2326,73 +2327,14 @@ export function MarketDataPanel() {
                             platformExceptionWatchCount={platformExceptionWatchCount}
                           />
 
-                          <div className="border-t border-slate-800 pt-3 space-y-3">
-                            <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-3">
-                              <div>
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <h5 className="text-xs font-bold text-slate-100">CIO 營運總覽</h5>
-                                  <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(cioOperatingDecision)}`}>
-                                    {executionReviewLabel(cioOperatingDecision)}
-                                  </span>
-                                </div>
-                                <p className="text-[11px] text-slate-500 mt-0.5">
-                                  將資料、研究、配置、交易、成交、復盤與例外事項整合成高層決策摘要
-                                </p>
-                              </div>
-                              <button
-                                onClick={handleExportCioOperatingBriefCsv}
-                                disabled={!cioOperatingBriefItems.length}
-                                className="px-3 py-2 rounded-md bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-100 text-xs font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
-                              >
-                                CIO CSV
-                              </button>
-                            </div>
-
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-                              {[
-                                ["總覽狀態", executionReviewLabel(cioOperatingDecision)],
-                                ["候選標的", `${candidateVisibleCount} 檔`],
-                                ["送簽交易", `${tradeTickets.length} 檔`],
-                                ["待處理例外", `${platformExceptionItems.length} 項`],
-                              ].map(([label, value]) => (
-                                <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 p-3 min-w-0">
-                                  <p className="text-[11px] text-slate-600 truncate">{label}</p>
-                                  <p className="mt-1 font-mono text-sm font-bold text-slate-100 truncate" title={value}>
-                                    {value}
-                                  </p>
-                                </div>
-                              ))}
-                            </div>
-
-                            <div className="overflow-x-auto">
-                              <table className="w-full min-w-[980px] text-xs">
-                                <thead>
-                                  <tr className="text-left text-[11px] text-slate-600">
-                                    <th className="py-2 px-3 font-medium">項目</th>
-                                    <th className="py-2 px-3 font-medium text-right">狀態</th>
-                                    <th className="py-2 px-3 font-medium text-right">目前值</th>
-                                    <th className="py-2 px-3 font-medium">門檻</th>
-                                    <th className="py-2 px-3 font-medium">下一步</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {cioOperatingBriefItems.map((item) => (
-                                    <tr key={item.label} className={`border-t ${executionReviewRowClass(item.status)}`}>
-                                      <td className="py-2 px-3 font-bold text-slate-100">{item.label}</td>
-                                      <td className="py-2 px-3 text-right">
-                                        <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(item.status)}`}>
-                                          {executionReviewLabel(item.status)}
-                                        </span>
-                                      </td>
-                                      <td className="py-2 px-3 text-right font-mono text-slate-200">{item.value}</td>
-                                      <td className="py-2 px-3 text-slate-400">{item.threshold}</td>
-                                      <td className="py-2 px-3 text-slate-500">{item.note}</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                          </div>
+                          <CioOperatingBriefSection
+                            cioOperatingDecision={cioOperatingDecision}
+                            onExportCioOperatingBriefCsv={handleExportCioOperatingBriefCsv}
+                            cioOperatingBriefItems={cioOperatingBriefItems}
+                            candidateVisibleCount={candidateVisibleCount}
+                            tradeTicketCount={tradeTickets.length}
+                            platformExceptionCount={platformExceptionItems.length}
+                          />
 
                           <div className="border-t border-slate-800 pt-3 space-y-3">
                             <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-3">
