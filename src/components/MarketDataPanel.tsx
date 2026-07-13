@@ -1,5 +1,27 @@
 import { useEffect, useState } from "react";
 import { useMarketSources } from "@/hooks/useMarketSources";
+import {
+  assetComparisonCsv,
+  averageComparisonMetric,
+  comparisonRowFromProfile,
+  comparisonSignalFilterLabel,
+  comparisonSortLabel,
+  coverageStatus,
+  daysSinceDate,
+  decisionSignalClass,
+  decisionSignalLabel,
+  formatCount,
+  formatPrice,
+  freshnessStatus,
+  qualityBadgeClass,
+  qualityClass,
+  qualityLabel,
+  sortComparisonRows,
+  type AssetComparisonRow,
+  type AssetComparisonSortKey,
+  type AssetDecisionSignal,
+  type QualityStatus,
+} from "@/lib/assetResearchWorkflow";
 import { fetchBigQueryAssetProfile, fetchBigQueryAssets } from "@/lib/marketApi";
 import {
   buildClientWorkspaceProvisioningItems,
@@ -152,15 +174,6 @@ import type {
 } from "@/types/market";
 import { BigQueryPortfolioPanel } from "./BigQueryPortfolioPanel";
 
-type QualityStatus = "strong" | "watch" | "risk" | "neutral";
-type AssetDecisionSignal = "candidate" | "watch" | "risk" | "neutral";
-type AssetComparisonSortKey =
-  | "score"
-  | "annualizedReturn"
-  | "annualizedVolatility"
-  | "maxDrawdown"
-  | "riskAdjustedReturn"
-  | "freshnessDays";
 type AllocationMode = "score" | "risk" | "equal";
 
 type SavedWatchlistPreset = {
@@ -172,23 +185,6 @@ type SavedWatchlistPreset = {
   signalFilter: AssetDecisionSignal | "all";
   minimumScore: number;
   updatedAt: string;
-};
-
-type AssetComparisonRow = {
-  symbol: string;
-  latestDate: string | null;
-  rowCount: number;
-  latestPrice: number | null;
-  totalReturn: number | null;
-  annualizedReturn: number | null;
-  annualizedVolatility: number | null;
-  maxDrawdown: number | null;
-  freshnessDays: number | null;
-  qualityStatus: QualityStatus;
-  riskAdjustedReturn: number | null;
-  score: number;
-  signal: AssetDecisionSignal;
-  signalNote: string;
 };
 
 type AllocationDraftRow = AssetComparisonRow & {
@@ -243,14 +239,6 @@ const bigQueryEnvironmentVars = [
 ];
 const watchlistPresetStorageKey = "wealth-dashboard.bigqueryWatchlistPresets";
 
-function formatCount(value: number | undefined) {
-  return typeof value === "number" && Number.isFinite(value) ? value.toLocaleString("zh-TW") : "--";
-}
-
-function formatPrice(value: number | null | undefined) {
-  return typeof value === "number" && Number.isFinite(value) ? value.toLocaleString("zh-TW", { maximumFractionDigits: 4 }) : "--";
-}
-
 function formatPercent(value: number | null | undefined) {
   return typeof value === "number" && Number.isFinite(value) ? `${(value * 100).toFixed(2)}%` : "--";
 }
@@ -259,62 +247,6 @@ function formatCurrency(value: number | null | undefined) {
   return typeof value === "number" && Number.isFinite(value)
     ? value.toLocaleString("zh-TW", { maximumFractionDigits: 0 })
     : "--";
-}
-
-function daysSinceDate(value?: string | null) {
-  if (!value) return null;
-  const time = new Date(`${value}T00:00:00`).getTime();
-  if (!Number.isFinite(time)) return null;
-  return Math.max(0, Math.floor((Date.now() - time) / 86400000));
-}
-
-function freshnessStatus(days: number | null): QualityStatus {
-  if (days === null) return "neutral";
-  if (days <= 3) return "strong";
-  if (days <= 10) return "watch";
-  return "risk";
-}
-
-function coverageStatus(count: number | undefined, strongThreshold: number, watchThreshold: number): QualityStatus {
-  if (typeof count !== "number" || !Number.isFinite(count)) return "neutral";
-  if (count >= strongThreshold) return "strong";
-  if (count >= watchThreshold) return "watch";
-  return "risk";
-}
-
-function qualityLabel(status: QualityStatus) {
-  if (status === "strong") return "正常";
-  if (status === "watch") return "觀察";
-  if (status === "risk") return "異常";
-  return "未知";
-}
-
-function qualityClass(status: QualityStatus) {
-  if (status === "strong") return "border-emerald-500/20 bg-emerald-950/10";
-  if (status === "watch") return "border-amber-500/25 bg-amber-950/10";
-  if (status === "risk") return "border-rose-500/25 bg-rose-950/10";
-  return "border-slate-800 bg-slate-900/60";
-}
-
-function qualityBadgeClass(status: QualityStatus) {
-  if (status === "strong") return "bg-emerald-500/15 text-emerald-200";
-  if (status === "watch") return "bg-amber-500/15 text-amber-200";
-  if (status === "risk") return "bg-rose-500/15 text-rose-200";
-  return "bg-slate-800 text-slate-300";
-}
-
-function decisionSignalLabel(signal: AssetDecisionSignal) {
-  if (signal === "candidate") return "候選";
-  if (signal === "watch") return "觀察";
-  if (signal === "risk") return "風險";
-  return "中性";
-}
-
-function decisionSignalClass(signal: AssetDecisionSignal) {
-  if (signal === "candidate") return "bg-emerald-500/15 text-emerald-200";
-  if (signal === "watch") return "bg-amber-500/15 text-amber-200";
-  if (signal === "risk") return "bg-rose-500/15 text-rose-200";
-  return "bg-slate-800 text-slate-300";
 }
 
 function csvCell(value: unknown) {
@@ -408,110 +340,6 @@ function parseSymbolList(value: string) {
       return true;
     })
     .slice(0, 12);
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
-}
-
-function comparisonRowFromProfile(profile: BigQueryAssetProfileResponse): AssetComparisonRow {
-  const freshnessDays = daysSinceDate(profile.summary.latest_date);
-  const missingRows = profile.summary.missing_selected_price_rows;
-  const freshness = freshnessStatus(freshnessDays);
-  const qualityStatus: QualityStatus =
-    freshness === "risk" || missingRows > 5
-      ? "risk"
-      : freshness === "watch" || missingRows > 0
-        ? "watch"
-        : "strong";
-  const annualizedReturn = profile.metrics.annualizedReturn;
-  const annualizedVolatility = profile.metrics.annualizedVolatility;
-  const maxDrawdown = profile.metrics.maxDrawdown;
-  const returnScore = typeof annualizedReturn === "number" ? clamp(annualizedReturn * 120, -30, 35) : 0;
-  const volatilityPenalty =
-    typeof annualizedVolatility === "number" ? clamp(annualizedVolatility * 60, 0, 25) : 10;
-  const drawdownPenalty = typeof maxDrawdown === "number" ? clamp(Math.abs(maxDrawdown) * 70, 0, 30) : 10;
-  const freshnessPenalty = freshnessDays === null ? 8 : freshnessDays > 10 ? 18 : freshnessDays > 3 ? 8 : 0;
-  const missingPenalty = missingRows > 5 ? 12 : missingRows > 0 ? 5 : 0;
-  const score = Math.round(clamp(50 + returnScore - volatilityPenalty - drawdownPenalty - freshnessPenalty - missingPenalty, 0, 100));
-  const riskAdjustedReturn =
-    typeof annualizedReturn === "number" &&
-    typeof annualizedVolatility === "number" &&
-    annualizedVolatility > 0
-      ? annualizedReturn / annualizedVolatility
-      : null;
-  const signal: AssetDecisionSignal =
-    qualityStatus === "risk" || score < 40
-      ? "risk"
-      : score >= 70 && qualityStatus === "strong"
-        ? "candidate"
-        : score >= 55
-          ? "watch"
-          : "neutral";
-  const signalNote =
-    signal === "candidate"
-      ? "報酬、風險與資料品質相對較佳"
-      : signal === "watch"
-        ? "具備可比性，但仍需檢查波動或資料品質"
-        : signal === "risk"
-          ? "資料品質或風險報酬條件偏弱"
-          : "暫無明確優勢";
-
-  return {
-    symbol: profile.symbol,
-    latestDate: profile.summary.latest_date,
-    rowCount: profile.summary.row_count,
-    latestPrice: profile.metrics.latestPrice,
-    totalReturn: profile.metrics.totalReturn,
-    annualizedReturn: profile.metrics.annualizedReturn,
-    annualizedVolatility: profile.metrics.annualizedVolatility,
-    maxDrawdown: profile.metrics.maxDrawdown,
-    freshnessDays,
-    qualityStatus,
-    riskAdjustedReturn,
-    score,
-    signal,
-    signalNote,
-  };
-}
-
-function assetComparisonCsv(rows: AssetComparisonRow[], priceBasis: "adjusted" | "raw") {
-  const header = [
-    "symbol",
-    "price_basis",
-    "latest_date",
-    "row_count",
-    "latest_price",
-    "total_return",
-    "annualized_return",
-    "annualized_volatility",
-    "max_drawdown",
-    "freshness_days",
-    "quality_status",
-    "risk_adjusted_return",
-    "score",
-    "signal",
-    "signal_note",
-  ];
-  const csvRows = rows.map((row) => [
-    row.symbol,
-    priceBasis,
-    row.latestDate ?? "",
-    row.rowCount,
-    row.latestPrice ?? "",
-    row.totalReturn ?? "",
-    row.annualizedReturn ?? "",
-    row.annualizedVolatility ?? "",
-    row.maxDrawdown ?? "",
-    row.freshnessDays ?? "",
-    row.qualityStatus,
-    row.riskAdjustedReturn ?? "",
-    row.score,
-    row.signal,
-    row.signalNote,
-  ]);
-
-  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
 function allocationModeLabel(mode: AllocationMode) {
@@ -866,25 +694,6 @@ function combinedExecutionStatus(statuses: ExecutionReviewStatus[]): ExecutionRe
   if (statuses.some((status) => status === "block")) return "block";
   if (statuses.some((status) => status === "watch")) return "watch";
   return "pass";
-}
-
-function averageComparisonMetric(rows: AssetComparisonRow[], selector: (row: AssetComparisonRow) => number | null) {
-  const values = rows.map(selector).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
-  if (!values.length) return null;
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
-}
-
-function comparisonSortLabel(sortKey: AssetComparisonSortKey) {
-  if (sortKey === "score") return "分數高到低";
-  if (sortKey === "annualizedReturn") return "年化報酬高到低";
-  if (sortKey === "riskAdjustedReturn") return "風險調整報酬高到低";
-  if (sortKey === "annualizedVolatility") return "波動低到高";
-  if (sortKey === "maxDrawdown") return "回撤低到高";
-  return "資料新鮮優先";
-}
-
-function comparisonSignalFilterLabel(signal: AssetDecisionSignal | "all") {
-  return signal === "all" ? "全部" : decisionSignalLabel(signal);
 }
 
 function assetComparisonMemo(
@@ -1693,22 +1502,6 @@ function assetComparisonMemo(
     "- 此摘要只依 BigQuery daily_prices 的歷史價格計算，尚未納入估值、產業、流動性、配息、匯率與交易成本。",
     "- 分數是研究排序工具，不是買賣建議；正式決策前仍需人工覆核。",
   ].join("\n");
-}
-
-function sortComparisonRows(rows: AssetComparisonRow[], sortKey: AssetComparisonSortKey) {
-  const sortedRows = [...rows];
-
-  return sortedRows.sort((left, right) => {
-    if (sortKey === "annualizedVolatility" || sortKey === "maxDrawdown" || sortKey === "freshnessDays") {
-      const leftValue = sortKey === "maxDrawdown" ? Math.abs(left.maxDrawdown ?? Infinity) : left[sortKey] ?? Infinity;
-      const rightValue = sortKey === "maxDrawdown" ? Math.abs(right.maxDrawdown ?? Infinity) : right[sortKey] ?? Infinity;
-      return leftValue - rightValue;
-    }
-
-    const leftValue = left[sortKey] ?? -Infinity;
-    const rightValue = right[sortKey] ?? -Infinity;
-    return rightValue - leftValue;
-  });
 }
 
 export function MarketDataPanel() {
