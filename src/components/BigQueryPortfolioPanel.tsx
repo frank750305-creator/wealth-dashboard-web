@@ -6,6 +6,7 @@ import { analyzePortfolioFromBigQuery, fetchBigQueryAssets, optimizePortfolioFro
 import type { BigQueryAsset, PortfolioAnalysisResponse, PortfolioOptimizationResponse } from "@/types/market";
 import { BigQueryPortfolioHeader } from "./BigQueryPortfolioHeader";
 import { BigQueryPortfolioPresetBar } from "./BigQueryPortfolioPresetBar";
+import { BigQueryPortfolioSettingsPanel } from "./BigQueryPortfolioSettingsPanel";
 import { BigQueryPortfolioSnapshotBar } from "./BigQueryPortfolioSnapshotBar";
 import { BigQueryPortfolioStatusNotices } from "./BigQueryPortfolioStatusNotices";
 
@@ -2787,175 +2788,41 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
           )}
         </div>
 
-        <div className="grid grid-cols-2 gap-3 text-xs">
-          <label className="space-y-1 col-span-2">
-            <span className="text-slate-500">Benchmark</span>
-            <input
-              value={benchmarkSymbol}
-              list={hasBigQueryCredentials ? assetOptionListId : undefined}
-              onChange={(event) => {
-                setBenchmarkSymbol(event.target.value);
-                setAssetQuery(event.target.value);
-              }}
-              className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-2 text-slate-100"
-            />
-          </label>
-          <label className="space-y-1 col-span-2">
-            <span className="text-slate-500">投組總金額 TWD</span>
-            <input
-              type="number"
-              min={0}
-              step={10000}
-              value={portfolioValue}
-              onChange={(event) => handlePortfolioValueChange(Number(event.target.value))}
-              className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-2 text-slate-100 font-mono"
-            />
-          </label>
-          <label className="space-y-1 col-span-2">
-            <span className="text-slate-500">交易成本 bps</span>
-            <input
-              type="number"
-              min={0}
-              step={1}
-              value={transactionCostBps}
-              onChange={(event) => handleTransactionCostBpsChange(Number(event.target.value))}
-              className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-2 text-slate-100 font-mono"
-            />
-          </label>
-          <label className="space-y-1 col-span-2">
-            <span className="text-slate-500">最小交易金額 TWD</span>
-            <input
-              type="number"
-              min={0}
-              step={1000}
-              value={minTradeAmount}
-              onChange={(event) => handleMinTradeAmountChange(Number(event.target.value))}
-              className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-2 text-slate-100 font-mono"
-            />
-          </label>
-          <label className="space-y-1">
-            <span className="text-slate-500">要求報酬 %</span>
-            <input
-              type="number"
-              min={0}
-              step={0.5}
-              value={requiredReturn}
-              onChange={(event) => setRequiredReturn(normalizePercentSetting(event.target.value, defaultRequiredReturn))}
-              className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-2 text-slate-100 font-mono"
-            />
-          </label>
-          <label className="space-y-1">
-            <span className="text-slate-500">最大損失 %</span>
-            <input
-              type="number"
-              min={0}
-              step={1}
-              value={maxLossTolerance}
-              onChange={(event) => setMaxLossTolerance(normalizePercentSetting(event.target.value, defaultMaxLossTolerance))}
-              className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-2 text-slate-100 font-mono"
-            />
-          </label>
-          <label className="space-y-1">
-            <span className="text-slate-500">信賴區間</span>
-            <select
-              value={confidenceLevel}
-              onChange={(event) => setConfidenceLevel(normalizeConfidenceLevel(event.target.value))}
-              className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-2 text-slate-100"
-            >
-              <option value={0.9}>90%</option>
-              <option value={0.95}>95%</option>
-              <option value={0.99}>99%</option>
-            </select>
-          </label>
-          <label className="space-y-1">
-            <span className="text-slate-500">無風險利率 %</span>
-            <input
-              type="number"
-              min={0}
-              step={0.25}
-              value={riskFreeRate}
-              onChange={(event) => setRiskFreeRate(normalizePercentSetting(event.target.value, defaultRiskFreeRate))}
-              className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-2 text-slate-100 font-mono"
-            />
-          </label>
-          <label className="space-y-1">
-            <span className="text-slate-500">起日</span>
-            <input
-              type="date"
-              value={startDate}
-              onChange={(event) => setStartDate(event.target.value)}
-              className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-2 text-slate-100"
-            />
-          </label>
-          <label className="space-y-1">
-            <span className="text-slate-500">迄日</span>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(event) => setEndDate(event.target.value)}
-              className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-2 text-slate-100"
-            />
-          </label>
-          <label className="space-y-1">
-            <span className="text-slate-500">價格基準</span>
-            <select
-              value={priceBasis}
-              onChange={(event) => setPriceBasis(event.target.value as "adjusted" | "raw")}
-              className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-2 text-slate-100"
-            >
-              <option value="adjusted">Adj</option>
-              <option value="raw">Raw</option>
-            </select>
-          </label>
-          <label className="space-y-1">
-            <span className="text-slate-500">計價</span>
-            <select
-              value={pricingCurrency}
-              onChange={(event) => setPricingCurrency(event.target.value as "original" | "TWD")}
-              className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-2 text-slate-100"
-            >
-              <option value="TWD">TWD</option>
-              <option value="original">原幣</option>
-            </select>
-          </label>
-          <label className="space-y-1 col-span-2">
-            <span className="text-slate-500">模式</span>
-            <select
-              value={mode}
-              onChange={(event) => setMode(event.target.value as "overlap" | "long_rebuild")}
-              className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-2 text-slate-100"
-            >
-              <option value="overlap">近期交集法</option>
-              <option value="long_rebuild">長線重建法</option>
-            </select>
-          </label>
-          <label className="space-y-1 col-span-2">
-            <span className="text-slate-500">AI 策略</span>
-            <select
-              value={optimizationMode}
-              onChange={(event) =>
-                setOptimizationMode(event.target.value as "max_sharpe" | "min_vol" | "max_return" | "target_vol")
-              }
-              className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-2 text-slate-100"
-            >
-              <option value="max_sharpe">最大夏普</option>
-              <option value="min_vol">最小風險</option>
-              <option value="max_return">最大報酬</option>
-              <option value="target_vol">指定波動率</option>
-            </select>
-          </label>
-          {optimizationMode === "target_vol" && (
-            <label className="space-y-1 col-span-2">
-              <span className="text-slate-500">目標波動率 %</span>
-              <input
-                type="number"
-                value={targetVolatility}
-                onChange={(event) => setTargetVolatility(Number(event.target.value))}
-                className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-2 text-slate-100 font-mono"
-              />
-            </label>
-          )}
-        </div>
+        <BigQueryPortfolioSettingsPanel
+          hasBigQueryCredentials={hasBigQueryCredentials}
+          assetOptionListId={assetOptionListId}
+          benchmarkSymbol={benchmarkSymbol}
+          portfolioValue={portfolioValue}
+          transactionCostBps={transactionCostBps}
+          minTradeAmount={minTradeAmount}
+          requiredReturn={requiredReturn}
+          maxLossTolerance={maxLossTolerance}
+          confidenceLevel={confidenceLevel}
+          riskFreeRate={riskFreeRate}
+          startDate={startDate}
+          endDate={endDate}
+          priceBasis={priceBasis}
+          pricingCurrency={pricingCurrency}
+          mode={mode}
+          optimizationMode={optimizationMode}
+          targetVolatility={targetVolatility}
+          onBenchmarkSymbolChange={setBenchmarkSymbol}
+          onAssetQueryChange={setAssetQuery}
+          onPortfolioValueChange={handlePortfolioValueChange}
+          onTransactionCostBpsChange={handleTransactionCostBpsChange}
+          onMinTradeAmountChange={handleMinTradeAmountChange}
+          onRequiredReturnChange={(value) => setRequiredReturn(normalizePercentSetting(value, defaultRequiredReturn))}
+          onMaxLossToleranceChange={(value) => setMaxLossTolerance(normalizePercentSetting(value, defaultMaxLossTolerance))}
+          onConfidenceLevelChange={(value) => setConfidenceLevel(normalizeConfidenceLevel(value))}
+          onRiskFreeRateChange={(value) => setRiskFreeRate(normalizePercentSetting(value, defaultRiskFreeRate))}
+          onStartDateChange={setStartDate}
+          onEndDateChange={setEndDate}
+          onPriceBasisChange={setPriceBasis}
+          onPricingCurrencyChange={setPricingCurrency}
+          onModeChange={setMode}
+          onOptimizationModeChange={setOptimizationMode}
+          onTargetVolatilityChange={setTargetVolatility}
+        />
       </div>
 
       <BigQueryPortfolioStatusNotices
