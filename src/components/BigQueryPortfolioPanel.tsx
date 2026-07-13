@@ -4,6 +4,7 @@ import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Bar, BarChart, CartesianGrid, ComposedChart, Line, LineChart, ResponsiveContainer, Scatter, Tooltip, XAxis, YAxis } from "recharts";
 import { analyzePortfolioFromBigQuery, fetchBigQueryAssets, optimizePortfolioFromBigQuery } from "@/lib/marketApi";
 import type { BigQueryAsset, PortfolioAnalysisResponse, PortfolioOptimizationResponse } from "@/types/market";
+import { BigQueryPortfolioAssetTools } from "./BigQueryPortfolioAssetTools";
 import { BigQueryPortfolioHeader } from "./BigQueryPortfolioHeader";
 import { BigQueryPortfolioPresetBar } from "./BigQueryPortfolioPresetBar";
 import { BigQueryPortfolioSettingsPanel } from "./BigQueryPortfolioSettingsPanel";
@@ -2530,112 +2531,26 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
             </div>
           ))}
 
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                onClick={() => setRows((currentRows) => [...currentRows, makeRow()])}
-                className="w-9 h-9 rounded-md bg-slate-950 border border-slate-700 text-cyan-300 hover:border-cyan-600"
-                title="新增商品"
-              >
-                +
-              </button>
-              <button
-                onClick={handleNormalizeWeights}
-                className="h-9 px-3 rounded-md bg-slate-950 border border-slate-700 text-[11px] font-bold text-slate-300 hover:border-cyan-600 hover:text-cyan-200"
-              >
-                正規化
-              </button>
-              <button
-                onClick={handleEqualWeight}
-                className="h-9 px-3 rounded-md bg-slate-950 border border-slate-700 text-[11px] font-bold text-slate-300 hover:border-cyan-600 hover:text-cyan-200"
-              >
-                等權
-              </button>
-              <button
-                onClick={handleMergeDuplicateSymbols}
-                className="h-9 px-3 rounded-md bg-slate-950 border border-slate-700 text-[11px] font-bold text-slate-300 hover:border-cyan-600 hover:text-cyan-200"
-              >
-                合併
-              </button>
-              <button
-                onClick={handleClearBlankRows}
-                className="h-9 px-3 rounded-md bg-slate-950 border border-slate-700 text-[11px] font-bold text-slate-300 hover:border-cyan-600 hover:text-cyan-200"
-              >
-                清空白
-              </button>
-              <button
-                onClick={handleSortByWeight}
-                className="h-9 px-3 rounded-md bg-slate-950 border border-slate-700 text-[11px] font-bold text-slate-300 hover:border-cyan-600 hover:text-cyan-200"
-              >
-                排序
-              </button>
-              <button
-                onClick={handleSortBySymbol}
-                className="h-9 px-3 rounded-md bg-slate-950 border border-slate-700 text-[11px] font-bold text-slate-300 hover:border-cyan-600 hover:text-cyan-200"
-              >
-                代號
-              </button>
-              <button
-                onClick={handleInferCurrencies}
-                className="h-9 px-3 rounded-md bg-slate-950 border border-slate-700 text-[11px] font-bold text-slate-300 hover:border-cyan-600 hover:text-cyan-200"
-              >
-                幣別
-              </button>
-              <button
-                onClick={handleCopySymbols}
-                className="h-9 px-3 rounded-md bg-slate-950 border border-slate-700 text-[11px] font-bold text-slate-300 hover:border-cyan-600 hover:text-cyan-200"
-              >
-                {symbolCopyStatus === "copied" ? "已複製" : "複代號"}
-              </button>
-              <button
-                onClick={handleCopyConfiguration}
-                className="h-9 px-3 rounded-md bg-slate-950 border border-slate-700 text-[11px] font-bold text-slate-300 hover:border-cyan-600 hover:text-cyan-200"
-              >
-                {configCopyStatus === "copied" ? "已複製" : "複配置"}
-              </button>
-            </div>
-            <div className="text-right">
-              <p className={`text-xs font-mono ${Math.abs(totalWeight - 100) < 0.01 ? "text-emerald-300" : "text-amber-300"}`}>
-                {totalWeight.toFixed(1)}%
-              </p>
-              <p className="text-[10px] text-slate-600">權重總和</p>
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-slate-800 bg-slate-950 p-3 space-y-2">
-            <div className="flex items-center justify-between gap-3 text-[11px]">
-              <span className="text-slate-500">批次配置</span>
-              <span className="font-mono text-slate-600">CSV / TSV</span>
-            </div>
-            <textarea
-              value={bulkConfigText}
-              onChange={(event) => setBulkConfigText(event.target.value)}
-              rows={3}
-              placeholder={"symbol,weight_percent,currency\n0050.TW,50,TWD\nSPY,50,USD"}
-              className="w-full resize-y rounded-md border border-slate-800 bg-slate-900 px-2 py-2 font-mono text-[11px] text-slate-100 outline-none placeholder:text-slate-700 focus:border-cyan-600"
-            />
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={handleApplyBulkConfiguration}
-                disabled={!bulkConfigText.trim()}
-                className="h-9 px-3 rounded-md bg-cyan-700 text-[11px] font-bold text-white hover:bg-cyan-600 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
-              >
-                套用貼上
-              </button>
-              <button
-                onClick={handleExportConfigurationCsv}
-                className="h-9 px-3 rounded-md border border-slate-700 bg-slate-900 text-[11px] font-bold text-slate-300 hover:border-cyan-600 hover:text-cyan-200"
-              >
-                下載 CSV
-              </button>
-              <button
-                onClick={handleResetConfiguration}
-                className="h-9 px-3 rounded-md border border-slate-700 bg-slate-900 text-[11px] font-bold text-slate-300 hover:border-amber-500 hover:text-amber-200"
-              >
-                重設預設
-              </button>
-            </div>
-          </div>
+          <BigQueryPortfolioAssetTools
+            totalWeight={totalWeight}
+            symbolCopyStatus={symbolCopyStatus}
+            configCopyStatus={configCopyStatus}
+            bulkConfigText={bulkConfigText}
+            onBulkConfigTextChange={setBulkConfigText}
+            onAddRow={() => setRows((currentRows) => [...currentRows, makeRow()])}
+            onNormalizeWeights={handleNormalizeWeights}
+            onEqualWeight={handleEqualWeight}
+            onMergeDuplicateSymbols={handleMergeDuplicateSymbols}
+            onClearBlankRows={handleClearBlankRows}
+            onSortByWeight={handleSortByWeight}
+            onSortBySymbol={handleSortBySymbol}
+            onInferCurrencies={handleInferCurrencies}
+            onCopySymbols={handleCopySymbols}
+            onCopyConfiguration={handleCopyConfiguration}
+            onApplyBulkConfiguration={handleApplyBulkConfiguration}
+            onExportConfigurationCsv={handleExportConfigurationCsv}
+            onResetConfiguration={handleResetConfiguration}
+          />
 
           <div className="rounded-lg border border-slate-800 bg-slate-950 p-3 space-y-3">
             <div className="flex items-center justify-between gap-3">
