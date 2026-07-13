@@ -2,6 +2,11 @@ import { useEffect, useState } from "react";
 import { useMarketSources } from "@/hooks/useMarketSources";
 import { fetchBigQueryAssetProfile, fetchBigQueryAssets } from "@/lib/marketApi";
 import {
+  buildMarketAlertEvents,
+  marketAlertCsv,
+  type MarketAlertEvent,
+} from "@/lib/marketAlertEvents";
+import {
   buildDataLicenseComplianceItems,
   dataLicenseComplianceCsv,
   type DataLicenseComplianceItem,
@@ -226,16 +231,6 @@ type DecisionFunnelStage = {
   conversion: string;
   owner: string;
   note: string;
-};
-
-type MarketAlertEvent = {
-  source: string;
-  title: string;
-  status: ExecutionReviewStatus;
-  priority: ExecutionHandoffPriority;
-  owner: string;
-  evidence: string;
-  action: string;
 };
 
 type DataPipelineHealthItem = {
@@ -4269,150 +4264,6 @@ function usageBillingCsv(rows: UsageBillingItem[]) {
     row.exportUsage,
     row.monthlyRevenue,
     row.invoiceStatus,
-    executionReviewLabel(row.status),
-    row.owner,
-    row.evidence,
-    row.action,
-  ]);
-
-  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
-}
-
-function buildMarketAlertEvents({
-  coverageUniverseItems,
-  dataContractItems,
-  dataPipelineHealthItems,
-  qualityCards,
-  decisionFunnelStages,
-  operatingKriItems,
-  platformExceptionItems,
-  slaEscalationItems,
-  riskOwner,
-  decisionApprover,
-}: {
-  coverageUniverseItems: CoverageUniverseItem[];
-  dataContractItems: DataContractItem[];
-  dataPipelineHealthItems: DataPipelineHealthItem[];
-  qualityCards: Array<{ label: string; value: string; status: QualityStatus; note: string }>;
-  decisionFunnelStages: DecisionFunnelStage[];
-  operatingKriItems: OperatingKriItem[];
-  platformExceptionItems: PlatformExceptionItem[];
-  slaEscalationItems: SlaEscalationItem[];
-  riskOwner: string;
-  decisionApprover: string;
-}): MarketAlertEvent[] {
-  const cleanRiskOwner = riskOwner.trim() || "風控";
-  const cleanApprover = decisionApprover.trim() || "投委會";
-  const coverageAlerts = coverageUniverseItems
-    .filter((item) => item.status !== "pass")
-    .map((item) => ({
-      source: "可投資宇宙",
-      title: item.label,
-      status: item.status,
-      priority: marketAlertPriorityFromStatus(item.status),
-      owner: item.owner,
-      evidence: `${item.count} / ${item.target}`,
-      action: item.action,
-    }));
-  const contractAlerts = dataContractItems
-    .filter((item) => item.status !== "pass")
-    .map((item) => ({
-      source: "資料合約",
-      title: item.table,
-      status: item.status,
-      priority: marketAlertPriorityFromStatus(item.status),
-      owner: item.owner,
-      evidence: item.missingColumns.length ? `缺欄位 ${item.missingColumns.join(", ")}` : item.freshness,
-      action: item.action,
-    }));
-  const pipelineAlerts = dataPipelineHealthItems
-    .filter((item) => item.status !== "pass")
-    .map((item) => ({
-      source: "資料管線",
-      title: item.label,
-      status: item.status,
-      priority: marketAlertPriorityFromStatus(item.status),
-      owner: item.owner,
-      evidence: item.value,
-      action: item.action,
-    }));
-  const dataAlerts = qualityCards
-    .filter((card) => card.status !== "strong" && card.status !== "neutral")
-    .map((card) => {
-      const status = qualityToExecutionStatus(card.status);
-
-      return {
-        source: "資料品質",
-        title: card.label,
-        status,
-        priority: marketAlertPriorityFromStatus(status),
-        owner: cleanRiskOwner,
-        evidence: card.value,
-        action: card.note,
-      };
-    });
-  const funnelAlerts = decisionFunnelStages
-    .filter((stage) => stage.status !== "pass")
-    .map((stage) => ({
-      source: "決策漏斗",
-      title: stage.label,
-      status: stage.status,
-      priority: marketAlertPriorityFromStatus(stage.status),
-      owner: stage.owner,
-      evidence: `${stage.value} / ${stage.conversion}`,
-      action: stage.note,
-    }));
-  const kriAlerts = operatingKriItems
-    .filter((item) => item.status !== "pass")
-    .map((item) => ({
-      source: "營運 KRI",
-      title: item.label,
-      status: item.status,
-      priority: marketAlertPriorityFromStatus(item.status),
-      owner: item.owner,
-      evidence: item.value,
-      action: item.note,
-    }));
-  const slaAlerts = slaEscalationItems
-    .filter((item) => item.tier !== "routine" || item.status !== "pass")
-    .map((item) => ({
-      source: "SLA 升級",
-      title: item.trigger,
-      status: item.status,
-      priority: item.priority,
-      owner: item.owner,
-      evidence: `${slaEscalationTierLabel(item.tier)} / ${item.due}`,
-      action: item.action,
-    }));
-  const exceptionAlerts = platformExceptionItems.map((item) => ({
-    source: item.source,
-    title: item.item,
-    status: item.status,
-    priority: item.priority,
-    owner: item.owner || cleanApprover,
-    evidence: item.evidence,
-    action: item.nextAction,
-  }));
-  const priorityRank: Record<ExecutionHandoffPriority, number> = { high: 0, medium: 1, low: 2 };
-  const statusRank: Record<ExecutionReviewStatus, number> = { block: 0, watch: 1, pass: 2 };
-
-  return [...coverageAlerts, ...contractAlerts, ...pipelineAlerts, ...dataAlerts, ...funnelAlerts, ...kriAlerts, ...slaAlerts, ...exceptionAlerts]
-    .sort(
-      (left, right) =>
-        priorityRank[left.priority] - priorityRank[right.priority] ||
-        statusRank[left.status] - statusRank[right.status] ||
-        left.source.localeCompare(right.source, "zh-Hant") ||
-        left.title.localeCompare(right.title, "zh-Hant"),
-    )
-    .slice(0, 30);
-}
-
-function marketAlertCsv(rows: MarketAlertEvent[]) {
-  const header = ["source", "title", "priority", "status", "owner", "evidence", "action"];
-  const csvRows = rows.map((row) => [
-    row.source,
-    row.title,
-    executionHandoffPriorityLabel(row.priority),
     executionReviewLabel(row.status),
     row.owner,
     row.evidence,
