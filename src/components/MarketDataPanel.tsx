@@ -2,6 +2,13 @@ import { useEffect, useState } from "react";
 import { useMarketSources } from "@/hooks/useMarketSources";
 import { fetchBigQueryAssetProfile, fetchBigQueryAssets } from "@/lib/marketApi";
 import {
+  buildCustomerSuccessHealthItems,
+  customerHealthStageClass,
+  customerHealthStageLabel,
+  customerSuccessHealthCsv,
+  type CustomerSuccessHealthItem,
+} from "@/lib/customerSuccessHealth";
+import {
   buildRevenueForecastItems,
   revenueForecastCsv,
   revenueForecastStageClass,
@@ -409,23 +416,6 @@ type ProductReleaseGateItem = {
   evidence: string;
   blocker: string;
   decision: string;
-  nextAction: string;
-};
-
-type CustomerHealthStage = "expand" | "healthy" | "watch" | "risk";
-
-type CustomerSuccessHealthItem = {
-  workspace: string;
-  segment: string;
-  plan: string;
-  healthStage: CustomerHealthStage;
-  status: ExecutionReviewStatus;
-  healthScore: number;
-  revenueSignal: string;
-  adoptionSignal: string;
-  riskSignal: string;
-  expansionSignal: string;
-  owner: string;
   nextAction: string;
 };
 
@@ -5061,169 +5051,6 @@ function productReleaseGateCsv(rows: ProductReleaseGateItem[]) {
     row.evidence,
     row.blocker,
     row.decision,
-    row.nextAction,
-  ]);
-
-  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
-}
-
-function customerHealthStageLabel(stage: CustomerHealthStage) {
-  if (stage === "expand") return "可擴充";
-  if (stage === "healthy") return "健康";
-  if (stage === "watch") return "觀察";
-  return "續約風險";
-}
-
-function customerHealthStageClass(stage: CustomerHealthStage) {
-  if (stage === "expand") return "border-sky-500/40 bg-sky-500/10 text-sky-300";
-  if (stage === "healthy") return "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
-  if (stage === "watch") return "border-amber-500/40 bg-amber-500/10 text-amber-300";
-  return "border-rose-500/40 bg-rose-500/10 text-rose-300";
-}
-
-function customerHealthStatus(score: number): ExecutionReviewStatus {
-  if (score >= 80) return "pass";
-  if (score >= 60) return "watch";
-  return "block";
-}
-
-function customerHealthStage(score: number, plan: string): CustomerHealthStage {
-  if (score >= 90 && !["Free", "Internal", "Internal Admin"].includes(plan)) return "expand";
-  if (score >= 80) return "healthy";
-  if (score >= 60) return "watch";
-  return "risk";
-}
-
-function statusPenalty(status: ExecutionReviewStatus, blockPenalty: number, watchPenalty: number) {
-  if (status === "block") return blockPenalty;
-  if (status === "watch") return watchPenalty;
-  return 0;
-}
-
-function buildCustomerSuccessHealthItems({
-  clientWorkspaceProvisioningItems,
-  usageBillingItems,
-  productReleaseGateItems,
-  incidentCommandItems,
-  usageBillingDecision,
-  dataLicenseComplianceDecision,
-  securityAuditDecision,
-  incidentCommandDecision,
-  riskOwner,
-  decisionOwner,
-  executionOwner,
-}: {
-  clientWorkspaceProvisioningItems: ClientWorkspaceProvisioningItem[];
-  usageBillingItems: UsageBillingItem[];
-  productReleaseGateItems: ProductReleaseGateItem[];
-  incidentCommandItems: IncidentCommandItem[];
-  usageBillingDecision: ExecutionReviewStatus;
-  dataLicenseComplianceDecision: ExecutionReviewStatus;
-  securityAuditDecision: ExecutionReviewStatus;
-  incidentCommandDecision: ExecutionReviewStatus;
-  riskOwner: string;
-  decisionOwner: string;
-  executionOwner: string;
-}): CustomerSuccessHealthItem[] {
-  const cleanRiskOwner = riskOwner.trim() || "風控";
-  const cleanDecisionOwner = decisionOwner.trim() || "研究";
-  const cleanExecutionOwner = executionOwner.trim() || "交易營運";
-  const billingByWorkspace = new Map(usageBillingItems.map((item) => [item.workspace, item]));
-  const productionProducts = productReleaseGateItems.filter((item) => item.releaseStage === "production").length;
-  const pilotProducts = productReleaseGateItems.filter((item) => item.releaseStage === "pilot").length;
-  const holdProducts = productReleaseGateItems.filter((item) => item.releaseStage === "hold").length;
-  const openIncidents = incidentCommandItems.filter((item) => item.status !== "pass").length;
-  const highIncidents = incidentCommandItems.filter((item) => item.severity === "high").length;
-  const controlPenalty =
-    statusPenalty(dataLicenseComplianceDecision, 12, 5) +
-    statusPenalty(securityAuditDecision, 14, 6) +
-    statusPenalty(incidentCommandDecision, 12, 5);
-
-  return clientWorkspaceProvisioningItems
-    .map((workspace) => {
-      const billing = billingByWorkspace.get(workspace.workspace);
-      const incidentPenalty = Math.min(22, highIncidents * 5 + openIncidents * 2);
-      const releasePenalty = Math.min(15, holdProducts * 4 + pilotProducts);
-      const score = Math.round(
-        clamp(
-          100 -
-            statusPenalty(workspace.status, 24, 10) -
-            statusPenalty(billing?.status ?? usageBillingDecision, 18, 8) -
-            controlPenalty -
-            incidentPenalty -
-            releasePenalty,
-          0,
-          100,
-        ),
-      );
-      const stage = customerHealthStage(score, workspace.plan);
-      const status = customerHealthStatus(score);
-      const isInternal = workspace.plan.includes("Internal") || workspace.segment.includes("內部");
-      const isTrading = workspace.workspace.includes("Trading");
-      const owner = isTrading ? cleanExecutionOwner : isInternal ? cleanRiskOwner : cleanDecisionOwner;
-      const revenueSignal = billing
-        ? `${billing.monthlyRevenue} / ${billing.invoiceStatus}`
-        : workspace.billing;
-      const adoptionSignal = `${workspace.seats} 席 / ${workspace.dataPackages}`;
-      const riskSignal =
-        highIncidents > 0
-          ? `${highIncidents} 個高優先事件需先關閉`
-          : status !== "pass"
-            ? "權限、帳務、授權或安全仍需觀察"
-            : "低風險，可維持例行追蹤";
-      const expansionSignal =
-        stage === "expand"
-          ? `${productionProducts} 個產品可正式上線，可評估加購或升級`
-          : stage === "healthy"
-            ? `${productionProducts} 個正式產品 / ${pilotProducts} 個試點產品`
-            : stage === "watch"
-              ? "先完成 onboarding 與使用深度，再談擴充"
-              : "優先保留與修復，不進行擴售";
-      const nextAction =
-        stage === "expand"
-          ? "安排 QBR，提出 API、席位或資料包擴充方案"
-          : stage === "healthy"
-            ? "維持月度健康檢查與使用回顧"
-            : stage === "watch"
-              ? "建立 14 天 onboarding / usage improvement plan"
-              : "由客戶成功與風控共同處理續約風險";
-
-      return {
-        workspace: workspace.workspace,
-        segment: workspace.segment,
-        plan: workspace.plan,
-        healthStage: stage,
-        status,
-        healthScore: score,
-        revenueSignal,
-        adoptionSignal,
-        riskSignal,
-        expansionSignal,
-        owner,
-        nextAction,
-      };
-    })
-    .sort(
-      (left, right) =>
-        left.healthScore - right.healthScore ||
-        left.workspace.localeCompare(right.workspace, "zh-Hant"),
-    );
-}
-
-function customerSuccessHealthCsv(rows: CustomerSuccessHealthItem[]) {
-  const header = ["workspace", "segment", "plan", "health_stage", "status", "health_score", "revenue_signal", "adoption_signal", "risk_signal", "expansion_signal", "owner", "next_action"];
-  const csvRows = rows.map((row) => [
-    row.workspace,
-    row.segment,
-    row.plan,
-    customerHealthStageLabel(row.healthStage),
-    executionReviewLabel(row.status),
-    row.healthScore,
-    row.revenueSignal,
-    row.adoptionSignal,
-    row.riskSignal,
-    row.expansionSignal,
-    row.owner,
     row.nextAction,
   ]);
 
