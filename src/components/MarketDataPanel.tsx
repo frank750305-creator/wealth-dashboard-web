@@ -153,6 +153,7 @@ import { CommercializationSection } from "./CommercializationSection";
 import { DataOperationsSection } from "./DataOperationsSection";
 import { EnterpriseReadinessSection } from "./EnterpriseReadinessSection";
 import { WatchlistControlsSection } from "./WatchlistControlsSection";
+import { WatchlistSummaryCards } from "./WatchlistSummaryCards";
 
 type SavedWatchlistPreset = {
   id: string;
@@ -2140,50 +2141,10 @@ export function MarketDataPanel() {
 
           {comparisonRows.length ? (
             <div className="space-y-3">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-                {[
-                  ["顯示商品", `${visibleComparisonRows.length} / ${comparisonRows.length} 檔`],
-                  [
-                    "平均年化報酬",
-                    formatPercent(
-                      visibleComparisonRows.reduce((sum, row) => sum + (row.annualizedReturn ?? 0), 0) /
-                        Math.max(1, visibleComparisonRows.filter((row) => row.annualizedReturn !== null).length),
-                    ),
-                  ],
-                  [
-                    "平均波動",
-                    formatPercent(
-                      visibleComparisonRows.reduce((sum, row) => sum + (row.annualizedVolatility ?? 0), 0) /
-                        Math.max(1, visibleComparisonRows.filter((row) => row.annualizedVolatility !== null).length),
-                    ),
-                  ],
-                  [
-                    "異常/觀察",
-                    `${visibleComparisonRows.filter((row) => row.qualityStatus !== "strong").length} 檔`,
-                  ],
-                  [
-                    "最高分",
-                    visibleComparisonRows.length
-                      ? `${visibleComparisonRows[0].symbol} · ${visibleComparisonRows[0].score}`
-                      : "--",
-                  ],
-                  [
-                    "候選",
-                    `${visibleComparisonRows.filter((row) => row.signal === "candidate").length} 檔`,
-                  ],
-                  [
-                    "風險",
-                    `${visibleComparisonRows.filter((row) => row.signal === "risk").length} 檔`,
-                  ],
-                ].map(([label, value]) => (
-                  <div key={label} className="rounded-md border border-slate-800 bg-slate-900/60 p-3 min-w-0">
-                    <p className="text-[11px] text-slate-600 truncate">{label}</p>
-                    <p className="mt-1 font-mono text-sm font-bold text-slate-100 truncate" title={value}>
-                      {value}
-                    </p>
-                  </div>
-                ))}
-              </div>
+              <WatchlistSummaryCards
+                comparisonRows={comparisonRows}
+                visibleComparisonRows={visibleComparisonRows}
+              />
 
               <section className="rounded-lg border border-slate-800 bg-slate-900/50 p-3 space-y-3">
                 <AllocationDraftSection
