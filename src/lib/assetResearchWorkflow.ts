@@ -201,6 +201,45 @@ export function assetComparisonCsv(rows: AssetComparisonRow[], priceBasis: "adju
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
+export function assetProfileCsv(profile: BigQueryAssetProfileResponse) {
+  const rows = [
+    ["section", "date", "name", "value"],
+    ["summary", "", "symbol", profile.symbol],
+    ["summary", "", "price_basis", profile.priceBasis],
+    ["summary", "", "first_date", profile.summary.first_date ?? ""],
+    ["summary", "", "latest_date", profile.summary.latest_date ?? ""],
+    ["summary", "", "row_count", profile.summary.row_count],
+    ["summary", "", "selected_price_rows", profile.summary.selected_price_rows],
+    ["summary", "", "missing_selected_price_rows", profile.summary.missing_selected_price_rows],
+    ["summary", "", "adjusted_price_rows", profile.summary.adjusted_price_rows],
+    ["summary", "", "raw_price_rows", profile.summary.raw_price_rows],
+    ...Object.entries(profile.metrics).map(([key, value]) => ["metric", "", key, value ?? ""]),
+    ...profile.recentPrices.map((point) => [
+      "recent_price",
+      point.date ?? "",
+      "selected_price",
+      point.selected_price ?? "",
+    ]),
+  ];
+
+  return rows.map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+export function parseSymbolList(value: string) {
+  const seen = new Set<string>();
+  return value
+    .split(/[\s,，、]+/)
+    .map((symbol) => symbol.trim())
+    .filter(Boolean)
+    .filter((symbol) => {
+      const key = symbol.toUpperCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 12);
+}
+
 export function averageComparisonMetric(rows: AssetComparisonRow[], selector: (row: AssetComparisonRow) => number | null) {
   const values = rows.map(selector).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
   if (!values.length) return null;
