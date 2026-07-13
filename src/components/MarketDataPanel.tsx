@@ -405,6 +405,23 @@ type ProductReleaseGateItem = {
   nextAction: string;
 };
 
+type CustomerHealthStage = "expand" | "healthy" | "watch" | "risk";
+
+type CustomerSuccessHealthItem = {
+  workspace: string;
+  segment: string;
+  plan: string;
+  healthStage: CustomerHealthStage;
+  status: ExecutionReviewStatus;
+  healthScore: number;
+  revenueSignal: string;
+  adoptionSignal: string;
+  riskSignal: string;
+  expansionSignal: string;
+  owner: string;
+  nextAction: string;
+};
+
 const statusMeta: Record<MarketSourceStatus, { label: string; className: string }> = {
   ready: {
     label: "可接 API",
@@ -5043,6 +5060,169 @@ function productReleaseGateCsv(rows: ProductReleaseGateItem[]) {
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
+function customerHealthStageLabel(stage: CustomerHealthStage) {
+  if (stage === "expand") return "可擴充";
+  if (stage === "healthy") return "健康";
+  if (stage === "watch") return "觀察";
+  return "續約風險";
+}
+
+function customerHealthStageClass(stage: CustomerHealthStage) {
+  if (stage === "expand") return "border-sky-500/40 bg-sky-500/10 text-sky-300";
+  if (stage === "healthy") return "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
+  if (stage === "watch") return "border-amber-500/40 bg-amber-500/10 text-amber-300";
+  return "border-rose-500/40 bg-rose-500/10 text-rose-300";
+}
+
+function customerHealthStatus(score: number): ExecutionReviewStatus {
+  if (score >= 80) return "pass";
+  if (score >= 60) return "watch";
+  return "block";
+}
+
+function customerHealthStage(score: number, plan: string): CustomerHealthStage {
+  if (score >= 90 && !["Free", "Internal", "Internal Admin"].includes(plan)) return "expand";
+  if (score >= 80) return "healthy";
+  if (score >= 60) return "watch";
+  return "risk";
+}
+
+function statusPenalty(status: ExecutionReviewStatus, blockPenalty: number, watchPenalty: number) {
+  if (status === "block") return blockPenalty;
+  if (status === "watch") return watchPenalty;
+  return 0;
+}
+
+function buildCustomerSuccessHealthItems({
+  clientWorkspaceProvisioningItems,
+  usageBillingItems,
+  productReleaseGateItems,
+  incidentCommandItems,
+  usageBillingDecision,
+  dataLicenseComplianceDecision,
+  securityAuditDecision,
+  incidentCommandDecision,
+  riskOwner,
+  decisionOwner,
+  executionOwner,
+}: {
+  clientWorkspaceProvisioningItems: ClientWorkspaceProvisioningItem[];
+  usageBillingItems: UsageBillingItem[];
+  productReleaseGateItems: ProductReleaseGateItem[];
+  incidentCommandItems: IncidentCommandItem[];
+  usageBillingDecision: ExecutionReviewStatus;
+  dataLicenseComplianceDecision: ExecutionReviewStatus;
+  securityAuditDecision: ExecutionReviewStatus;
+  incidentCommandDecision: ExecutionReviewStatus;
+  riskOwner: string;
+  decisionOwner: string;
+  executionOwner: string;
+}): CustomerSuccessHealthItem[] {
+  const cleanRiskOwner = riskOwner.trim() || "風控";
+  const cleanDecisionOwner = decisionOwner.trim() || "研究";
+  const cleanExecutionOwner = executionOwner.trim() || "交易營運";
+  const billingByWorkspace = new Map(usageBillingItems.map((item) => [item.workspace, item]));
+  const productionProducts = productReleaseGateItems.filter((item) => item.releaseStage === "production").length;
+  const pilotProducts = productReleaseGateItems.filter((item) => item.releaseStage === "pilot").length;
+  const holdProducts = productReleaseGateItems.filter((item) => item.releaseStage === "hold").length;
+  const openIncidents = incidentCommandItems.filter((item) => item.status !== "pass").length;
+  const highIncidents = incidentCommandItems.filter((item) => item.severity === "high").length;
+  const controlPenalty =
+    statusPenalty(dataLicenseComplianceDecision, 12, 5) +
+    statusPenalty(securityAuditDecision, 14, 6) +
+    statusPenalty(incidentCommandDecision, 12, 5);
+
+  return clientWorkspaceProvisioningItems
+    .map((workspace) => {
+      const billing = billingByWorkspace.get(workspace.workspace);
+      const incidentPenalty = Math.min(22, highIncidents * 5 + openIncidents * 2);
+      const releasePenalty = Math.min(15, holdProducts * 4 + pilotProducts);
+      const score = Math.round(
+        clamp(
+          100 -
+            statusPenalty(workspace.status, 24, 10) -
+            statusPenalty(billing?.status ?? usageBillingDecision, 18, 8) -
+            controlPenalty -
+            incidentPenalty -
+            releasePenalty,
+          0,
+          100,
+        ),
+      );
+      const stage = customerHealthStage(score, workspace.plan);
+      const status = customerHealthStatus(score);
+      const isInternal = workspace.plan.includes("Internal") || workspace.segment.includes("內部");
+      const isTrading = workspace.workspace.includes("Trading");
+      const owner = isTrading ? cleanExecutionOwner : isInternal ? cleanRiskOwner : cleanDecisionOwner;
+      const revenueSignal = billing
+        ? `${billing.monthlyRevenue} / ${billing.invoiceStatus}`
+        : workspace.billing;
+      const adoptionSignal = `${workspace.seats} 席 / ${workspace.dataPackages}`;
+      const riskSignal =
+        highIncidents > 0
+          ? `${highIncidents} 個高優先事件需先關閉`
+          : status !== "pass"
+            ? "權限、帳務、授權或安全仍需觀察"
+            : "低風險，可維持例行追蹤";
+      const expansionSignal =
+        stage === "expand"
+          ? `${productionProducts} 個產品可正式上線，可評估加購或升級`
+          : stage === "healthy"
+            ? `${productionProducts} 個正式產品 / ${pilotProducts} 個試點產品`
+            : stage === "watch"
+              ? "先完成 onboarding 與使用深度，再談擴充"
+              : "優先保留與修復，不進行擴售";
+      const nextAction =
+        stage === "expand"
+          ? "安排 QBR，提出 API、席位或資料包擴充方案"
+          : stage === "healthy"
+            ? "維持月度健康檢查與使用回顧"
+            : stage === "watch"
+              ? "建立 14 天 onboarding / usage improvement plan"
+              : "由客戶成功與風控共同處理續約風險";
+
+      return {
+        workspace: workspace.workspace,
+        segment: workspace.segment,
+        plan: workspace.plan,
+        healthStage: stage,
+        status,
+        healthScore: score,
+        revenueSignal,
+        adoptionSignal,
+        riskSignal,
+        expansionSignal,
+        owner,
+        nextAction,
+      };
+    })
+    .sort(
+      (left, right) =>
+        left.healthScore - right.healthScore ||
+        left.workspace.localeCompare(right.workspace, "zh-Hant"),
+    );
+}
+
+function customerSuccessHealthCsv(rows: CustomerSuccessHealthItem[]) {
+  const header = ["workspace", "segment", "plan", "health_stage", "status", "health_score", "revenue_signal", "adoption_signal", "risk_signal", "expansion_signal", "owner", "next_action"];
+  const csvRows = rows.map((row) => [
+    row.workspace,
+    row.segment,
+    row.plan,
+    customerHealthStageLabel(row.healthStage),
+    executionReviewLabel(row.status),
+    row.healthScore,
+    row.revenueSignal,
+    row.adoptionSignal,
+    row.riskSignal,
+    row.expansionSignal,
+    row.owner,
+    row.nextAction,
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
 function buildMarketAlertEvents({
   coverageUniverseItems,
   dataContractItems,
@@ -5275,6 +5455,7 @@ function assetComparisonMemo(
     securityAuditItems?: SecurityAuditItem[];
     incidentCommandItems?: IncidentCommandItem[];
     productReleaseGateItems?: ProductReleaseGateItem[];
+    customerSuccessHealthItems?: CustomerSuccessHealthItem[];
   },
 ) {
   const candidateRows = rows.filter((row) => row.signal === "candidate");
@@ -5322,6 +5503,7 @@ function assetComparisonMemo(
   const memoSecurityAuditItems = (options.securityAuditItems ?? []).slice(0, 12);
   const memoIncidentCommandItems = (options.incidentCommandItems ?? []).slice(0, 12);
   const memoProductReleaseGateItems = (options.productReleaseGateItems ?? []).slice(0, 12);
+  const memoCustomerSuccessHealthItems = (options.customerSuccessHealthItems ?? []).slice(0, 12);
   const tableHeader = "| 商品 | 分數 | 訊號 | 年化報酬 | 年化波動 | 最大回撤 | 最新日 | 說明 |";
   const tableDivider = "|---|---:|---|---:|---:|---:|---|---|";
   const tableRows = topRows.map((row) =>
@@ -5738,6 +5920,19 @@ function assetComparisonMemo(
       markdownCell(row.nextAction),
     ].join(" | "),
   );
+  const customerSuccessHealthTableRows = memoCustomerSuccessHealthItems.map((row) =>
+    [
+      markdownCell(row.workspace),
+      markdownCell(row.segment),
+      markdownCell(row.plan),
+      row.healthScore,
+      markdownCell(customerHealthStageLabel(row.healthStage)),
+      markdownCell(row.revenueSignal),
+      markdownCell(row.riskSignal),
+      markdownCell(row.expansionSignal),
+      markdownCell(row.nextAction),
+    ].join(" | "),
+  );
 
   return [
     `# ${options.name || "未命名 Watchlist"} 研究摘要`,
@@ -5854,6 +6049,11 @@ function assetComparisonMemo(
     memoProductReleaseGateItems.length ? "| 產品 | 對象 | 上線階段 | 狀態 | 負責人 | 依據 | 決策 | 下一步 |" : "目前沒有可輸出的產品上線閘門。",
     memoProductReleaseGateItems.length ? "|---|---|---|---|---|---|---|---|" : "",
     ...productReleaseGateTableRows.map((row) => `| ${row} |`),
+    "",
+    "## 客戶成功健康中心",
+    memoCustomerSuccessHealthItems.length ? "| 工作區 | 客群 | 方案 | 健康分數 | 階段 | 收入訊號 | 風險訊號 | 擴充訊號 | 下一步 |" : "目前沒有可輸出的客戶健康資料。",
+    memoCustomerSuccessHealthItems.length ? "|---|---|---|---:|---|---|---|---|---|" : "",
+    ...customerSuccessHealthTableRows.map((row) => `| ${row} |`),
     "",
     "## 篩選概況",
     `- 顯示商品：${rows.length} / ${options.totalRows} 檔`,
@@ -6662,6 +6862,27 @@ export function MarketDataPanel() {
   const productReleaseGateDecision = productReleaseGateItems.length
     ? combinedExecutionStatus(productReleaseGateItems.map((item) => item.status))
     : "watch";
+  const customerSuccessHealthItems = buildCustomerSuccessHealthItems({
+    clientWorkspaceProvisioningItems,
+    usageBillingItems,
+    productReleaseGateItems,
+    incidentCommandItems,
+    usageBillingDecision,
+    dataLicenseComplianceDecision,
+    securityAuditDecision,
+    incidentCommandDecision,
+    riskOwner,
+    decisionOwner,
+    executionOwner,
+  });
+  const customerHealthyCount = customerSuccessHealthItems.filter(
+    (item) => item.healthStage === "healthy" || item.healthStage === "expand",
+  ).length;
+  const customerExpansionCount = customerSuccessHealthItems.filter((item) => item.healthStage === "expand").length;
+  const customerRiskCount = customerSuccessHealthItems.filter((item) => item.healthStage === "risk").length;
+  const customerSuccessHealthDecision = customerSuccessHealthItems.length
+    ? combinedExecutionStatus(customerSuccessHealthItems.map((item) => item.status))
+    : "watch";
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -6915,6 +7136,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-product-release-gate-${resultStamp()}.csv`,
       productReleaseGateCsv(productReleaseGateItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportCustomerSuccessHealthCsv = () => {
+    if (!customerSuccessHealthItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-customer-success-health-${resultStamp()}.csv`,
+      customerSuccessHealthCsv(customerSuccessHealthItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -7225,6 +7455,7 @@ export function MarketDataPanel() {
       securityAuditItems,
       incidentCommandItems,
       productReleaseGateItems,
+      customerSuccessHealthItems,
     });
   const handleExportAssetComparisonMemo = () => {
     if (!visibleComparisonRows.length) return;
@@ -8741,6 +8972,96 @@ export function MarketDataPanel() {
                 ) : (
                   <div className="rounded-md border border-dashed border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-500">
                     建立營運事件資料後，這裡會顯示產品上線閘門。
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-slate-800 pt-3 space-y-3">
+                <div className="flex flex-col md:flex-row md:items-end justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="text-xs font-bold text-slate-100">客戶成功健康中心</h4>
+                      <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(customerSuccessHealthDecision)}`}>
+                        {executionReviewLabel(customerSuccessHealthDecision)}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-[11px] text-slate-500">
+                      以工作區、方案、帳務、產品上線、事件與安全合規狀態，推導客戶健康分數、續約風險與擴充機會
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-end gap-2 text-xs">
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        ["健康", `${customerHealthyCount}`],
+                        ["可擴充", `${customerExpansionCount}`],
+                        ["風險", `${customerRiskCount}`],
+                      ].map(([label, value]) => (
+                        <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 px-3 py-2 text-right">
+                          <p className="text-[10px] text-slate-600">{label}</p>
+                          <p className="mt-0.5 font-mono font-bold text-slate-100">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      onClick={handleExportCustomerSuccessHealthCsv}
+                      disabled={!customerSuccessHealthItems.length}
+                      className="px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+                    >
+                      客戶 CSV
+                    </button>
+                  </div>
+                </div>
+
+                {customerSuccessHealthItems.length ? (
+                  <div className="overflow-x-auto rounded-lg border border-slate-800">
+                    <table className="w-full min-w-[1650px] text-xs">
+                      <thead className="bg-slate-900/80">
+                        <tr className="text-left text-[11px] text-slate-600">
+                          <th className="py-2 px-3 font-medium">工作區</th>
+                          <th className="py-2 px-3 font-medium">客群</th>
+                          <th className="py-2 px-3 font-medium">方案</th>
+                          <th className="py-2 px-3 font-medium text-right">分數</th>
+                          <th className="py-2 px-3 font-medium">階段</th>
+                          <th className="py-2 px-3 font-medium text-right">狀態</th>
+                          <th className="py-2 px-3 font-medium">收入訊號</th>
+                          <th className="py-2 px-3 font-medium">使用訊號</th>
+                          <th className="py-2 px-3 font-medium">風險訊號</th>
+                          <th className="py-2 px-3 font-medium">擴充訊號</th>
+                          <th className="py-2 px-3 font-medium">負責人</th>
+                          <th className="py-2 px-3 font-medium">下一步</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {customerSuccessHealthItems.map((item) => (
+                          <tr key={`${item.workspace}-${item.plan}`} className={`border-t ${executionReviewRowClass(item.status)}`}>
+                            <td className="py-2 px-3 font-bold text-slate-100">{item.workspace}</td>
+                            <td className="py-2 px-3 text-slate-400">{item.segment}</td>
+                            <td className="py-2 px-3 text-slate-400">{item.plan}</td>
+                            <td className="py-2 px-3 text-right font-mono font-bold text-slate-100">{item.healthScore}</td>
+                            <td className="py-2 px-3">
+                              <span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${customerHealthStageClass(item.healthStage)}`}>
+                                {customerHealthStageLabel(item.healthStage)}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-right">
+                              <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(item.status)}`}>
+                                {executionReviewLabel(item.status)}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-slate-500">{item.revenueSignal}</td>
+                            <td className="py-2 px-3 text-slate-500">{item.adoptionSignal}</td>
+                            <td className="py-2 px-3 text-slate-500">{item.riskSignal}</td>
+                            <td className="py-2 px-3 text-slate-500">{item.expansionSignal}</td>
+                            <td className="py-2 px-3 text-slate-400">{item.owner}</td>
+                            <td className="py-2 px-3 text-slate-500">{item.nextAction}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-dashed border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-500">
+                    建立客戶工作區後，這裡會顯示客戶成功健康資料。
                   </div>
                 )}
               </div>
