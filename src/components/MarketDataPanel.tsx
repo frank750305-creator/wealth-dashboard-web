@@ -161,6 +161,7 @@ import { PolicyLimitSection } from "./PolicyLimitSection";
 import { PlatformExceptionSection } from "./PlatformExceptionSection";
 import { PostTradeAttributionSection } from "./PostTradeAttributionSection";
 import { RebalanceDraftSection } from "./RebalanceDraftSection";
+import { SecurityNotesSection } from "./SecurityNotesSection";
 import { SlaEscalationSection } from "./SlaEscalationSection";
 import { TradeBatchSection } from "./TradeBatchSection";
 import { TradeTicketSection } from "./TradeTicketSection";
@@ -2321,21 +2322,7 @@ export function MarketDataPanel() {
         <MarketSourceInventorySection sources={sources} isLoading={isLoading} error={error} />
       </section>
 
-      {data?.securityNotes.length ? (
-        <section className="bg-slate-900 border border-slate-800 p-4 md:p-6 rounded-xl shadow-2xl">
-          <h3 className="text-sm font-bold text-amber-300 border-b border-slate-800 pb-3 mb-3">
-            ▍ 上線安全檢查
-          </h3>
-          <ul className="space-y-2 text-xs text-slate-300">
-            {data.securityNotes.map((note) => (
-              <li key={note} className="flex gap-2">
-                <span className="text-amber-400">•</span>
-                <span>{note}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
+      <SecurityNotesSection notes={data?.securityNotes ?? []} />
 
       <BigQueryPortfolioPanel hasBigQueryCredentials={hasBigQueryCredentials} />
     </div>
