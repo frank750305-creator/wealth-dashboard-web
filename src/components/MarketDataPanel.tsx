@@ -155,6 +155,7 @@ import { ExecutionHandoffSection } from "./ExecutionHandoffSection";
 import { ExecutionReviewSection } from "./ExecutionReviewSection";
 import { MonitoringRulesSection } from "./MonitoringRulesSection";
 import { PolicyLimitSection } from "./PolicyLimitSection";
+import { PostTradeAttributionSection } from "./PostTradeAttributionSection";
 import { RebalanceDraftSection } from "./RebalanceDraftSection";
 import { TradeBatchSection } from "./TradeBatchSection";
 import { TradeTicketSection } from "./TradeTicketSection";
@@ -2300,102 +2301,18 @@ export function MarketDataPanel() {
                             totalCashImpactAfterCost={totalCashImpactAfterCost}
                           />
 
-                          <div className="border-t border-slate-800 pt-3 space-y-3">
-                            <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-3">
-                              <div>
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <h5 className="text-xs font-bold text-slate-100">交易後績效歸因</h5>
-                                  <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(postTradeDecision)}`}>
-                                    {executionReviewLabel(postTradeDecision)}
-                                  </span>
-                                </div>
-                                <p className="text-[11px] text-slate-500 mt-0.5">
-                                  將成交率、殘單、成本、現金偏差與未成交市場曝險整理成復盤指標
-                                </p>
-                              </div>
-                              <div className="grid grid-cols-1 sm:grid-cols-[120px_140px_auto] gap-2 text-xs">
-                                <label className="space-y-1">
-                                  <span className="text-slate-500">復盤天數</span>
-                                  <input
-                                    type="number"
-                                    min={1}
-                                    max={60}
-                                    step={1}
-                                    value={postTradeReviewDays}
-                                    onChange={(event) => setPostTradeReviewDays(Math.min(60, Math.max(1, Math.floor(Number(event.target.value) || 1))))}
-                                    className="w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-right font-mono text-slate-100"
-                                  />
-                                </label>
-                                <label className="space-y-1">
-                                  <span className="text-slate-500">市場變動 %</span>
-                                  <input
-                                    type="number"
-                                    min={-30}
-                                    max={30}
-                                    step={0.5}
-                                    value={postTradeBenchmarkMovePercent}
-                                    onChange={(event) => {
-                                      const nextValue = Number(event.target.value);
-                                      setPostTradeBenchmarkMovePercent(Math.min(30, Math.max(-30, Number.isFinite(nextValue) ? nextValue : 0)));
-                                    }}
-                                    className="w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-right font-mono text-slate-100"
-                                  />
-                                </label>
-                                <button
-                                  onClick={handleExportPostTradeAttributionCsv}
-                                  disabled={!postTradeAttributionRows.length}
-                                  className="sm:self-end px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
-                                >
-                                  歸因 CSV
-                                </button>
-                              </div>
-                            </div>
-
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-                              {[
-                                ["復盤狀態", executionReviewLabel(postTradeDecision)],
-                                ["阻擋 / 觀察", `${postTradeBlockCount} / ${postTradeWatchCount}`],
-                                ["殘單曝險", formatCurrency(postTradeResidualMarketImpact)],
-                                ["復盤週期", `T+${postTradeReviewDays}`],
-                              ].map(([label, value]) => (
-                                <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 p-3 min-w-0">
-                                  <p className="text-[11px] text-slate-600 truncate">{label}</p>
-                                  <p className="mt-1 font-mono text-sm font-bold text-slate-100 truncate" title={value}>
-                                    {value}
-                                  </p>
-                                </div>
-                              ))}
-                            </div>
-
-                            <div className="overflow-x-auto">
-                              <table className="w-full min-w-[980px] text-xs">
-                                <thead>
-                                  <tr className="text-left text-[11px] text-slate-600">
-                                    <th className="py-2 px-3 font-medium">項目</th>
-                                    <th className="py-2 px-3 font-medium text-right">狀態</th>
-                                    <th className="py-2 px-3 font-medium text-right">目前值</th>
-                                    <th className="py-2 px-3 font-medium">門檻</th>
-                                    <th className="py-2 px-3 font-medium">說明</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {postTradeAttributionRows.map((item) => (
-                                    <tr key={item.label} className={`border-t ${executionReviewRowClass(item.status)}`}>
-                                      <td className="py-2 px-3 font-bold text-slate-100">{item.label}</td>
-                                      <td className="py-2 px-3 text-right">
-                                        <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(item.status)}`}>
-                                          {executionReviewLabel(item.status)}
-                                        </span>
-                                      </td>
-                                      <td className="py-2 px-3 text-right font-mono text-slate-200">{item.value}</td>
-                                      <td className="py-2 px-3 text-slate-400">{item.threshold}</td>
-                                      <td className="py-2 px-3 text-slate-500">{item.note}</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                          </div>
+                          <PostTradeAttributionSection
+                            postTradeDecision={postTradeDecision}
+                            postTradeReviewDays={postTradeReviewDays}
+                            onPostTradeReviewDaysChange={setPostTradeReviewDays}
+                            postTradeBenchmarkMovePercent={postTradeBenchmarkMovePercent}
+                            onPostTradeBenchmarkMovePercentChange={setPostTradeBenchmarkMovePercent}
+                            onExportPostTradeAttributionCsv={handleExportPostTradeAttributionCsv}
+                            postTradeAttributionRows={postTradeAttributionRows}
+                            postTradeBlockCount={postTradeBlockCount}
+                            postTradeWatchCount={postTradeWatchCount}
+                            postTradeResidualMarketImpact={postTradeResidualMarketImpact}
+                          />
 
                           <div className="border-t border-slate-800 pt-3 space-y-3">
                             <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-3">
