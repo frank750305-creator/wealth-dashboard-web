@@ -79,6 +79,7 @@ import {
   buildDataContractItems,
   buildDataPipelineHealthItems,
   buildDataPipelineTableSnapshots,
+  bigQueryDiagnosticsCsv,
   coverageUniverseCsv,
   dataContractCsv,
   dataPipelineCsv,
@@ -238,12 +239,6 @@ function formatCurrency(value: number | null | undefined) {
   return typeof value === "number" && Number.isFinite(value)
     ? value.toLocaleString("zh-TW", { maximumFractionDigits: 0 })
     : "--";
-}
-
-function csvCell(value: unknown) {
-  if (value === null || value === undefined) return "";
-  const text = String(value);
-  return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
 
 function markdownCell(value: unknown) {
@@ -1912,46 +1907,15 @@ export function MarketDataPanel() {
   const handleExportDiagnosticsCsv = () => {
     if (!bigQueryDiagnostics) return;
 
-    const rows = [
-      ["section", "name", "value", "status", "note"],
-      ...qualityCards.map((card) => ["quality", card.label, card.value, card.status, card.note]),
-      ["summary", "price_first_date", bigQueryDiagnostics.priceSummary.first_date ?? "", "", ""],
-      ["summary", "price_latest_date", bigQueryDiagnostics.priceSummary.latest_date ?? "", "", ""],
-      ["summary", "price_row_count", bigQueryDiagnostics.priceSummary.row_count ?? "", "", ""],
-      ["summary", "price_symbol_count", bigQueryDiagnostics.priceSummary.symbol_count ?? "", "", ""],
-      ["summary", "adjusted_price_rows", bigQueryDiagnostics.priceSummary.adjusted_price_rows ?? "", "", ""],
-      ["summary", "raw_price_rows", bigQueryDiagnostics.priceSummary.raw_price_rows ?? "", "", ""],
-      ["summary", "fx_first_date", bigQueryDiagnostics.fxSummary.first_date ?? "", "", ""],
-      ["summary", "fx_latest_date", bigQueryDiagnostics.fxSummary.latest_date ?? "", "", ""],
-      ["summary", "fx_row_count", bigQueryDiagnostics.fxSummary.row_count ?? "", "", ""],
-      ["summary", "fx_currency_count", bigQueryDiagnostics.fxSummary.currency_count ?? "", "", ""],
-      ...issueCards.map((card) => ["issue", card.label, card.value, card.status, card.note]),
-      ...bigQueryDiagnostics.recentSymbols.map((symbol) => [
-        "recent_symbol",
-        symbol.symbol,
-        symbol.latest_date ?? "",
-        freshnessStatus(daysSinceDate(symbol.latest_date)),
-        symbol.row_count,
-      ]),
-      ...staleSymbols.map((symbol) => [
-        "stale_symbol",
-        symbol.symbol,
-        symbol.latest_date ?? "",
-        symbol.stale_days ?? "",
-        symbol.row_count,
-      ]),
-      ...fxCurrencies.map((currency) => [
-        "fx_currency",
-        currency.currency,
-        currency.latest_date ?? "",
-        freshnessStatus(daysSinceDate(currency.latest_date)),
-        currency.row_count,
-      ]),
-    ];
-
     downloadTextFile(
       `bigquery-data-quality-${resultStamp()}.csv`,
-      rows.map((row) => row.map(csvCell).join(",")).join("\n"),
+      bigQueryDiagnosticsCsv({
+        diagnostics: bigQueryDiagnostics,
+        qualityCards,
+        issueCards,
+        staleSymbols,
+        fxCurrencies,
+      }),
       "text/csv;charset=utf-8",
     );
   };

@@ -51,6 +51,13 @@ export type CoverageUniverseItem = {
   action: string;
 };
 
+export type DataQualitySummaryCard = {
+  label: string;
+  value: string;
+  status: DataWarehouseQualityStatus;
+  note: string;
+};
+
 function formatCount(value: number | null | undefined) {
   return typeof value === "number" && Number.isFinite(value) ? value.toLocaleString("zh-TW") : "--";
 }
@@ -333,6 +340,59 @@ export function dataPipelineCsv({
   return [header, ...healthRows, ...snapshotRows, ...staleRows, ...fxRows]
     .map((row) => row.map(csvCell).join(","))
     .join("\n");
+}
+
+export function bigQueryDiagnosticsCsv({
+  diagnostics,
+  qualityCards,
+  issueCards,
+  staleSymbols,
+  fxCurrencies,
+}: {
+  diagnostics: BigQueryMarketDiagnostics;
+  qualityCards: DataQualitySummaryCard[];
+  issueCards: DataQualitySummaryCard[];
+  staleSymbols: BigQueryStaleSymbol[];
+  fxCurrencies: BigQueryFxCurrency[];
+}) {
+  const rows = [
+    ["section", "name", "value", "status", "note"],
+    ...qualityCards.map((card) => ["quality", card.label, card.value, card.status, card.note]),
+    ["summary", "price_first_date", diagnostics.priceSummary.first_date ?? "", "", ""],
+    ["summary", "price_latest_date", diagnostics.priceSummary.latest_date ?? "", "", ""],
+    ["summary", "price_row_count", diagnostics.priceSummary.row_count ?? "", "", ""],
+    ["summary", "price_symbol_count", diagnostics.priceSummary.symbol_count ?? "", "", ""],
+    ["summary", "adjusted_price_rows", diagnostics.priceSummary.adjusted_price_rows ?? "", "", ""],
+    ["summary", "raw_price_rows", diagnostics.priceSummary.raw_price_rows ?? "", "", ""],
+    ["summary", "fx_first_date", diagnostics.fxSummary.first_date ?? "", "", ""],
+    ["summary", "fx_latest_date", diagnostics.fxSummary.latest_date ?? "", "", ""],
+    ["summary", "fx_row_count", diagnostics.fxSummary.row_count ?? "", "", ""],
+    ["summary", "fx_currency_count", diagnostics.fxSummary.currency_count ?? "", "", ""],
+    ...issueCards.map((card) => ["issue", card.label, card.value, card.status, card.note]),
+    ...diagnostics.recentSymbols.map((symbol) => [
+      "recent_symbol",
+      symbol.symbol,
+      symbol.latest_date ?? "",
+      freshnessStatus(daysSinceDate(symbol.latest_date)),
+      symbol.row_count,
+    ]),
+    ...staleSymbols.map((symbol) => [
+      "stale_symbol",
+      symbol.symbol,
+      symbol.latest_date ?? "",
+      symbol.stale_days ?? "",
+      symbol.row_count,
+    ]),
+    ...fxCurrencies.map((currency) => [
+      "fx_currency",
+      currency.currency,
+      currency.latest_date ?? "",
+      freshnessStatus(daysSinceDate(currency.latest_date)),
+      currency.row_count,
+    ]),
+  ];
+
+  return rows.map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
 function buildDataContractItem({
