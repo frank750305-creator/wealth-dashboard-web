@@ -151,6 +151,7 @@ import { AssetProfileSection } from "./AssetProfileSection";
 import { CommercializationSection } from "./CommercializationSection";
 import { DataOperationsSection } from "./DataOperationsSection";
 import { EnterpriseReadinessSection } from "./EnterpriseReadinessSection";
+import { ExecutionReviewSection } from "./ExecutionReviewSection";
 import { RebalanceDraftSection } from "./RebalanceDraftSection";
 import { TradeBatchSection } from "./TradeBatchSection";
 import { TradeTicketSection } from "./TradeTicketSection";
@@ -2203,60 +2204,14 @@ export function MarketDataPanel() {
                             averageTradeBatchGross={averageTradeBatchGross}
                           />
 
-                          <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-3">
-                            <div>
-                              <div className="flex flex-wrap items-center gap-2">
-                                <h5 className="text-xs font-bold text-slate-100">交易前檢核中心</h5>
-                                <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(executionReviewDecision)}`}>
-                                  {executionReviewLabel(executionReviewDecision)}
-                                </span>
-                              </div>
-                              <p className="text-[11px] text-slate-500 mt-0.5">
-                                將交易清單轉成可覆核的現金、集中度、資料新鮮度與壓力風險檢查
-                              </p>
-                            </div>
-                            <div className="flex flex-wrap items-center gap-2 text-xs">
-                              <span className="rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-slate-400">
-                                暫停 {executionBlockCount} · 觀察 {executionWatchCount}
-                              </span>
-                              <button
-                                onClick={handleExportExecutionReviewCsv}
-                                disabled={!rebalanceRows.length}
-                                className="px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
-                              >
-                                檢核 CSV
-                              </button>
-                            </div>
-                          </div>
-
-                          <div className="overflow-x-auto">
-                            <table className="w-full min-w-[900px] text-xs">
-                              <thead>
-                                <tr className="text-left text-[11px] text-slate-600">
-                                  <th className="py-2 px-3 font-medium">項目</th>
-                                  <th className="py-2 px-3 font-medium text-right">狀態</th>
-                                  <th className="py-2 px-3 font-medium text-right">目前值</th>
-                                  <th className="py-2 px-3 font-medium">門檻</th>
-                                  <th className="py-2 px-3 font-medium">說明</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {executionReviewItems.map((item) => (
-                                  <tr key={item.label} className={`border-t ${executionReviewRowClass(item.status)}`}>
-                                    <td className="py-2 px-3 font-bold text-slate-100">{item.label}</td>
-                                    <td className="py-2 px-3 text-right">
-                                      <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(item.status)}`}>
-                                        {executionReviewLabel(item.status)}
-                                      </span>
-                                    </td>
-                                    <td className="py-2 px-3 text-right font-mono text-slate-200">{item.value}</td>
-                                    <td className="py-2 px-3 text-slate-400">{item.threshold}</td>
-                                    <td className="py-2 px-3 text-slate-500">{item.note}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
+                          <ExecutionReviewSection
+                            decision={executionReviewDecision}
+                            blockCount={executionBlockCount}
+                            watchCount={executionWatchCount}
+                            canExport={Boolean(rebalanceRows.length)}
+                            onExportExecutionReviewCsv={handleExportExecutionReviewCsv}
+                            items={executionReviewItems}
+                          />
 
                           <div className="border-t border-slate-800 pt-3 space-y-3">
                             <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-3">
