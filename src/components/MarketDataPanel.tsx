@@ -2,6 +2,11 @@ import { useEffect, useState } from "react";
 import { useMarketSources } from "@/hooks/useMarketSources";
 import { assetComparisonMemo } from "@/lib/watchlistMemo";
 import {
+  loadWatchlistPresetsFromStorage,
+  writeWatchlistPresetsToStorage,
+  type SavedWatchlistPreset,
+} from "@/lib/watchlistPresets";
+import {
   assetComparisonCsv,
   assetProfileCsv,
   comparisonRowFromProfile,
@@ -162,17 +167,6 @@ import { TradeTicketSection } from "./TradeTicketSection";
 import { WatchlistControlsSection } from "./WatchlistControlsSection";
 import { WatchlistSummaryCards } from "./WatchlistSummaryCards";
 
-type SavedWatchlistPreset = {
-  id: string;
-  name: string;
-  symbols: string;
-  priceBasis: "adjusted" | "raw";
-  sortKey: AssetComparisonSortKey;
-  signalFilter: AssetDecisionSignal | "all";
-  minimumScore: number;
-  updatedAt: string;
-};
-
 const statusMeta: Record<MarketSourceStatus, { label: string; className: string }> = {
   ready: {
     label: "可接 API",
@@ -199,8 +193,6 @@ const bigQueryEnvironmentVars = [
   { key: "BIGQUERY_FX_TABLE", value: "daily_fx", kind: "plain" },
   { key: "GCP_SERVICE_ACCOUNT_JSON", value: "Service account JSON", kind: "secret" },
 ];
-const watchlistPresetStorageKey = "wealth-dashboard.bigqueryWatchlistPresets";
-
 function formatPercent(value: number | null | undefined) {
   return typeof value === "number" && Number.isFinite(value) ? `${(value * 100).toFixed(2)}%` : "--";
 }
@@ -219,33 +211,6 @@ function downloadTextFile(fileName: string, content: string, mimeType: string) {
 
 function resultStamp() {
   return new Date().toISOString().slice(0, 19).replaceAll(":", "").replace("T", "-");
-}
-
-function loadWatchlistPresetsFromStorage() {
-  if (typeof window === "undefined") return [];
-
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(watchlistPresetStorageKey) || "[]");
-    if (!Array.isArray(parsed)) return [];
-
-    return parsed.filter((item): item is SavedWatchlistPreset => {
-      if (!item || typeof item !== "object") return false;
-      const preset = item as Partial<SavedWatchlistPreset>;
-      return (
-        typeof preset.id === "string" &&
-        typeof preset.name === "string" &&
-        typeof preset.symbols === "string" &&
-        typeof preset.updatedAt === "string"
-      );
-    });
-  } catch {
-    return [];
-  }
-}
-
-function writeWatchlistPresetsToStorage(presets: SavedWatchlistPreset[]) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(watchlistPresetStorageKey, JSON.stringify(presets));
 }
 
 function qualityToExecutionStatus(status: QualityStatus): ExecutionReviewStatus {
