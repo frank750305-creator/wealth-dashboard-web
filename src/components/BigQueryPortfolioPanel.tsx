@@ -9,6 +9,7 @@ import { BigQueryPortfolioAssetSuggestions } from "./BigQueryPortfolioAssetSugge
 import { BigQueryPortfolioAssetTools } from "./BigQueryPortfolioAssetTools";
 import { BigQueryPortfolioHeader } from "./BigQueryPortfolioHeader";
 import { BigQueryPortfolioPresetBar } from "./BigQueryPortfolioPresetBar";
+import { BigQueryPortfolioResultExportBar } from "./BigQueryPortfolioResultExportBar";
 import { BigQueryPortfolioSettingsPanel } from "./BigQueryPortfolioSettingsPanel";
 import { BigQueryPortfolioSignalCardGrid } from "./BigQueryPortfolioSignalCardGrid";
 import { BigQueryPortfolioSnapshotBar } from "./BigQueryPortfolioSnapshotBar";
@@ -2627,92 +2628,27 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
 
       {displayResult && (
         <div className="space-y-4">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-slate-950 border border-slate-800 rounded-lg p-3">
-            <div>
-              <p className="text-xs font-bold text-slate-200">分析結果匯出</p>
-              <p className="text-[11px] text-slate-500 mt-0.5">
-                {displayResult.dataWindow.startDate ?? "--"} ~ {displayResult.dataWindow.endDate ?? "--"}
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={handleSaveSnapshot}
-                className="px-3 py-2 text-xs font-bold rounded-md bg-cyan-700 hover:bg-cyan-600 text-white"
-              >
-                存快照
-              </button>
-              <button
-                onClick={handleExportJson}
-                className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
-              >
-                JSON
-              </button>
-              <button
-                onClick={handleExportCommitteeMemo}
-                className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
-              >
-                Memo MD
-              </button>
-              <button
-                onClick={handleCopyCommitteeMemo}
-                className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
-              >
-                {memoCopyStatus === "copied" ? "已複製" : "複製 Memo"}
-              </button>
-              {monitoringRules.length ? (
-                <button
-                  onClick={handleExportMonitoringCsv}
-                  className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
-                >
-                  監控 CSV
-                </button>
-              ) : null}
-              {decisionSignals.length ? (
-                <button
-                  onClick={handleExportDecisionSummary}
-                  className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
-                >
-                  摘要 TXT
-                </button>
-              ) : null}
-              {decisionSignals.length ? (
-                <button
-                  onClick={handleCopyDecisionSummary}
-                  className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
-                >
-                  {copyStatus === "copied" ? "已複製" : "複製摘要"}
-                </button>
-              ) : null}
-              <button
-                onClick={handleExportWealthCsv}
-                className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
-              >
-                財富 CSV
-              </button>
-              <button
-                onClick={handleExportAssetCsv}
-                className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
-              >
-                資產 CSV
-              </button>
-              {rebalanceRows.length ? (
-                <button
-                  onClick={handleExportRebalancingCsv}
-                  className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
-                >
-                  調倉 CSV
-                </button>
-              ) : null}
-              {modeComparisonRows.length ? (
-                <button
-                  onClick={handleExportModeComparisonCsv}
-                  className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
-                >
-                  比較 CSV
-                </button>
-              ) : null}
-            </div>
-          </div>
+          <BigQueryPortfolioResultExportBar
+            startDate={displayResult.dataWindow.startDate}
+            endDate={displayResult.dataWindow.endDate}
+            memoCopyStatus={memoCopyStatus}
+            copyStatus={copyStatus}
+            hasMonitoringRules={Boolean(monitoringRules.length)}
+            hasDecisionSignals={Boolean(decisionSignals.length)}
+            hasRebalanceRows={Boolean(rebalanceRows.length)}
+            hasModeComparisonRows={Boolean(modeComparisonRows.length)}
+            onSaveSnapshot={handleSaveSnapshot}
+            onExportJson={handleExportJson}
+            onExportCommitteeMemo={handleExportCommitteeMemo}
+            onCopyCommitteeMemo={handleCopyCommitteeMemo}
+            onExportMonitoringCsv={handleExportMonitoringCsv}
+            onExportDecisionSummary={handleExportDecisionSummary}
+            onCopyDecisionSummary={handleCopyDecisionSummary}
+            onExportWealthCsv={handleExportWealthCsv}
+            onExportAssetCsv={handleExportAssetCsv}
+            onExportRebalancingCsv={handleExportRebalancingCsv}
+            onExportModeComparisonCsv={handleExportModeComparisonCsv}
+          />
 
           {snapshotComparisonRows.length ? (
             <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 space-y-3">
