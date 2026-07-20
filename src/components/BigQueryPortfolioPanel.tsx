@@ -9,6 +9,7 @@ import { BigQueryPortfolioAssetTools } from "./BigQueryPortfolioAssetTools";
 import { BigQueryPortfolioHeader } from "./BigQueryPortfolioHeader";
 import { BigQueryPortfolioPresetBar } from "./BigQueryPortfolioPresetBar";
 import { BigQueryPortfolioSettingsPanel } from "./BigQueryPortfolioSettingsPanel";
+import { BigQueryPortfolioSignalCardGrid } from "./BigQueryPortfolioSignalCardGrid";
 import { BigQueryPortfolioSnapshotBar } from "./BigQueryPortfolioSnapshotBar";
 import { BigQueryPortfolioStatusNotices } from "./BigQueryPortfolioStatusNotices";
 
@@ -2648,27 +2649,7 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-            {inputChecks.map((check) => (
-              <div
-                key={check.label}
-                className={`rounded-lg border p-3 min-w-0 ${decisionSignalClass(check.status)}`}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-[11px] text-slate-500 truncate">{check.label}</p>
-                  <span
-                    className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-bold ${decisionSignalBadgeClass(check.status)}`}
-                  >
-                    {inputCheckStatusLabel(check.status)}
-                  </span>
-                </div>
-                <p className="mt-2 font-mono text-xs font-bold text-slate-100 truncate" title={check.value}>
-                  {check.value}
-                </p>
-                <p className="mt-1 text-[11px] text-slate-500 leading-relaxed">{check.note}</p>
-              </div>
-            ))}
-          </div>
+          <BigQueryPortfolioSignalCardGrid cards={inputChecks} />
 
           <BigQueryPortfolioAssetSuggestions
             hasBigQueryCredentials={hasBigQueryCredentials}
