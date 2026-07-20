@@ -13,6 +13,7 @@ import { BigQueryPortfolioResultExportBar } from "./BigQueryPortfolioResultExpor
 import { BigQueryPortfolioSettingsPanel } from "./BigQueryPortfolioSettingsPanel";
 import { BigQueryPortfolioSignalCardGrid } from "./BigQueryPortfolioSignalCardGrid";
 import { BigQueryPortfolioSnapshotBar } from "./BigQueryPortfolioSnapshotBar";
+import { BigQueryPortfolioSnapshotComparison } from "./BigQueryPortfolioSnapshotComparison";
 import { BigQueryPortfolioStatusNotices } from "./BigQueryPortfolioStatusNotices";
 
 type AssetRow = {
@@ -2650,37 +2651,10 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
             onExportModeComparisonCsv={handleExportModeComparisonCsv}
           />
 
-          {snapshotComparisonRows.length ? (
-            <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-bold text-slate-200">快照比較</p>
-                  <p className="text-[11px] text-slate-500 mt-0.5">
-                    {selectedSnapshot?.name ?? "--"} · Delta = 目前結果 - 快照
-                  </p>
-                </div>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
-                {snapshotComparisonRows.map((row) => {
-                  const isNegative = typeof row.delta === "number" && row.delta < 0;
-                  return (
-                    <div key={row.key} className="rounded-lg border border-slate-800 bg-slate-900/60 p-3 min-w-0">
-                      <p className="text-[11px] text-slate-500 truncate">{row.label}</p>
-                      <p className="mt-2 font-mono text-xs font-bold text-slate-100">
-                        {formatMetric(row.currentValue, row.kind)}
-                      </p>
-                      <p className="mt-1 font-mono text-[11px] text-slate-500">
-                        快照 {formatMetric(row.snapshotValue, row.kind)}
-                      </p>
-                      <p className={`mt-1 font-mono text-[11px] font-bold ${isNegative ? "text-rose-300" : "text-emerald-300"}`}>
-                        {formatMetricDelta(row.delta, row.kind)}
-                      </p>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ) : null}
+          <BigQueryPortfolioSnapshotComparison
+            snapshotName={selectedSnapshot?.name}
+            rows={snapshotComparisonRows}
+          />
 
           {policySignals.length ? (
             <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 space-y-3">
