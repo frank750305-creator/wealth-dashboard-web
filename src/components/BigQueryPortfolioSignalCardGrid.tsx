@@ -9,6 +9,7 @@ export type BigQueryPortfolioSignalCard = {
 
 type BigQueryPortfolioSignalCardGridProps = {
   cards: BigQueryPortfolioSignalCard[];
+  variant?: "compact" | "wide";
 };
 
 function signalCardClass(status: SignalCardStatus) {
@@ -34,9 +35,10 @@ function signalStatusLabel(status: SignalCardStatus) {
 
 export function BigQueryPortfolioSignalCardGrid({
   cards,
+  variant = "compact",
 }: BigQueryPortfolioSignalCardGridProps) {
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+    <div className={variant === "wide" ? "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-2" : "grid grid-cols-1 md:grid-cols-2 gap-2"}>
       {cards.map((card) => (
         <div
           key={card.label}
