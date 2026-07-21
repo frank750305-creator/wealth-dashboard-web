@@ -39,6 +39,35 @@ export type ResearchTaskSummary = {
   nextAction: string;
 };
 
+export type ResearchLifecycleStage = {
+  id: string;
+  label: string;
+  status: ResearchTaskStatus;
+  owner: string;
+  evidence: string;
+  exitCriteria: string;
+};
+
+export type ResearchLifecycleAuditRecord = {
+  timestamp: string;
+  actor: string;
+  action: string;
+  status: ResearchTaskStatus;
+  evidence: string;
+};
+
+export type ResearchTaskLifecycle = {
+  gateStatus: ResearchTaskStatus;
+  gateLabel: string;
+  decision: string;
+  releaseCondition: string;
+  activeStage: string;
+  blockerCount: number;
+  readyCount: number;
+  stages: ResearchLifecycleStage[];
+  auditRecords: ResearchLifecycleAuditRecord[];
+};
+
 type BuildResearchTaskItemsInput = {
   comparisonRows: AssetComparisonRow[];
   visibleComparisonRows: AssetComparisonRow[];
@@ -47,6 +76,15 @@ type BuildResearchTaskItemsInput = {
   marketAlertCommandSummary: MarketAlertCommandSummary;
   marketAlertRunbookItems: MarketAlertRunbookItem[];
   researchOwner: string;
+  riskOwner: string;
+};
+
+type BuildResearchTaskLifecycleInput = {
+  tasks: ResearchTaskItem[];
+  summary: ResearchTaskSummary;
+  marketAlertCommandSummary: MarketAlertCommandSummary;
+  generatedAt: string;
+  decisionOwner: string;
   riskOwner: string;
 };
 
@@ -79,6 +117,22 @@ function taskStatusRank(status: ResearchTaskStatus) {
   if (status === "active") return 1;
   if (status === "ready") return 2;
   return 3;
+}
+
+function laneStatus(tasks: ResearchTaskItem[], lane: ResearchTaskLane): ResearchTaskStatus {
+  const laneTasks = tasks.filter((task) => task.lane === lane);
+  if (!laneTasks.length) return "done";
+  if (laneTasks.some((task) => task.status === "blocked")) return "blocked";
+  if (laneTasks.some((task) => task.status === "active")) return "active";
+  if (laneTasks.some((task) => task.status === "ready")) return "ready";
+  return "done";
+}
+
+function lifecycleDecision(gateStatus: ResearchTaskStatus) {
+  if (gateStatus === "blocked") return "暫停研究放行";
+  if (gateStatus === "active") return "條件式放行";
+  if (gateStatus === "ready") return "等待覆核放行";
+  return "可進入投委會";
 }
 
 function taskFromComparisonRow(row: AssetComparisonRow, researchOwner: string, riskOwner: string): ResearchTaskItem {
@@ -312,4 +366,130 @@ export function researchTaskCsv(rows: ResearchTaskItem[]) {
   ]);
 
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+export function buildResearchTaskLifecycle({
+  tasks,
+  summary,
+  marketAlertCommandSummary,
+  generatedAt,
+  decisionOwner,
+  riskOwner,
+}: BuildResearchTaskLifecycleInput): ResearchTaskLifecycle {
+  const gateStatus: ResearchTaskStatus =
+    summary.blocked || marketAlertCommandSummary.status === "block"
+      ? "blocked"
+      : summary.active || marketAlertCommandSummary.status === "watch"
+        ? "active"
+        : summary.ready
+          ? "ready"
+          : "done";
+  const stages: ResearchLifecycleStage[] = [
+    {
+      id: "data",
+      label: "資料與 Watchlist",
+      status: laneStatus(tasks, "data"),
+      owner: decisionOwner,
+      evidence: `${tasks.filter((task) => task.lane === "data").length} 個資料任務`,
+      exitCriteria: "Watchlist 已載入，且沒有資料阻塞項。",
+    },
+    {
+      id: "research",
+      label: "研究 Memo",
+      status: laneStatus(tasks, "research"),
+      owner: decisionOwner,
+      evidence: `${tasks.filter((task) => task.lane === "research").length} 個研究任務`,
+      exitCriteria: "候選商品完成單一資產 memo，並保留資料品質結論。",
+    },
+    {
+      id: "risk",
+      label: "風控覆核",
+      status: laneStatus(tasks, "risk"),
+      owner: riskOwner,
+      evidence: `${tasks.filter((task) => task.lane === "risk").length} 個風控任務`,
+      exitCriteria: "風險或資料異常已解除，或明確排除相關資產。",
+    },
+    {
+      id: "allocation",
+      label: "配置草案",
+      status: laneStatus(tasks, "allocation"),
+      owner: decisionOwner,
+      evidence: `${tasks.filter((task) => task.lane === "allocation").length} 個配置任務`,
+      exitCriteria: "權重、風險貢獻、交易限制完成覆核。",
+    },
+    {
+      id: "control",
+      label: "告警與放行",
+      status: laneStatus(tasks, "control"),
+      owner: marketAlertCommandSummary.focusOwner,
+      evidence: marketAlertCommandSummary.releaseGate,
+      exitCriteria: "市場警示中心不再阻塞，runbook 已完成驗收。",
+    },
+  ];
+  const activeStage = stages.find((stage) => stage.status !== "done") ?? stages.at(-1);
+  const gateLabel = gateStatus === "blocked" ? "暫停" : gateStatus === "active" ? "條件式" : gateStatus === "ready" ? "待覆核" : "放行";
+  const releaseCondition =
+    gateStatus === "blocked"
+      ? "解除所有阻塞任務與市場警示後才能進入投委會。"
+      : gateStatus === "active"
+        ? "可持續研究，但配置與交易前需人工覆核。"
+        : gateStatus === "ready"
+          ? "等待研究負責人完成最後覆核。"
+          : "已達到研究流程放行條件。";
+  const auditRecords: ResearchLifecycleAuditRecord[] = [
+    {
+      timestamp: generatedAt,
+      actor: decisionOwner,
+      action: lifecycleDecision(gateStatus),
+      status: gateStatus,
+      evidence: `${summary.total} tasks / ${marketAlertCommandSummary.releaseGate}`,
+    },
+    ...tasks.slice(0, 5).map((task) => ({
+      timestamp: generatedAt,
+      actor: task.owner,
+      action: task.title,
+      status: task.status,
+      evidence: task.evidence,
+    })),
+  ];
+
+  return {
+    gateStatus,
+    gateLabel,
+    decision: lifecycleDecision(gateStatus),
+    releaseCondition,
+    activeStage: activeStage?.label ?? "--",
+    blockerCount: summary.blocked,
+    readyCount: summary.ready,
+    stages,
+    auditRecords,
+  };
+}
+
+export function researchTaskLifecycleCsv(lifecycle: ResearchTaskLifecycle) {
+  const stageHeader = ["section", "id", "label", "status", "owner", "evidence", "exit_criteria"];
+  const stageRows = lifecycle.stages.map((stage) => [
+    "stage",
+    stage.id,
+    stage.label,
+    researchTaskStatusLabel(stage.status),
+    stage.owner,
+    stage.evidence,
+    stage.exitCriteria,
+  ]);
+  const auditRows = lifecycle.auditRecords.map((record) => [
+    "audit",
+    record.timestamp,
+    record.actor,
+    researchTaskStatusLabel(record.status),
+    record.action,
+    record.evidence,
+    "",
+  ]);
+  const summaryRows = [
+    ["summary", "decision", lifecycle.decision, researchTaskStatusLabel(lifecycle.gateStatus), lifecycle.gateLabel, lifecycle.releaseCondition, ""],
+    ["summary", "active_stage", lifecycle.activeStage, "", "", "", ""],
+  ];
+
+  return [stageHeader, ...summaryRows, ...stageRows, ...auditRows].map((row) => row.map(csvCell).join(",")).join("\n");
 }

@@ -77,9 +77,11 @@ import {
   marketAlertCommandSummaryCsv,
 } from "@/lib/marketAlertEvents";
 import {
+  buildResearchTaskLifecycle,
   buildResearchTaskItems,
   buildResearchTaskSummary,
   researchTaskCsv,
+  researchTaskLifecycleCsv,
 } from "@/lib/researchTaskWorkflow";
 import {
   buildDataLicenseComplianceItems,
@@ -724,6 +726,14 @@ export function MarketDataPanel() {
     riskOwner,
   });
   const researchTaskSummary = buildResearchTaskSummary(researchTaskItems);
+  const researchTaskLifecycle = buildResearchTaskLifecycle({
+    tasks: researchTaskItems,
+    summary: researchTaskSummary,
+    marketAlertCommandSummary,
+    generatedAt: decisionGeneratedAt,
+    decisionOwner,
+    riskOwner,
+  });
   const marketHighAlertCount = marketAlertEvents.filter((event) => event.priority === "high").length;
   const marketMediumAlertCount = marketAlertEvents.filter((event) => event.priority === "medium").length;
   const marketAlertDecision = marketAlertEvents.length
@@ -1479,6 +1489,13 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleExportResearchTaskLifecycleCsv = () => {
+    downloadTextFile(
+      `bigquery-research-task-lifecycle-${resultStamp()}.csv`,
+      researchTaskLifecycleCsv(researchTaskLifecycle),
+      "text/csv;charset=utf-8",
+    );
+  };
   const buildAssetComparisonMemo = () =>
     assetComparisonMemo(visibleComparisonRows, {
       name: watchlistPresetName.trim() || "未命名 Watchlist",
@@ -1845,7 +1862,9 @@ export function MarketDataPanel() {
           <ResearchTaskBoardSection
             tasks={researchTaskItems}
             summary={researchTaskSummary}
+            lifecycle={researchTaskLifecycle}
             onExportResearchTaskCsv={handleExportResearchTaskCsv}
+            onExportResearchTaskLifecycleCsv={handleExportResearchTaskLifecycleCsv}
           />
 
           {comparisonRows.length ? (

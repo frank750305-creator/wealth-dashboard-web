@@ -2,6 +2,7 @@ import {
   researchTaskLaneLabel,
   researchTaskPriorityLabel,
   researchTaskStatusLabel,
+  type ResearchTaskLifecycle,
   type ResearchTaskItem,
   type ResearchTaskPriority,
   type ResearchTaskStatus,
@@ -11,7 +12,9 @@ import {
 type ResearchTaskBoardSectionProps = {
   tasks: ResearchTaskItem[];
   summary: ResearchTaskSummary;
+  lifecycle: ResearchTaskLifecycle;
   onExportResearchTaskCsv: () => void;
+  onExportResearchTaskLifecycleCsv: () => void;
 };
 
 function statusBadgeClass(status: ResearchTaskStatus) {
@@ -37,7 +40,9 @@ function priorityBadgeClass(priority: ResearchTaskPriority) {
 export function ResearchTaskBoardSection({
   tasks,
   summary,
+  lifecycle,
   onExportResearchTaskCsv,
+  onExportResearchTaskLifecycleCsv,
 }: ResearchTaskBoardSectionProps) {
   return (
     <section className="rounded-lg border border-slate-800 bg-slate-900/50 p-3 space-y-3">
@@ -57,13 +62,69 @@ export function ResearchTaskBoardSection({
             負責：{summary.focusOwner} · {summary.nextAction}
           </p>
         </div>
-        <button
-          onClick={onExportResearchTaskCsv}
-          disabled={!tasks.length}
-          className="self-start xl:self-auto px-3 py-2 rounded-md bg-cyan-700 hover:bg-cyan-600 text-white text-xs font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
-        >
-          任務 CSV
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={onExportResearchTaskLifecycleCsv}
+            className="px-3 py-2 rounded-md bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold"
+          >
+            生命週期 CSV
+          </button>
+          <button
+            onClick={onExportResearchTaskCsv}
+            disabled={!tasks.length}
+            className="px-3 py-2 rounded-md bg-cyan-700 hover:bg-cyan-600 text-white text-xs font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+          >
+            任務 CSV
+          </button>
+        </div>
+      </div>
+
+      <div className={`rounded-md border p-3 ${statusPanelClass(lifecycle.gateStatus)}`}>
+        <div className="flex flex-col xl:flex-row xl:items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-xs font-bold text-slate-100">生命週期 Gate</p>
+              <span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${statusBadgeClass(lifecycle.gateStatus)}`}>
+                {lifecycle.gateLabel}
+              </span>
+            </div>
+            <p className="mt-2 text-sm font-bold text-slate-100">{lifecycle.decision}</p>
+            <p className="mt-1 text-[11px] leading-relaxed text-slate-500">{lifecycle.releaseCondition}</p>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs xl:min-w-[520px]">
+            {[
+              ["目前階段", lifecycle.activeStage],
+              ["阻塞", lifecycle.blockerCount],
+              ["待覆核", lifecycle.readyCount],
+              ["稽核紀錄", lifecycle.auditRecords.length],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded bg-slate-950/70 px-2 py-2 min-w-0">
+                <p className="text-[10px] text-slate-600 truncate">{label}</p>
+                <p className="mt-1 font-mono font-bold text-slate-100 truncate" title={String(value)}>
+                  {value}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-5 gap-2 text-xs">
+        {lifecycle.stages.map((stage) => (
+          <div key={stage.id} className={`rounded-md border p-3 min-w-0 ${statusPanelClass(stage.status)}`}>
+            <div className="flex items-center justify-between gap-2">
+              <p className="font-bold text-slate-100 truncate">{stage.label}</p>
+              <span className={`shrink-0 rounded border px-2 py-0.5 text-[10px] font-bold ${statusBadgeClass(stage.status)}`}>
+                {researchTaskStatusLabel(stage.status)}
+              </span>
+            </div>
+            <p className="mt-2 text-[11px] text-slate-500 truncate">{stage.owner}</p>
+            <p className="mt-1 font-mono text-[11px] text-slate-400 truncate" title={stage.evidence}>
+              {stage.evidence}
+            </p>
+            <p className="mt-2 text-[11px] leading-relaxed text-slate-500">{stage.exitCriteria}</p>
+          </div>
+        ))}
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
@@ -83,7 +144,7 @@ export function ResearchTaskBoardSection({
 
       {tasks.length ? (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-2 text-xs">
-          {tasks.slice(0, 8).map((task) => (
+          {tasks.slice(0, 6).map((task) => (
             <div key={task.id} className={`rounded-md border p-3 min-w-0 ${statusPanelClass(task.status)}`}>
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
@@ -119,6 +180,45 @@ export function ResearchTaskBoardSection({
           目前沒有研究任務。
         </div>
       )}
+
+      {lifecycle.auditRecords.length ? (
+        <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-bold text-slate-100">稽核紀錄</p>
+            <span className="rounded bg-slate-800 px-2 py-0.5 text-[10px] font-bold text-slate-300">
+              {lifecycle.auditRecords.length} 筆
+            </span>
+          </div>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full min-w-[760px] text-xs">
+              <thead>
+                <tr className="text-left text-[11px] text-slate-600">
+                  <th className="py-2 pr-3 font-medium">Time</th>
+                  <th className="py-2 px-3 font-medium">Actor</th>
+                  <th className="py-2 px-3 font-medium">Action</th>
+                  <th className="py-2 px-3 font-medium text-right">Status</th>
+                  <th className="py-2 pl-3 font-medium">Evidence</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lifecycle.auditRecords.slice(0, 6).map((record, index) => (
+                  <tr key={`${record.timestamp}-${record.action}-${index}`} className="border-t border-slate-800">
+                    <td className="py-2 pr-3 font-mono text-slate-400">{record.timestamp.slice(0, 19)}</td>
+                    <td className="py-2 px-3 text-slate-300">{record.actor}</td>
+                    <td className="py-2 px-3 text-slate-200">{record.action}</td>
+                    <td className="py-2 px-3 text-right">
+                      <span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${statusBadgeClass(record.status)}`}>
+                        {researchTaskStatusLabel(record.status)}
+                      </span>
+                    </td>
+                    <td className="py-2 pl-3 font-mono text-slate-500">{record.evidence}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
