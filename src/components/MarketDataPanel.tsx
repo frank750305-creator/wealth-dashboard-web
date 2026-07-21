@@ -1584,6 +1584,15 @@ export function MarketDataPanel() {
       "application/json;charset=utf-8",
     );
   };
+  const refreshResearchTaskSyncAudit = async (workspaceId: string) => {
+    const result = await fetchResearchTaskSyncAudit(12, workspaceId);
+    if (result.status === "schema_outdated") {
+      throw new Error(`研究任務表需先同步升級欄位：${result.missingFields?.join(", ") || "--"}`);
+    }
+    setResearchTaskAuditRecords(result.auditRecords);
+    setResearchTaskAuditError("");
+    return result;
+  };
   const handleSyncResearchTasksToBigQuery = async () => {
     if (!researchTaskItems.length) return;
 
@@ -1605,6 +1614,20 @@ export function MarketDataPanel() {
       setResearchTaskSyncMessage(
         `${result.insertedCount}/${result.receivedCount} 筆寫入 ${result.table}`,
       );
+      if (isSynced) {
+        try {
+          const auditResult = await refreshResearchTaskSyncAudit(researchTaskWorkspaceId);
+          setResearchTaskSyncMessage(
+            `${result.insertedCount}/${result.receivedCount} 筆寫入 ${result.table}；稽核 ${auditResult.auditCount} 批`,
+          );
+        } catch (auditErr: unknown) {
+          const auditMessage = auditErr instanceof Error ? auditErr.message : String(auditErr);
+          setResearchTaskAuditError(auditMessage);
+          setResearchTaskSyncMessage(
+            `${result.insertedCount}/${result.receivedCount} 筆寫入 ${result.table}；稽核更新失敗`,
+          );
+        }
+      }
     } catch (err: unknown) {
       setResearchTaskSyncStatus("error");
       setResearchTaskSyncMessage(err instanceof Error ? err.message : String(err));
@@ -1646,17 +1669,7 @@ export function MarketDataPanel() {
     setResearchTaskSyncMessage("同步稽核載入中。");
 
     try {
-      const result = await fetchResearchTaskSyncAudit(12, researchTaskWorkspaceId);
-      if (result.status === "schema_outdated") {
-        const message = `研究任務表需先同步升級欄位：${result.missingFields?.join(", ") || "--"}`;
-        setResearchTaskAuditError(message);
-        setResearchTaskSyncStatus("error");
-        setResearchTaskSyncMessage(message);
-        return;
-      }
-
-      setResearchTaskAuditRecords(result.auditRecords);
-      setResearchTaskAuditError("");
+      const result = await refreshResearchTaskSyncAudit(researchTaskWorkspaceId);
       setResearchTaskSyncStatus("loaded");
       setResearchTaskSyncMessage(`已載入 ${result.auditCount} 筆同步稽核 ${result.workspaceId}`);
     } catch (err: unknown) {
