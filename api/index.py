@@ -146,6 +146,82 @@ async def market_sources():
         ],
     }
 
+@app.get("/api/v1/platform/data-products")
+async def platform_data_products():
+    return {
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+        "status": "catalog_ready",
+        "dataProducts": [
+            {
+                "id": "market-data-warehouse",
+                "name": "市場資料倉儲",
+                "owner": "Data Engineering",
+                "consumer": "Research Desk / Advisory Team",
+                "input": "daily_prices, daily_fx, fund metadata",
+                "output": "asset search, history, profile, diagnostics",
+                "sla": "daily refresh with schema checks",
+                "version": "v1",
+                "api": [
+                    "/api/v1/market/bigquery/status",
+                    "/api/v1/market/bigquery/diagnostics",
+                    "/api/v1/market/bigquery/assets",
+                ],
+            },
+            {
+                "id": "portfolio-analytics",
+                "name": "投組分析引擎",
+                "owner": "Investment Research",
+                "consumer": "Investment Committee / Advisor",
+                "input": "weights, symbols, benchmark, currency policy",
+                "output": "risk metrics, allocation weights, efficient frontier",
+                "sla": "request-time computation after data readiness checks",
+                "version": "v1",
+                "api": [
+                    "/api/v1/portfolio/analyze-bigquery",
+                    "/api/v1/portfolio/optimize-bigquery",
+                ],
+            },
+            {
+                "id": "research-task-warehouse",
+                "name": "研究任務倉儲",
+                "owner": "Research Operations",
+                "consumer": "Research Desk / Platform Audit",
+                "input": "workspace task state, lifecycle status, manual overrides",
+                "output": "latest task state, sync audit batches",
+                "sla": "manual sync must be queryable by workspace",
+                "version": "v1",
+                "api": [
+                    "/api/v1/research/tasks/bigquery/status",
+                    "/api/v1/research/tasks/bigquery/latest",
+                    "/api/v1/research/tasks/bigquery/audit",
+                    "/api/v1/research/tasks/bigquery/sync",
+                ],
+            },
+        ],
+    }
+
+@app.get("/api/v1/trading/tickets")
+async def trading_tickets(portfolio_id: Optional[str] = None, batch_id: Optional[str] = None):
+    return {
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+        "status": "not_connected",
+        "portfolioId": portfolio_id,
+        "batchId": batch_id,
+        "tickets": [],
+        "schema": {
+            "ticket_id": "string",
+            "portfolio_id": "string",
+            "batch_id": "string",
+            "symbol": "string",
+            "side": "buy | sell | hold",
+            "notional": "number",
+            "currency": "string",
+            "cash_impact": "number",
+            "status": "draft | approved | routed | filled | cancelled",
+        },
+        "nextAction": "Connect approved trade ticket rows from the frontend execution workflow to a persistent order table before routing.",
+    }
+
 # --- 法規常數 ---
 TAX_EXEMPT_VAL = 1333.0
 SPOUSE_DED = 553.0
