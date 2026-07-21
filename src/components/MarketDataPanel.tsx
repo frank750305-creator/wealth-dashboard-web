@@ -77,6 +77,11 @@ import {
   marketAlertCommandSummaryCsv,
 } from "@/lib/marketAlertEvents";
 import {
+  buildResearchTaskItems,
+  buildResearchTaskSummary,
+  researchTaskCsv,
+} from "@/lib/researchTaskWorkflow";
+import {
   buildDataLicenseComplianceItems,
   dataLicenseComplianceCsv,
 } from "@/lib/dataLicenseCompliance";
@@ -173,6 +178,7 @@ import { PolicyLimitSection } from "./PolicyLimitSection";
 import { PlatformExceptionSection } from "./PlatformExceptionSection";
 import { PostTradeAttributionSection } from "./PostTradeAttributionSection";
 import { RebalanceDraftSection } from "./RebalanceDraftSection";
+import { ResearchTaskBoardSection } from "./ResearchTaskBoardSection";
 import { SecurityNotesSection } from "./SecurityNotesSection";
 import { SlaEscalationSection } from "./SlaEscalationSection";
 import { TradeBatchSection } from "./TradeBatchSection";
@@ -707,6 +713,17 @@ export function MarketDataPanel() {
     ownerQueues: marketAlertOwnerQueues,
     runbookItems: marketAlertRunbookItems,
   });
+  const researchTaskItems = buildResearchTaskItems({
+    comparisonRows,
+    visibleComparisonRows,
+    assetProfileSymbol: assetProfile?.symbol,
+    activeAllocationRows,
+    marketAlertCommandSummary,
+    marketAlertRunbookItems,
+    researchOwner: decisionOwner,
+    riskOwner,
+  });
+  const researchTaskSummary = buildResearchTaskSummary(researchTaskItems);
   const marketHighAlertCount = marketAlertEvents.filter((event) => event.priority === "high").length;
   const marketMediumAlertCount = marketAlertEvents.filter((event) => event.priority === "medium").length;
   const marketAlertDecision = marketAlertEvents.length
@@ -1453,6 +1470,15 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleExportResearchTaskCsv = () => {
+    if (!researchTaskItems.length) return;
+
+    downloadTextFile(
+      `bigquery-research-task-board-${resultStamp()}.csv`,
+      researchTaskCsv(researchTaskItems),
+      "text/csv;charset=utf-8",
+    );
+  };
   const buildAssetComparisonMemo = () =>
     assetComparisonMemo(visibleComparisonRows, {
       name: watchlistPresetName.trim() || "未命名 Watchlist",
@@ -1814,6 +1840,12 @@ export function MarketDataPanel() {
             minimumComparisonScore={minimumComparisonScore}
             onMinimumComparisonScoreChange={setMinimumComparisonScore}
             comparisonError={comparisonError}
+          />
+
+          <ResearchTaskBoardSection
+            tasks={researchTaskItems}
+            summary={researchTaskSummary}
+            onExportResearchTaskCsv={handleExportResearchTaskCsv}
           />
 
           {comparisonRows.length ? (
