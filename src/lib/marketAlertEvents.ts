@@ -28,6 +28,20 @@ export type MarketAlertOwnerQueue = {
   nextAction: string;
 };
 
+export type MarketAlertRunbookItem = {
+  source: string;
+  title: string;
+  status: MarketAlertStatus;
+  priority: MarketAlertPriority;
+  owner: string;
+  deadline: string;
+  trigger: string;
+  diagnose: string;
+  resolve: string;
+  verify: string;
+  escalation: string;
+};
+
 type CoverageUniverseAlertInput = {
   label: string;
   status: MarketAlertStatus;
@@ -144,6 +158,70 @@ function marketAlertPriorityFromEvents(events: MarketAlertEvent[]): MarketAlertP
   if (events.some((event) => event.priority === "high")) return "high";
   if (events.some((event) => event.priority === "medium")) return "medium";
   return "low";
+}
+
+function marketAlertDeadline(priority: MarketAlertPriority, status: MarketAlertStatus) {
+  if (priority === "high" || status === "block") return "T+0 盤中處理";
+  if (priority === "medium" || status === "watch") return "T+1 收盤前";
+  return "週檢查";
+}
+
+function runbookTemplateForSource(source: string) {
+  if (source === "資料合約") {
+    return {
+      diagnose: "比對 BigQuery schema、必要欄位與 API 回傳欄位，確認是缺欄位、型別不符或查詢口徑變更。",
+      resolve: "修正資料表欄位、查詢映射或 ingestion schema，必要時補一次歷史回填。",
+      verify: "重新讀取 diagnostics，確認 schema check 通過且缺欄位清單為空。",
+    };
+  }
+  if (source === "資料管線") {
+    return {
+      diagnose: "檢查最近批次、資料日期、row count 與來源抓取結果，定位是抓取失敗、寫入失敗或排程中斷。",
+      resolve: "重跑對應 ingestion job，補齊缺口日期，並確認失敗原因已移除。",
+      verify: "重新檢查 latest date、stale symbol 與資料管線健康卡是否回到通過。",
+    };
+  }
+  if (source === "資料品質") {
+    return {
+      diagnose: "檢查 freshness、coverage、depth 與缺漏價格，確認異常集中在單一資產、資料表或整批資料。",
+      resolve: "回補缺漏價格、修正 symbol mapping，或暫時將受影響資產排除在正式分析外。",
+      verify: "重新產生品質 scorecard，確認分數與狀態恢復到正常或觀察區。",
+    };
+  }
+  if (source === "可投資宇宙") {
+    return {
+      diagnose: "檢查商品主檔、可投資清單與 watchlist 是否有缺資產、重複 symbol 或資料期間不足。",
+      resolve: "補 metadata、清理重複商品，並更新 watchlist preset。",
+      verify: "重新搜尋與比較資產，確認候選資產可進入配置與研究 memo。",
+    };
+  }
+  if (source === "決策漏斗") {
+    return {
+      diagnose: "檢查從 watchlist、配置草案、交易 ticket 到成交回填的轉換斷點。",
+      resolve: "補齊缺少的配置、交易或覆核資料，重新產生決策漏斗。",
+      verify: "確認漏斗主要階段不再 block，且候選、配置、交易數量合理。",
+    };
+  }
+  if (source === "營運 KRI") {
+    return {
+      diagnose: "檢查交易成本、未成交金額、SLA、例外項與風控限制是否超過門檻。",
+      resolve: "分派負責人處理高風險 KRI，必要時暫停交易或降低部位。",
+      verify: "重新產生營運 KRI，確認 block 項目下降並留下處理紀錄。",
+    };
+  }
+  if (source === "SLA 升級") {
+    return {
+      diagnose: "確認升級等級、到期時間、未處理 owner 與受影響流程。",
+      resolve: "依 L1/L2/L3 節奏處理，L1 立即通知負責人並凍結相關放行。",
+      verify: "確認 SLA 狀態降級或解除，並同步到 owner queue。",
+    };
+  }
+
+  return {
+    diagnose: "確認事件來源、依據與受影響流程，避免把資料問題誤判為投資結論。",
+    resolve: "依事件 action 完成修復或人工覆核，必要時暫停放行。",
+    verify: "重新產生市場警示中心，確認事件狀態下降或消失。",
+  };
 }
 
 export function buildMarketAlertEvents({
@@ -365,6 +443,75 @@ export function marketAlertOwnerQueueCsv(rows: MarketAlertOwnerQueue[]) {
     row.pass,
     row.topSource,
     row.nextAction,
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+export function buildMarketAlertRunbookItems(rows: MarketAlertEvent[]): MarketAlertRunbookItem[] {
+  const priorityRank: Record<MarketAlertPriority, number> = { high: 0, medium: 1, low: 2 };
+  const statusRank: Record<MarketAlertStatus, number> = { block: 0, watch: 1, pass: 2 };
+
+  return rows
+    .map((row) => {
+      const template = runbookTemplateForSource(row.source);
+      const escalation =
+        row.status === "block"
+          ? "若 T+0 無法解除，升級給決策負責人並暫停相關模型輸出。"
+          : row.priority === "medium"
+            ? "若 T+1 仍未解除，排入每日站會並指定修復時間。"
+            : "若連續兩次週檢仍存在，轉為觀察項。";
+
+      return {
+        source: row.source,
+        title: row.title,
+        status: row.status,
+        priority: row.priority,
+        owner: row.owner,
+        deadline: marketAlertDeadline(row.priority, row.status),
+        trigger: row.evidence,
+        diagnose: template.diagnose,
+        resolve: `${template.resolve} 目前動作：${row.action}`,
+        verify: template.verify,
+        escalation,
+      };
+    })
+    .sort(
+      (left, right) =>
+        priorityRank[left.priority] - priorityRank[right.priority] ||
+        statusRank[left.status] - statusRank[right.status] ||
+        left.owner.localeCompare(right.owner, "zh-Hant") ||
+        left.title.localeCompare(right.title, "zh-Hant"),
+    )
+    .slice(0, 18);
+}
+
+export function marketAlertRunbookCsv(rows: MarketAlertRunbookItem[]) {
+  const header = [
+    "source",
+    "title",
+    "priority",
+    "status",
+    "owner",
+    "deadline",
+    "trigger",
+    "diagnose",
+    "resolve",
+    "verify",
+    "escalation",
+  ];
+  const csvRows = rows.map((row) => [
+    row.source,
+    row.title,
+    executionHandoffPriorityLabel(row.priority),
+    executionReviewLabel(row.status),
+    row.owner,
+    row.deadline,
+    row.trigger,
+    row.diagnose,
+    row.resolve,
+    row.verify,
+    row.escalation,
   ]);
 
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");

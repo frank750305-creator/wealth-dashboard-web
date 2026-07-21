@@ -2,6 +2,7 @@ import type {
   MarketAlertEvent,
   MarketAlertOwnerQueue,
   MarketAlertPriority,
+  MarketAlertRunbookItem,
   MarketAlertStatus,
 } from "@/lib/marketAlertEvents";
 
@@ -9,8 +10,10 @@ type MarketAlertSectionProps = {
   marketAlertDecision: MarketAlertStatus;
   onExportMarketAlertCsv: () => void;
   onExportMarketAlertOwnerQueueCsv: () => void;
+  onExportMarketAlertRunbookCsv: () => void;
   marketAlertEvents: MarketAlertEvent[];
   marketAlertOwnerQueues: MarketAlertOwnerQueue[];
+  marketAlertRunbookItems: MarketAlertRunbookItem[];
   marketHighAlertCount: number;
   marketMediumAlertCount: number;
   platformExceptionCount: number;
@@ -50,8 +53,10 @@ export function MarketAlertSection({
   marketAlertDecision,
   onExportMarketAlertCsv,
   onExportMarketAlertOwnerQueueCsv,
+  onExportMarketAlertRunbookCsv,
   marketAlertEvents,
   marketAlertOwnerQueues,
+  marketAlertRunbookItems,
   marketHighAlertCount,
   marketMediumAlertCount,
   platformExceptionCount,
@@ -77,6 +82,13 @@ export function MarketAlertSection({
             className="px-3 py-2 rounded-md bg-cyan-700 hover:bg-cyan-600 text-white text-xs font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
           >
             分派 CSV
+          </button>
+          <button
+            onClick={onExportMarketAlertRunbookCsv}
+            disabled={!marketAlertRunbookItems.length}
+            className="px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+          >
+            Runbook CSV
           </button>
           <button
             onClick={onExportMarketAlertCsv}
@@ -133,6 +145,50 @@ export function MarketAlertSection({
               <p className="mt-3 text-[11px] leading-relaxed text-slate-500">{queue.nextAction}</p>
             </div>
           ))}
+        </div>
+      ) : null}
+
+      {marketAlertRunbookItems.length ? (
+        <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3 space-y-3">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-bold text-slate-100">Runbook 處理手冊</p>
+              <p className="mt-0.5 text-[11px] text-slate-500">把警示轉成檢查、修復、驗收與升級條件</p>
+            </div>
+            <span className="self-start md:self-auto rounded bg-slate-800 px-2 py-0.5 text-[10px] font-bold text-slate-300">
+              {marketAlertRunbookItems.length} 條
+            </span>
+          </div>
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-2 text-xs">
+            {marketAlertRunbookItems.slice(0, 4).map((item) => (
+              <div key={`${item.source}-${item.title}-${item.owner}`} className={`rounded-md border p-3 min-w-0 ${executionReviewRowClass(item.status)}`}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-bold text-slate-100 truncate">{item.title}</p>
+                    <p className="mt-1 text-[11px] text-slate-500 truncate">
+                      {item.source} · {item.owner} · {item.deadline}
+                    </p>
+                  </div>
+                  <span className={`shrink-0 rounded border px-2 py-0.5 text-[10px] font-bold ${marketAlertPriorityClass(item.priority)}`}>
+                    {marketAlertPriorityLabel(item.priority)}
+                  </span>
+                </div>
+                <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {[
+                    ["檢查", item.diagnose],
+                    ["修復", item.resolve],
+                    ["驗收", item.verify],
+                    ["升級", item.escalation],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded bg-slate-950/70 p-2">
+                      <p className="text-[10px] font-bold text-slate-500">{label}</p>
+                      <p className="mt-1 text-[11px] leading-relaxed text-slate-400">{value}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       ) : null}
 

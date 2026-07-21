@@ -71,6 +71,8 @@ import {
   marketAlertCsv,
   buildMarketAlertOwnerQueues,
   marketAlertOwnerQueueCsv,
+  buildMarketAlertRunbookItems,
+  marketAlertRunbookCsv,
 } from "@/lib/marketAlertEvents";
 import {
   buildDataLicenseComplianceItems,
@@ -697,6 +699,7 @@ export function MarketDataPanel() {
     decisionApprover,
   });
   const marketAlertOwnerQueues = buildMarketAlertOwnerQueues(marketAlertEvents);
+  const marketAlertRunbookItems = buildMarketAlertRunbookItems(marketAlertEvents);
   const marketHighAlertCount = marketAlertEvents.filter((event) => event.priority === "high").length;
   const marketMediumAlertCount = marketAlertEvents.filter((event) => event.priority === "medium").length;
   const marketAlertDecision = marketAlertEvents.length
@@ -1427,6 +1430,15 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleExportMarketAlertRunbookCsv = () => {
+    if (!marketAlertRunbookItems.length) return;
+
+    downloadTextFile(
+      `bigquery-market-alert-runbook-${resultStamp()}.csv`,
+      marketAlertRunbookCsv(marketAlertRunbookItems),
+      "text/csv;charset=utf-8",
+    );
+  };
   const buildAssetComparisonMemo = () =>
     assetComparisonMemo(visibleComparisonRows, {
       name: watchlistPresetName.trim() || "未命名 Watchlist",
@@ -2017,8 +2029,10 @@ export function MarketDataPanel() {
                             marketAlertDecision={marketAlertDecision}
                             onExportMarketAlertCsv={handleExportMarketAlertCsv}
                             onExportMarketAlertOwnerQueueCsv={handleExportMarketAlertOwnerQueueCsv}
+                            onExportMarketAlertRunbookCsv={handleExportMarketAlertRunbookCsv}
                             marketAlertEvents={marketAlertEvents}
                             marketAlertOwnerQueues={marketAlertOwnerQueues}
+                            marketAlertRunbookItems={marketAlertRunbookItems}
                             marketHighAlertCount={marketHighAlertCount}
                             marketMediumAlertCount={marketMediumAlertCount}
                             platformExceptionCount={platformExceptionItems.length}
