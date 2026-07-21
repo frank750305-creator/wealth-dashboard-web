@@ -31,6 +31,10 @@ try:
         load_latest_trade_ticket_records,
         sync_trade_ticket_records,
     )
+    from .execution_route_service import (
+        load_latest_execution_route_records,
+        sync_execution_route_records,
+    )
 except ImportError:
     from market_data_service import (
         MarketDataError,
@@ -55,6 +59,10 @@ except ImportError:
     from trading_ticket_service import (
         load_latest_trade_ticket_records,
         sync_trade_ticket_records,
+    )
+    from execution_route_service import (
+        load_latest_execution_route_records,
+        sync_execution_route_records,
     )
 
 app = FastAPI(title="高資產傳承與所得稅擇優核算大腦", version="4.0_Ultimate")
@@ -203,6 +211,20 @@ async def platform_data_products():
                     "/api/v1/research/tasks/bigquery/latest",
                     "/api/v1/research/tasks/bigquery/audit",
                     "/api/v1/research/tasks/bigquery/sync",
+                ],
+            },
+            {
+                "id": "trade-execution-warehouse",
+                "name": "交易執行倉儲",
+                "owner": "Execution Operations",
+                "consumer": "Trading Desk / Platform Audit",
+                "input": "trade tickets, approval gates, simulated route status",
+                "output": "latest trade tickets, execution routes, route audit trail",
+                "sla": "manual sync must be queryable by workspace, portfolio, and batch",
+                "version": "v1",
+                "api": [
+                    "/api/v1/trading/tickets",
+                    "/api/v1/trading/routes",
                 ],
             },
         ],
@@ -497,6 +519,43 @@ class TradeTicketSyncPayload(BaseModel):
     generated_at: Optional[str] = None
     records: List[TradeTicketSyncRecordPayload]
 
+class ExecutionRouteSyncRecordPayload(BaseModel):
+    workspace_id: Optional[str] = None
+    actor_id: Optional[str] = None
+    route_id: str
+    ticket_id: Optional[str] = None
+    idempotency_key: Optional[str] = None
+    generated_at: str
+    updated_at: str
+    portfolio_id: Optional[str] = None
+    batch_id: Optional[str] = None
+    batch_number: int = 0
+    sequence_in_batch: int = 0
+    route_sequence: int = 0
+    symbol: str
+    direction: str
+    venue: str
+    route_state: str
+    route_status: str
+    route_notional: float = 0
+    ticket_amount: float = 0
+    cash_impact: float = 0
+    batch_gross_amount: float = 0
+    batch_cash_impact: float = 0
+    estimated_slippage_bps: float = 0
+    estimated_commission_bps: float = 0
+    estimated_route_cost: float = 0
+    approval_decision: str = "watch"
+    route_note: Optional[str] = None
+
+class ExecutionRouteSyncPayload(BaseModel):
+    workspace_id: Optional[str] = None
+    actor_id: Optional[str] = None
+    portfolio_id: Optional[str] = None
+    batch_id: Optional[str] = None
+    generated_at: Optional[str] = None
+    records: List[ExecutionRouteSyncRecordPayload]
+
 def calc_tw_tax(net_inc: float) -> float:
     if net_inc <= 56: return net_inc * 0.05
     elif net_inc <= 126: return net_inc * 0.12 - 3.92
@@ -604,6 +663,44 @@ async def sync_trading_tickets(payload: TradeTicketSyncPayload):
         return {
             "generatedAt": datetime.now(timezone.utc).isoformat(),
             **sync_trade_ticket_records(records),
+        }
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+@app.get("/api/v1/trading/routes")
+async def trading_execution_routes(
+    workspace_id: Optional[str] = None,
+    portfolio_id: Optional[str] = None,
+    batch_id: Optional[str] = None,
+    limit: int = 100,
+):
+    try:
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            **load_latest_execution_route_records(
+                limit=limit,
+                workspace_id=workspace_id,
+                portfolio_id=portfolio_id,
+                batch_id=batch_id,
+            ),
+        }
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+@app.post("/api/v1/trading/routes")
+async def sync_trading_execution_routes(payload: ExecutionRouteSyncPayload):
+    try:
+        records = []
+        for record in payload.records:
+            item = record.model_dump()
+            item["workspace_id"] = item.get("workspace_id") or payload.workspace_id
+            item["actor_id"] = item.get("actor_id") or payload.actor_id
+            item["portfolio_id"] = item.get("portfolio_id") or payload.portfolio_id
+            item["batch_id"] = item.get("batch_id") or payload.batch_id
+            records.append(item)
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            **sync_execution_route_records(records),
         }
     except MarketDataError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc))

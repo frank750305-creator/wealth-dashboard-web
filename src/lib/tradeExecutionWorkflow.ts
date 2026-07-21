@@ -1,4 +1,7 @@
-import type { TradeTicketWarehouseSyncPayload } from "@/types/market";
+import type {
+  ExecutionRouteWarehouseSyncPayload,
+  TradeTicketWarehouseSyncPayload,
+} from "@/types/market";
 
 export type RebalanceDirection = "buy" | "sell" | "hold";
 
@@ -528,6 +531,73 @@ export function executionRouteCsv(rows: ExecutionRouteRow[]) {
   ]);
 
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+export function buildExecutionRouteSyncPayload({
+  routes,
+  generatedAt,
+  workspaceId,
+  actorId,
+  portfolioId,
+  batchId,
+  approvalDecision,
+}: {
+  routes: ExecutionRouteRow[];
+  generatedAt: string;
+  workspaceId?: string;
+  actorId?: string;
+  portfolioId?: string;
+  batchId?: string;
+  approvalDecision: ExecutionReviewStatus;
+}): ExecutionRouteWarehouseSyncPayload {
+  const cleanWorkspaceId = normalizeWarehouseKey(workspaceId, "default");
+  const cleanActorId = normalizeWarehouseKey(actorId, "system");
+  const cleanPortfolioId = normalizeWarehouseKey(portfolioId, "default-portfolio");
+  const cleanBatchId = normalizeWarehouseKey(batchId, generatedAt);
+  const records = routes.map((route) => {
+    const ticketId = `${cleanPortfolioId}:${cleanBatchId}:${route.symbol}:${route.direction}`;
+    const routeId = `${cleanPortfolioId}:${cleanBatchId}:${route.routeId}`;
+    return {
+      workspace_id: cleanWorkspaceId,
+      actor_id: cleanActorId,
+      route_id: routeId,
+      ticket_id: ticketId,
+      idempotency_key: `${cleanWorkspaceId}:${cleanActorId}:${routeId}:${generatedAt}`,
+      generated_at: generatedAt,
+      updated_at: generatedAt,
+      portfolio_id: cleanPortfolioId,
+      batch_id: cleanBatchId,
+      batch_number: route.batchNumber,
+      sequence_in_batch: route.sequenceInBatch,
+      route_sequence: route.routeSequence,
+      symbol: route.symbol,
+      direction: route.direction,
+      venue: route.venue,
+      route_state: route.routeState,
+      route_status: route.routeStatus,
+      route_notional: route.routeNotional,
+      ticket_amount: route.ticketAmount,
+      cash_impact: route.cashImpact,
+      batch_gross_amount: route.batchGrossAmount,
+      batch_cash_impact: route.batchCashImpact,
+      estimated_slippage_bps: route.estimatedSlippageBps,
+      estimated_commission_bps: route.estimatedCommissionBps,
+      estimated_route_cost: route.estimatedRouteCost,
+      approval_decision: approvalDecision,
+      route_note: route.routeNote,
+    };
+  });
+
+  return {
+    table: "execution_routes",
+    workspace_id: cleanWorkspaceId,
+    actor_id: cleanActorId,
+    portfolio_id: cleanPortfolioId,
+    batch_id: cleanBatchId,
+    generated_at: generatedAt,
+    record_count: records.length,
+    records,
+  };
 }
 
 export function buildExecutionFillRows({

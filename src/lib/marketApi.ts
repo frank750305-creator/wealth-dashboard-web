@@ -4,6 +4,9 @@ import type {
   BigQueryAssetHistoryResponse,
   BigQueryAssetProfileResponse,
   BigQueryAssetSearchResponse,
+  ExecutionRouteWarehouseLatestResponse,
+  ExecutionRouteWarehouseSyncPayload,
+  ExecutionRouteWarehouseSyncResponse,
   MarketSourcesResponse,
   PortfolioAnalysisResponse,
   PortfolioAnalyzeBigQueryPayload,
@@ -177,6 +180,54 @@ export async function syncTradeTicketsToBigQuery(
   if (!response.ok) {
     const errText = await response.text();
     throw new Error(`交易票 BigQuery 同步異常 (代碼: ${response.status})\n${errText}`);
+  }
+
+  return response.json();
+}
+
+export async function fetchLatestExecutionRoutesFromBigQuery({
+  limit = 100,
+  workspaceId = "default",
+  portfolioId = "",
+  batchId = "",
+}: {
+  limit?: number;
+  workspaceId?: string;
+  portfolioId?: string;
+  batchId?: string;
+}): Promise<ExecutionRouteWarehouseLatestResponse> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    workspace_id: workspaceId.trim() || "default",
+  });
+  if (portfolioId.trim()) params.set("portfolio_id", portfolioId.trim());
+  if (batchId.trim()) params.set("batch_id", batchId.trim());
+
+  const response = await fetch(`/api/v1/trading/routes?${params.toString()}`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`執行路由 BigQuery 載入異常 (代碼: ${response.status})\n${errText}`);
+  }
+
+  return response.json();
+}
+
+export async function syncExecutionRoutesToBigQuery(
+  payload: ExecutionRouteWarehouseSyncPayload,
+): Promise<ExecutionRouteWarehouseSyncResponse> {
+  const response = await fetch("/api/v1/trading/routes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`執行路由 BigQuery 同步異常 (代碼: ${response.status})\n${errText}`);
   }
 
   return response.json();

@@ -37,10 +37,12 @@ import {
   fetchBigQueryAssetHistory,
   fetchBigQueryAssetProfile,
   fetchBigQueryAssets,
+  fetchLatestExecutionRoutesFromBigQuery,
   fetchLatestTradeTicketsFromBigQuery,
   fetchLatestResearchTasksFromBigQuery,
   fetchResearchTaskSyncAudit,
   fetchResearchTaskWarehouseStatus,
+  syncExecutionRoutesToBigQuery,
   syncTradeTicketsToBigQuery,
   syncResearchTasksToBigQuery,
 } from "@/lib/marketApi";
@@ -163,6 +165,7 @@ import {
 import {
   buildExecutionFillRows,
   buildExecutionRouteRows,
+  buildExecutionRouteSyncPayload,
   buildTradeTicketApprovalGateItems,
   buildTradeTicketSyncPayload,
   executionFillCsv,
@@ -333,6 +336,11 @@ export function MarketDataPanel() {
   >("idle");
   const [tradeTicketSyncMessage, setTradeTicketSyncMessage] = useState("");
   const [tradeTicketWarehouseCount, setTradeTicketWarehouseCount] = useState(0);
+  const [executionRouteSyncStatus, setExecutionRouteSyncStatus] = useState<
+    "idle" | "syncing" | "loading" | "synced" | "loaded" | "error"
+  >("idle");
+  const [executionRouteSyncMessage, setExecutionRouteSyncMessage] = useState("");
+  const [executionRouteWarehouseCount, setExecutionRouteWarehouseCount] = useState(0);
   const [watchlistMemoCopyStatus, setWatchlistMemoCopyStatus] = useState<"idle" | "copied">("idle");
   const sources = data?.sources ?? [];
   const securedCount = sources.filter((source) => source.status !== "needs_secret").length;
@@ -1583,6 +1591,56 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleSyncExecutionRoutesToBigQuery = async () => {
+    if (!executionRouteRows.length) return;
+
+    setExecutionRouteSyncStatus("syncing");
+    setExecutionRouteSyncMessage("執行路由同步中。");
+
+    try {
+      const result = await syncExecutionRoutesToBigQuery(
+        buildExecutionRouteSyncPayload({
+          routes: executionRouteRows,
+          generatedAt: decisionGeneratedAt,
+          workspaceId: researchTaskWorkspaceId,
+          actorId: executionOwner,
+          portfolioId: tradeTicketPortfolioId,
+          batchId: tradeTicketBatchId,
+          approvalDecision: tradeTicketApprovalDecision,
+        }),
+      );
+      const isSynced = result.status === "synced";
+      setExecutionRouteSyncStatus(isSynced ? "synced" : "error");
+      setExecutionRouteWarehouseCount(result.insertedCount);
+      setExecutionRouteSyncMessage(`${result.insertedCount}/${result.receivedCount} 筆執行路由寫入 ${result.table}`);
+    } catch (err: unknown) {
+      setExecutionRouteSyncStatus("error");
+      setExecutionRouteSyncMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
+  const handleLoadExecutionRoutesFromBigQuery = async () => {
+    setExecutionRouteSyncStatus("loading");
+    setExecutionRouteSyncMessage("執行路由載入中。");
+
+    try {
+      const result = await fetchLatestExecutionRoutesFromBigQuery({
+        limit: 100,
+        workspaceId: researchTaskWorkspaceId,
+        portfolioId: tradeTicketPortfolioId,
+      });
+      if (result.status === "schema_outdated") {
+        setExecutionRouteSyncStatus("error");
+        setExecutionRouteSyncMessage(`執行路由表需先同步升級欄位：${result.missingFields?.join(", ") || "--"}`);
+        return;
+      }
+      setExecutionRouteWarehouseCount(result.routeCount);
+      setExecutionRouteSyncStatus("loaded");
+      setExecutionRouteSyncMessage(`已讀取 ${result.routeCount} 筆執行路由 ${result.workspaceId}`);
+    } catch (err: unknown) {
+      setExecutionRouteSyncStatus("error");
+      setExecutionRouteSyncMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
   const handleExportExecutionFillCsv = () => {
     if (!executionFillRows.length) return;
 
@@ -2425,12 +2483,18 @@ export function MarketDataPanel() {
                             onRouteSlippageBpsChange={setRouteSlippageBps}
                             routeCommissionBps={routeCommissionBps}
                             onRouteCommissionBpsChange={setRouteCommissionBps}
+                            onSyncExecutionRoutesToBigQuery={handleSyncExecutionRoutesToBigQuery}
+                            onLoadExecutionRoutesFromBigQuery={handleLoadExecutionRoutesFromBigQuery}
                             onExportExecutionRouteCsv={handleExportExecutionRouteCsv}
                             executionRouteRows={executionRouteRows}
                             routedCount={executionRouteRoutedCount}
                             stagedCount={executionRouteStagedCount}
                             blockedCount={executionRouteBlockedCount}
                             estimatedRouteCost={estimatedRouteCost}
+                            hasBigQueryCredentials={hasBigQueryCredentials}
+                            syncStatus={executionRouteSyncStatus}
+                            syncMessage={executionRouteSyncMessage}
+                            warehouseRouteCount={executionRouteWarehouseCount}
                           />
 
                           <ExecutionFillSection

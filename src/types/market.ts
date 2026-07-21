@@ -494,3 +494,66 @@ export type TradeTicketWarehouseLatestResponse = {
   missingFields?: string[];
   tickets: TradeTicketWarehouseRecord[];
 };
+
+export type ExecutionRouteWarehouseRecord = {
+  workspace_id: string;
+  actor_id: string;
+  route_id: string;
+  ticket_id: string | null;
+  idempotency_key: string;
+  generated_at: string;
+  updated_at: string;
+  portfolio_id: string | null;
+  batch_id: string | null;
+  batch_number: number;
+  sequence_in_batch: number;
+  route_sequence: number;
+  symbol: string;
+  direction: string;
+  venue: string;
+  route_state: string;
+  route_status: string;
+  route_notional: number;
+  ticket_amount: number;
+  cash_impact: number;
+  batch_gross_amount: number;
+  batch_cash_impact: number;
+  estimated_slippage_bps: number;
+  estimated_commission_bps: number;
+  estimated_route_cost: number;
+  approval_decision: string;
+  route_note: string | null;
+};
+
+export type ExecutionRouteWarehouseSyncPayload = {
+  table: string;
+  workspace_id: string;
+  actor_id: string;
+  portfolio_id: string;
+  batch_id: string;
+  generated_at: string;
+  record_count: number;
+  records: ExecutionRouteWarehouseRecord[];
+};
+
+export type ExecutionRouteWarehouseSyncResponse = {
+  generatedAt: string;
+  status: "synced" | "partial_error" | string;
+  table: string;
+  receivedCount: number;
+  insertedCount: number;
+  errors: unknown[];
+};
+
+export type ExecutionRouteWarehouseLatestResponse = {
+  generatedAt: string;
+  status: "loaded" | "missing" | "schema_outdated" | string;
+  table: string;
+  workspaceId: string;
+  portfolioId?: string | null;
+  batchId?: string | null;
+  limit: number;
+  routeCount: number;
+  missingFields?: string[];
+  routes: ExecutionRouteWarehouseRecord[];
+};
