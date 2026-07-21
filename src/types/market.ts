@@ -959,3 +959,71 @@ export type DecisionFunnelWarehouseLatestResponse = {
   missingFields?: string[];
   stages: DecisionFunnelWarehouseRecord[];
 };
+
+export type MarketAlertWarehouseRecord = {
+  workspace_id: string;
+  actor_id: string;
+  alert_id: string;
+  idempotency_key: string;
+  generated_at: string;
+  updated_at: string;
+  portfolio_id: string | null;
+  batch_id: string | null;
+  source: string;
+  title: string;
+  status: string;
+  priority: string;
+  owner: string | null;
+  evidence: string | null;
+  action: string | null;
+  command_status: string;
+  command_priority: string;
+  operating_mode: string | null;
+  release_gate: string | null;
+  headline: string | null;
+  blocked_flow: string | null;
+  focus_owner: string | null;
+  focus_source: string | null;
+  immediate_action: string | null;
+  next_review: string | null;
+  total_alerts: number;
+  high_priority_count: number;
+  block_count: number;
+  watch_count: number;
+  owner_count: number;
+  runbook_count: number;
+  source_system: string;
+};
+
+export type MarketAlertWarehouseSyncPayload = {
+  table: string;
+  workspace_id: string;
+  actor_id: string;
+  portfolio_id: string;
+  batch_id: string;
+  generated_at: string;
+  record_count: number;
+  records: MarketAlertWarehouseRecord[];
+};
+
+export type MarketAlertWarehouseSyncResponse = {
+  generatedAt: string;
+  status: "synced" | "partial_error" | string;
+  table: string;
+  receivedCount: number;
+  insertedCount: number;
+  errors: unknown[];
+};
+
+export type MarketAlertWarehouseLatestResponse = {
+  generatedAt: string;
+  status: "loaded" | "missing" | "schema_outdated" | string;
+  table: string;
+  workspaceId: string;
+  portfolioId?: string | null;
+  batchId?: string | null;
+  limit: number;
+  alertCount: number;
+  missingFields?: string[];
+  alerts: MarketAlertWarehouseRecord[];
+};

@@ -61,6 +61,10 @@ try:
         load_latest_decision_funnel_records,
         sync_decision_funnel_records,
     )
+    from .market_alert_service import (
+        load_latest_market_alert_records,
+        sync_market_alert_records,
+    )
 except ImportError:
     from market_data_service import (
         MarketDataError,
@@ -115,6 +119,10 @@ except ImportError:
     from decision_funnel_service import (
         load_latest_decision_funnel_records,
         sync_decision_funnel_records,
+    )
+    from market_alert_service import (
+        load_latest_market_alert_records,
+        sync_market_alert_records,
     )
 
 app = FastAPI(title="高資產傳承與所得稅擇優核算大腦", version="4.0_Ultimate")
@@ -284,6 +292,7 @@ async def platform_data_products():
                     "/api/v1/trading/sla-escalations",
                     "/api/v1/trading/operating-kri",
                     "/api/v1/trading/decision-funnel",
+                    "/api/v1/trading/market-alerts",
                 ],
             },
         ],
@@ -834,6 +843,48 @@ class DecisionFunnelSyncPayload(BaseModel):
     generated_at: Optional[str] = None
     records: List[DecisionFunnelSyncRecordPayload]
 
+class MarketAlertSyncRecordPayload(BaseModel):
+    workspace_id: Optional[str] = None
+    actor_id: Optional[str] = None
+    alert_id: str
+    idempotency_key: Optional[str] = None
+    generated_at: str
+    updated_at: str
+    portfolio_id: Optional[str] = None
+    batch_id: Optional[str] = None
+    source: str
+    title: str
+    status: str
+    priority: str
+    owner: Optional[str] = None
+    evidence: Optional[str] = None
+    action: Optional[str] = None
+    command_status: str
+    command_priority: str
+    operating_mode: Optional[str] = None
+    release_gate: Optional[str] = None
+    headline: Optional[str] = None
+    blocked_flow: Optional[str] = None
+    focus_owner: Optional[str] = None
+    focus_source: Optional[str] = None
+    immediate_action: Optional[str] = None
+    next_review: Optional[str] = None
+    total_alerts: int = 0
+    high_priority_count: int = 0
+    block_count: int = 0
+    watch_count: int = 0
+    owner_count: int = 0
+    runbook_count: int = 0
+    source_system: str = "market_alert_center"
+
+class MarketAlertSyncPayload(BaseModel):
+    workspace_id: Optional[str] = None
+    actor_id: Optional[str] = None
+    portfolio_id: Optional[str] = None
+    batch_id: Optional[str] = None
+    generated_at: Optional[str] = None
+    records: List[MarketAlertSyncRecordPayload]
+
 def calc_tw_tax(net_inc: float) -> float:
     if net_inc <= 56: return net_inc * 0.05
     elif net_inc <= 126: return net_inc * 0.12 - 3.92
@@ -1247,6 +1298,44 @@ async def sync_trading_decision_funnel(payload: DecisionFunnelSyncPayload):
         return {
             "generatedAt": datetime.now(timezone.utc).isoformat(),
             **sync_decision_funnel_records(records),
+        }
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+@app.get("/api/v1/trading/market-alerts")
+async def trading_market_alerts(
+    workspace_id: Optional[str] = None,
+    portfolio_id: Optional[str] = None,
+    batch_id: Optional[str] = None,
+    limit: int = 100,
+):
+    try:
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            **load_latest_market_alert_records(
+                limit=limit,
+                workspace_id=workspace_id,
+                portfolio_id=portfolio_id,
+                batch_id=batch_id,
+            ),
+        }
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+@app.post("/api/v1/trading/market-alerts")
+async def sync_trading_market_alerts(payload: MarketAlertSyncPayload):
+    try:
+        records = []
+        for record in payload.records:
+            item = record.model_dump()
+            item["workspace_id"] = item.get("workspace_id") or payload.workspace_id
+            item["actor_id"] = item.get("actor_id") or payload.actor_id
+            item["portfolio_id"] = item.get("portfolio_id") or payload.portfolio_id
+            item["batch_id"] = item.get("batch_id") or payload.batch_id
+            records.append(item)
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            **sync_market_alert_records(records),
         }
     except MarketDataError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc))

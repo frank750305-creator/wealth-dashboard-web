@@ -39,6 +39,7 @@ import {
   fetchBigQueryAssets,
   fetchLatestDecisionFunnelFromBigQuery,
   fetchLatestExecutionFillsFromBigQuery,
+  fetchLatestMarketAlertsFromBigQuery,
   fetchLatestExecutionRouteEventsFromBigQuery,
   fetchLatestExecutionRoutesFromBigQuery,
   fetchLatestOperatingKriFromBigQuery,
@@ -53,6 +54,7 @@ import {
   syncExecutionFillsToBigQuery,
   syncExecutionRouteEventsToBigQuery,
   syncExecutionRoutesToBigQuery,
+  syncMarketAlertsToBigQuery,
   syncOperatingKriToBigQuery,
   syncPlatformExceptionsToBigQuery,
   syncPostTradeAttributionsToBigQuery,
@@ -102,6 +104,7 @@ import {
   buildMarketAlertRunbookItems,
   marketAlertRunbookCsv,
   buildMarketAlertCommandSummary,
+  buildMarketAlertSyncPayload,
   marketAlertCommandSummaryCsv,
 } from "@/lib/marketAlertEvents";
 import {
@@ -402,6 +405,11 @@ export function MarketDataPanel() {
   >("idle");
   const [decisionFunnelSyncMessage, setDecisionFunnelSyncMessage] = useState("");
   const [decisionFunnelWarehouseCount, setDecisionFunnelWarehouseCount] = useState(0);
+  const [marketAlertSyncStatus, setMarketAlertSyncStatus] = useState<
+    "idle" | "syncing" | "loading" | "synced" | "loaded" | "error"
+  >("idle");
+  const [marketAlertSyncMessage, setMarketAlertSyncMessage] = useState("");
+  const [marketAlertWarehouseCount, setMarketAlertWarehouseCount] = useState(0);
   const [watchlistMemoCopyStatus, setWatchlistMemoCopyStatus] = useState<"idle" | "copied">("idle");
   const sources = data?.sources ?? [];
   const securedCount = sources.filter((source) => source.status !== "needs_secret").length;
@@ -2165,6 +2173,56 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleSyncMarketAlertsToBigQuery = async () => {
+    if (!marketAlertEvents.length) return;
+
+    setMarketAlertSyncStatus("syncing");
+    setMarketAlertSyncMessage("市場警示同步中。");
+
+    try {
+      const result = await syncMarketAlertsToBigQuery(
+        buildMarketAlertSyncPayload({
+          events: marketAlertEvents,
+          commandSummary: marketAlertCommandSummary,
+          generatedAt: decisionGeneratedAt,
+          workspaceId: researchTaskWorkspaceId,
+          actorId: riskOwner,
+          portfolioId: tradeTicketPortfolioId,
+          batchId: tradeTicketBatchId,
+        }),
+      );
+      const isSynced = result.status === "synced";
+      setMarketAlertSyncStatus(isSynced ? "synced" : "error");
+      setMarketAlertWarehouseCount(result.insertedCount);
+      setMarketAlertSyncMessage(`${result.insertedCount}/${result.receivedCount} 筆市場警示寫入 ${result.table}`);
+    } catch (err: unknown) {
+      setMarketAlertSyncStatus("error");
+      setMarketAlertSyncMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
+  const handleLoadMarketAlertsFromBigQuery = async () => {
+    setMarketAlertSyncStatus("loading");
+    setMarketAlertSyncMessage("市場警示載入中。");
+
+    try {
+      const result = await fetchLatestMarketAlertsFromBigQuery({
+        limit: 100,
+        workspaceId: researchTaskWorkspaceId,
+        portfolioId: tradeTicketPortfolioId,
+      });
+      if (result.status === "schema_outdated") {
+        setMarketAlertSyncStatus("error");
+        setMarketAlertSyncMessage(`市場警示表需先同步升級欄位：${result.missingFields?.join(", ") || "--"}`);
+        return;
+      }
+      setMarketAlertWarehouseCount(result.alertCount);
+      setMarketAlertSyncStatus("loaded");
+      setMarketAlertSyncMessage(`已讀取 ${result.alertCount} 筆市場警示 ${result.workspaceId}`);
+    } catch (err: unknown) {
+      setMarketAlertSyncStatus("error");
+      setMarketAlertSyncMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
   const handleExportMarketAlertCommandSummaryCsv = () => {
     downloadTextFile(
       `bigquery-market-alert-command-summary-${resultStamp()}.csv`,
@@ -3089,6 +3147,12 @@ export function MarketDataPanel() {
                           <MarketAlertSection
                             marketAlertDecision={marketAlertDecision}
                             marketAlertCommandSummary={marketAlertCommandSummary}
+                            hasBigQueryCredentials={hasBigQueryCredentials}
+                            syncStatus={marketAlertSyncStatus}
+                            syncMessage={marketAlertSyncMessage}
+                            warehouseAlertCount={marketAlertWarehouseCount}
+                            onSyncMarketAlertsToBigQuery={handleSyncMarketAlertsToBigQuery}
+                            onLoadMarketAlertsFromBigQuery={handleLoadMarketAlertsFromBigQuery}
                             onExportMarketAlertCsv={handleExportMarketAlertCsv}
                             onExportMarketAlertCommandSummaryCsv={handleExportMarketAlertCommandSummaryCsv}
                             onExportMarketAlertOwnerQueueCsv={handleExportMarketAlertOwnerQueueCsv}

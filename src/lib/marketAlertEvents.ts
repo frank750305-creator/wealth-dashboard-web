@@ -1,3 +1,5 @@
+import type { MarketAlertWarehouseSyncPayload } from "@/types/market";
+
 export type MarketAlertStatus = "pass" | "watch" | "block";
 export type MarketAlertPriority = "high" | "medium" | "low";
 export type MarketAlertQualityStatus = "strong" | "watch" | "risk" | "neutral";
@@ -135,6 +137,11 @@ function csvCell(value: unknown) {
   const stringValue = String(value ?? "");
   if (/[",\n]/.test(stringValue)) return `"${stringValue.replaceAll('"', '""')}"`;
   return stringValue;
+}
+
+function normalizeWarehouseKey(value: string | undefined, fallback: string) {
+  const cleanValue = value?.trim();
+  return cleanValue || fallback;
 }
 
 function executionReviewLabel(status: MarketAlertStatus) {
@@ -385,6 +392,78 @@ export function marketAlertCsv(rows: MarketAlertEvent[]) {
   ]);
 
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+export function buildMarketAlertSyncPayload({
+  events,
+  commandSummary,
+  generatedAt,
+  workspaceId,
+  actorId,
+  portfolioId,
+  batchId,
+}: {
+  events: MarketAlertEvent[];
+  commandSummary: MarketAlertCommandSummary;
+  generatedAt: string;
+  workspaceId?: string;
+  actorId?: string;
+  portfolioId?: string;
+  batchId?: string;
+}): MarketAlertWarehouseSyncPayload {
+  const cleanWorkspaceId = normalizeWarehouseKey(workspaceId, "default");
+  const cleanActorId = normalizeWarehouseKey(actorId, "system");
+  const cleanPortfolioId = normalizeWarehouseKey(portfolioId, "default-portfolio");
+  const cleanBatchId = normalizeWarehouseKey(batchId, generatedAt);
+  const records = events.map((event, index) => {
+    const alertId = `${cleanPortfolioId}:${cleanBatchId}:ALERT:${index + 1}`;
+
+    return {
+      workspace_id: cleanWorkspaceId,
+      actor_id: cleanActorId,
+      alert_id: alertId,
+      idempotency_key: `${cleanWorkspaceId}:${cleanActorId}:${alertId}:${generatedAt}`,
+      generated_at: generatedAt,
+      updated_at: generatedAt,
+      portfolio_id: cleanPortfolioId,
+      batch_id: cleanBatchId,
+      source: event.source,
+      title: event.title,
+      status: event.status,
+      priority: event.priority,
+      owner: event.owner,
+      evidence: event.evidence,
+      action: event.action,
+      command_status: commandSummary.status,
+      command_priority: commandSummary.priority,
+      operating_mode: commandSummary.operatingMode,
+      release_gate: commandSummary.releaseGate,
+      headline: commandSummary.headline,
+      blocked_flow: commandSummary.blockedFlow,
+      focus_owner: commandSummary.focusOwner,
+      focus_source: commandSummary.focusSource,
+      immediate_action: commandSummary.immediateAction,
+      next_review: commandSummary.nextReview,
+      total_alerts: commandSummary.totalAlerts,
+      high_priority_count: commandSummary.highPriorityCount,
+      block_count: commandSummary.blockCount,
+      watch_count: commandSummary.watchCount,
+      owner_count: commandSummary.ownerCount,
+      runbook_count: commandSummary.runbookCount,
+      source_system: "market_alert_center",
+    };
+  });
+
+  return {
+    table: "market_alert_events",
+    workspace_id: cleanWorkspaceId,
+    actor_id: cleanActorId,
+    portfolio_id: cleanPortfolioId,
+    batch_id: cleanBatchId,
+    generated_at: generatedAt,
+    record_count: records.length,
+    records,
+  };
 }
 
 export function buildMarketAlertOwnerQueues(rows: MarketAlertEvent[]): MarketAlertOwnerQueue[] {
