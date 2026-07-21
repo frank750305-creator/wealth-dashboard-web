@@ -162,10 +162,12 @@ import {
 } from "@/lib/investmentCommitteeWorkflow";
 import {
   buildExecutionFillRows,
+  buildTradeTicketApprovalGateItems,
   buildTradeTicketSyncPayload,
   executionFillCsv,
   tradeBatchCsv,
   tradeBatchRows,
+  tradeTicketApprovalGateCsv,
   tradeTicketCsv,
   tradeTicketRows,
   type ExecutionReviewStatus,
@@ -528,6 +530,7 @@ export function MarketDataPanel() {
   const handoffBlockCount = executionHandoffItems.filter((item) => item.status === "block").length;
   const handoffWatchCount = executionHandoffItems.filter((item) => item.status === "watch").length;
   const handoffHighPriorityCount = executionHandoffItems.filter((item) => item.priority === "high").length;
+  const handoffDecision: ExecutionReviewStatus = handoffBlockCount > 0 ? "block" : handoffWatchCount > 0 ? "watch" : "pass";
   const executionFillRows = buildExecutionFillRows({
     tradeTickets,
     fillCompletionPercent,
@@ -783,6 +786,27 @@ export function MarketDataPanel() {
   const marketAlertDecision = marketAlertEvents.length
     ? combinedExecutionStatus(marketAlertEvents.map((event) => event.status))
     : "pass";
+  const committeeApprovalDecision: ExecutionReviewStatus =
+    committeeBlockCount > 0 ? "block" : committeeWatchCount > 0 ? "watch" : "pass";
+  const tradeTicketApprovalGateItems = buildTradeTicketApprovalGateItems({
+    tradeTickets,
+    tradeBatches,
+    skippedTradeCount,
+    executionReviewDecision,
+    committeeApprovalDecision,
+    policyDecision,
+    handoffDecision,
+    dataReadinessDecision,
+    marketAlertDecision,
+    maximumBatchAmount,
+    minimumTradeAmount,
+    decisionOwner,
+    executionOwner,
+  });
+  const tradeTicketApprovalBlockCount = tradeTicketApprovalGateItems.filter((item) => item.status === "block").length;
+  const tradeTicketApprovalWatchCount = tradeTicketApprovalGateItems.filter((item) => item.status === "watch").length;
+  const tradeTicketApprovalDecision: ExecutionReviewStatus =
+    tradeTicketApprovalBlockCount > 0 ? "block" : tradeTicketApprovalWatchCount > 0 ? "watch" : "pass";
   const dataProductCatalogItems = buildDataProductCatalogItems({
     dataReadinessDecision,
     coverageUniverseDecision,
@@ -1402,6 +1426,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `bigquery-trade-tickets-${resultStamp()}.csv`,
       tradeTicketCsv(tradeTickets, minimumTradeAmount),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportTradeTicketApprovalGateCsv = () => {
+    if (!tradeTicketApprovalGateItems.length) return;
+
+    downloadTextFile(
+      `bigquery-trade-ticket-approval-gate-${resultStamp()}.csv`,
+      tradeTicketApprovalGateCsv(tradeTicketApprovalGateItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -2250,6 +2283,11 @@ export function MarketDataPanel() {
                           syncStatus={tradeTicketSyncStatus}
                           syncMessage={tradeTicketSyncMessage}
                           warehouseTicketCount={tradeTicketWarehouseCount}
+                          approvalDecision={tradeTicketApprovalDecision}
+                          approvalBlockCount={tradeTicketApprovalBlockCount}
+                          approvalWatchCount={tradeTicketApprovalWatchCount}
+                          approvalGateItems={tradeTicketApprovalGateItems}
+                          onExportTradeTicketApprovalGateCsv={handleExportTradeTicketApprovalGateCsv}
                         />
 
                         <div className="border-t border-slate-800 pt-3 space-y-3">

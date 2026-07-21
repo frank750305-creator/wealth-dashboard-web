@@ -520,7 +520,7 @@ export function buildApiContractBlueprintItems({
       status: serviceStatus("/api/v1/trading/tickets"),
       owner: cleanDecisionOwner,
       breakingRisk: "高：ticket_id、方向、金額、現金影響與 batch_id 需可追溯",
-      action: "正式路由前需補 ticket approval 與 execution venue 欄位",
+      action: "approval gate 已接前端；正式路由前需補 execution venue 與 route 狀態回填",
     },
   ];
 }

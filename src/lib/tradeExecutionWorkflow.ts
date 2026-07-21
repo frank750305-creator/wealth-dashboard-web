@@ -46,6 +46,16 @@ export type ExecutionFillRow = TradeTicketRow & {
   fillNote: string;
 };
 
+export type TradeTicketApprovalGateItem = {
+  id: string;
+  label: string;
+  status: ExecutionReviewStatus;
+  owner: string;
+  evidence: string;
+  rule: string;
+  action: string;
+};
+
 function normalizeWarehouseKey(value: string | undefined, fallback: string) {
   const cleanValue = String(value || fallback).trim().replaceAll(" ", "-").slice(0, 80);
   return cleanValue || fallback;
@@ -61,6 +71,10 @@ function executionReviewLabel(status: ExecutionReviewStatus) {
   if (status === "pass") return "通過";
   if (status === "watch") return "觀察";
   return "暫停";
+}
+
+export function tradeTicketApprovalLabel(status: ExecutionReviewStatus) {
+  return executionReviewLabel(status);
 }
 
 export function tradeTicketRows(rows: RebalanceDraftRow[], minimumTradeAmount: number): TradeTicketRow[] {
@@ -249,6 +263,149 @@ export function tradeBatchCsv(rows: TradeBatchRow[], maximumBatchAmount: number,
     row.tradeWeight,
     row.score ?? "",
     row.batchNote,
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+export function buildTradeTicketApprovalGateItems({
+  tradeTickets,
+  tradeBatches,
+  skippedTradeCount,
+  executionReviewDecision,
+  committeeApprovalDecision,
+  policyDecision,
+  handoffDecision,
+  dataReadinessDecision,
+  marketAlertDecision,
+  maximumBatchAmount,
+  minimumTradeAmount,
+  decisionOwner,
+  executionOwner,
+}: {
+  tradeTickets: TradeTicketRow[];
+  tradeBatches: TradeBatchRow[];
+  skippedTradeCount: number;
+  executionReviewDecision: ExecutionReviewStatus;
+  committeeApprovalDecision: ExecutionReviewStatus;
+  policyDecision: ExecutionReviewStatus;
+  handoffDecision: ExecutionReviewStatus;
+  dataReadinessDecision: ExecutionReviewStatus;
+  marketAlertDecision: ExecutionReviewStatus;
+  maximumBatchAmount: number;
+  minimumTradeAmount: number;
+  decisionOwner: string;
+  executionOwner: string;
+}): TradeTicketApprovalGateItem[] {
+  const cleanDecisionOwner = decisionOwner.trim() || "Investment owner";
+  const cleanExecutionOwner = executionOwner.trim() || "Execution owner";
+  const grossTicketAmount = tradeTickets.reduce((sum, row) => sum + row.ticketAmount, 0);
+  const largestTicketAmount = tradeTickets.reduce((maxValue, row) => Math.max(maxValue, row.ticketAmount), 0);
+  const largestBatchAmount = tradeBatches.reduce((maxValue, row) => Math.max(maxValue, row.batchGrossAmount), 0);
+  const batchLimitStatus: ExecutionReviewStatus =
+    !tradeTickets.length
+      ? "watch"
+      : maximumBatchAmount > 0 && largestBatchAmount > maximumBatchAmount
+        ? "block"
+        : "pass";
+  const minimumTradeStatus: ExecutionReviewStatus =
+    !tradeTickets.length ? "block" : skippedTradeCount > 0 ? "watch" : "pass";
+
+  return [
+    {
+      id: "ticket-readiness",
+      label: "交易票完整性",
+      status: tradeTickets.length ? "pass" : "block",
+      owner: cleanDecisionOwner,
+      evidence: `${tradeTickets.length} 張交易票 / 總金額 ${grossTicketAmount.toLocaleString("zh-TW", { maximumFractionDigits: 0 })}`,
+      rule: "送簽前必須至少有一張可執行交易票",
+      action: tradeTickets.length ? "可送下一關" : "先產生再平衡交易票",
+    },
+    {
+      id: "minimum-trade-threshold",
+      label: "最小交易金額",
+      status: minimumTradeStatus,
+      owner: cleanDecisionOwner,
+      evidence: `門檻 ${minimumTradeAmount.toLocaleString("zh-TW", { maximumFractionDigits: 0 })} / 略過 ${Math.max(0, skippedTradeCount)} 張`,
+      rule: "低於門檻的交易不進入正式送簽",
+      action: skippedTradeCount > 0 ? "確認門檻以下交易是否維持跳過" : "維持現有門檻",
+    },
+    {
+      id: "batch-limit",
+      label: "批次金額上限",
+      status: batchLimitStatus,
+      owner: cleanExecutionOwner,
+      evidence: `最大批次 ${largestBatchAmount.toLocaleString("zh-TW", { maximumFractionDigits: 0 })} / 最大單筆 ${largestTicketAmount.toLocaleString("zh-TW", { maximumFractionDigits: 0 })}`,
+      rule: "單批交易金額不可超過執行上限",
+      action: batchLimitStatus === "block" ? "拆分交易或提高上限後重新送簽" : "可交由交易執行控管",
+    },
+    {
+      id: "pre-trade-review",
+      label: "交易前覆核",
+      status: executionReviewDecision,
+      owner: cleanDecisionOwner,
+      evidence: `交易前覆核：${executionReviewLabel(executionReviewDecision)}`,
+      rule: "價格新鮮度、曝險與交易清單需先通過",
+      action: executionReviewDecision === "pass" ? "保留覆核紀錄" : "先處理交易前覆核警示",
+    },
+    {
+      id: "policy-limit",
+      label: "投資政策限制",
+      status: policyDecision,
+      owner: cleanDecisionOwner,
+      evidence: `政策限制：${executionReviewLabel(policyDecision)}`,
+      rule: "單一權重、波動、回撤與分數需符合政策",
+      action: policyDecision === "pass" ? "可進投委會覆核" : "先修正配置或調整政策門檻",
+    },
+    {
+      id: "committee-approval",
+      label: "投委會送簽",
+      status: committeeApprovalDecision,
+      owner: cleanDecisionOwner,
+      evidence: `投委會清單：${executionReviewLabel(committeeApprovalDecision)}`,
+      rule: "投委會 blocking item 必須歸零",
+      action: committeeApprovalDecision === "pass" ? "可保留核准摘要" : "先完成投委會補件",
+    },
+    {
+      id: "execution-handoff",
+      label: "執行交接",
+      status: handoffDecision,
+      owner: cleanExecutionOwner,
+      evidence: `交接狀態：${executionReviewLabel(handoffDecision)}`,
+      rule: "執行、風控、交割 owner 與期限需可追蹤",
+      action: handoffDecision === "pass" ? "可交給執行台" : "先補齊交接責任人與期限",
+    },
+    {
+      id: "data-readiness",
+      label: "資料準備度",
+      status: dataReadinessDecision,
+      owner: cleanDecisionOwner,
+      evidence: `BigQuery 資料：${executionReviewLabel(dataReadinessDecision)}`,
+      rule: "價格、FX、schema 與覆蓋率需可讀取",
+      action: dataReadinessDecision === "pass" ? "可引用倉儲資料" : "先修資料管線與欄位缺口",
+    },
+    {
+      id: "market-alert",
+      label: "市場與營運警示",
+      status: marketAlertDecision,
+      owner: cleanExecutionOwner,
+      evidence: `警示中心：${executionReviewLabel(marketAlertDecision)}`,
+      rule: "高優先警示不得進入無條件送簽",
+      action: marketAlertDecision === "pass" ? "維持例行監控" : "先關閉阻斷警示或升級人工核准",
+    },
+  ];
+}
+
+export function tradeTicketApprovalGateCsv(rows: TradeTicketApprovalGateItem[]) {
+  const header = ["id", "label", "status", "owner", "evidence", "rule", "action"];
+  const csvRows = rows.map((row) => [
+    row.id,
+    row.label,
+    executionReviewLabel(row.status),
+    row.owner,
+    row.evidence,
+    row.rule,
+    row.action,
   ]);
 
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");

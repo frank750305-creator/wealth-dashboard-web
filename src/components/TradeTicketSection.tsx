@@ -2,12 +2,18 @@ import {
   rebalanceDirectionClass,
   rebalanceDirectionLabel,
 } from "@/lib/rebalanceWorkflow";
-import type { TradeTicketRow } from "@/lib/tradeExecutionWorkflow";
+import {
+  tradeTicketApprovalLabel,
+  type ExecutionReviewStatus,
+  type TradeTicketApprovalGateItem,
+  type TradeTicketRow,
+} from "@/lib/tradeExecutionWorkflow";
 
 type TradeTicketSectionProps = {
   minimumTradeAmount: number;
   onMinimumTradeAmountChange: (value: number) => void;
   onExportTradeTicketCsv: () => void;
+  onExportTradeTicketApprovalGateCsv: () => void;
   onSyncTradeTicketsToBigQuery: () => void;
   onLoadTradeTicketsFromBigQuery: () => void;
   tradeTickets: TradeTicketRow[];
@@ -16,6 +22,10 @@ type TradeTicketSectionProps = {
   syncStatus: "idle" | "syncing" | "loading" | "synced" | "loaded" | "error";
   syncMessage: string;
   warehouseTicketCount: number;
+  approvalDecision: ExecutionReviewStatus;
+  approvalBlockCount: number;
+  approvalWatchCount: number;
+  approvalGateItems: TradeTicketApprovalGateItem[];
 };
 
 function formatPercent(value: number | null | undefined) {
@@ -28,10 +38,23 @@ function formatCurrency(value: number | null | undefined) {
     : "--";
 }
 
+function approvalBadgeClass(status: ExecutionReviewStatus) {
+  if (status === "pass") return "bg-emerald-500/10 text-emerald-300 border-emerald-500/30";
+  if (status === "watch") return "bg-amber-500/10 text-amber-300 border-amber-500/30";
+  return "bg-rose-500/10 text-rose-300 border-rose-500/30";
+}
+
+function approvalRowClass(status: ExecutionReviewStatus) {
+  if (status === "pass") return "border-emerald-500/20 bg-emerald-500/[0.03]";
+  if (status === "watch") return "border-amber-500/20 bg-amber-500/[0.04]";
+  return "border-rose-500/20 bg-rose-500/[0.05]";
+}
+
 export function TradeTicketSection({
   minimumTradeAmount,
   onMinimumTradeAmountChange,
   onExportTradeTicketCsv,
+  onExportTradeTicketApprovalGateCsv,
   onSyncTradeTicketsToBigQuery,
   onLoadTradeTicketsFromBigQuery,
   tradeTickets,
@@ -40,6 +63,10 @@ export function TradeTicketSection({
   syncStatus,
   syncMessage,
   warehouseTicketCount,
+  approvalDecision,
+  approvalBlockCount,
+  approvalWatchCount,
+  approvalGateItems,
 }: TradeTicketSectionProps) {
   const buyAmount = tradeTickets
     .filter((row) => row.direction === "buy")
@@ -55,7 +82,7 @@ export function TradeTicketSection({
             再用最小交易金額過濾，形成可交給人工覆核的交易清單
           </p>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-[170px_repeat(3,auto)] gap-2 text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-[170px_repeat(4,auto)] gap-2 text-xs">
           <label className="space-y-1">
             <span className="text-slate-500">最小交易金額</span>
             <input
@@ -88,6 +115,13 @@ export function TradeTicketSection({
           >
             交易 CSV
           </button>
+          <button
+            onClick={onExportTradeTicketApprovalGateCsv}
+            disabled={!approvalGateItems.length}
+            className="sm:self-end px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+          >
+            Gate CSV
+          </button>
         </div>
       </div>
       {syncMessage ? (
@@ -96,13 +130,15 @@ export function TradeTicketSection({
         </p>
       ) : null}
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
+      <div className="grid grid-cols-2 md:grid-cols-7 gap-2 text-xs">
         {[
           ["可執行", `${tradeTickets.length} 檔`],
           ["低於門檻", `${Math.max(0, skippedTradeCount)} 檔`],
           ["買入合計", formatCurrency(buyAmount)],
           ["倉儲票數", `${warehouseTicketCount} 張`],
           ["現金淨額", formatCurrency(netCash)],
+          ["Gate 阻擋", `${approvalBlockCount} 項`],
+          ["Gate 觀察", `${approvalWatchCount} 項`],
         ].map(([label, value]) => (
           <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 p-3 min-w-0">
             <p className="text-[11px] text-slate-600 truncate">{label}</p>
@@ -111,6 +147,60 @@ export function TradeTicketSection({
             </p>
           </div>
         ))}
+      </div>
+
+      <div className="rounded-md border border-slate-800 bg-slate-950/70 p-3 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h6 className="text-xs font-bold text-slate-100">交易票 Approval Gate</h6>
+              <span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${approvalBadgeClass(approvalDecision)}`}>
+                {tradeTicketApprovalLabel(approvalDecision)}
+              </span>
+            </div>
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              送簽前合併交易清單、政策、投委會、交接、資料與警示狀態
+            </p>
+          </div>
+          <button
+            onClick={onExportTradeTicketApprovalGateCsv}
+            disabled={!approvalGateItems.length}
+            className="px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-100 disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+          >
+            Gate CSV
+          </button>
+        </div>
+
+        <div className="overflow-x-auto rounded-md border border-slate-800">
+          <table className="w-full min-w-[980px] text-xs">
+            <thead>
+              <tr className="text-left text-[11px] text-slate-600">
+                <th className="py-2 px-3 font-medium">項目</th>
+                <th className="py-2 px-3 font-medium">狀態</th>
+                <th className="py-2 px-3 font-medium">Owner</th>
+                <th className="py-2 px-3 font-medium">Evidence</th>
+                <th className="py-2 px-3 font-medium">Rule</th>
+                <th className="py-2 px-3 font-medium">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {approvalGateItems.map((item) => (
+                <tr key={item.id} className={`border-t ${approvalRowClass(item.status)}`}>
+                  <td className="py-2 px-3 font-bold text-slate-100">{item.label}</td>
+                  <td className="py-2 px-3">
+                    <span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${approvalBadgeClass(item.status)}`}>
+                      {tradeTicketApprovalLabel(item.status)}
+                    </span>
+                  </td>
+                  <td className="py-2 px-3 text-slate-400">{item.owner}</td>
+                  <td className="py-2 px-3 text-slate-500">{item.evidence}</td>
+                  <td className="py-2 px-3 text-slate-500">{item.rule}</td>
+                  <td className="py-2 px-3 text-slate-400">{item.action}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {tradeTickets.length ? (
