@@ -9,6 +9,7 @@ import {
   type ResearchTaskStatus,
   type ResearchTaskSummary,
 } from "@/lib/researchTaskWorkflow";
+import type { ResearchTaskWarehouseAuditRecord } from "@/types/market";
 
 type ResearchTaskBoardSectionProps = {
   tasks: ResearchTaskItem[];
@@ -19,6 +20,8 @@ type ResearchTaskBoardSectionProps = {
   workspaceId: string;
   warehouseTable?: string;
   warehouseError: string;
+  auditRecords: ResearchTaskWarehouseAuditRecord[];
+  auditError: string;
   syncStatus: "idle" | "syncing" | "loading" | "synced" | "loaded" | "error";
   syncMessage: string;
   onWorkspaceIdChange: (value: string) => void;
@@ -29,6 +32,7 @@ type ResearchTaskBoardSectionProps = {
   onResetTaskOverride: (taskId: string) => void;
   onSyncResearchTasksToBigQuery: () => void;
   onLoadResearchTasksFromBigQuery: () => void;
+  onLoadResearchTaskSyncAudit: () => void;
   onExportResearchTaskCsv: () => void;
   onExportResearchTaskLifecycleCsv: () => void;
   onExportResearchTaskSyncJson: () => void;
@@ -65,6 +69,8 @@ export function ResearchTaskBoardSection({
   workspaceId,
   warehouseTable,
   warehouseError,
+  auditRecords,
+  auditError,
   syncStatus,
   syncMessage,
   onWorkspaceIdChange,
@@ -72,6 +78,7 @@ export function ResearchTaskBoardSection({
   onResetTaskOverride,
   onSyncResearchTasksToBigQuery,
   onLoadResearchTasksFromBigQuery,
+  onLoadResearchTaskSyncAudit,
   onExportResearchTaskCsv,
   onExportResearchTaskLifecycleCsv,
   onExportResearchTaskSyncJson,
@@ -116,6 +123,13 @@ export function ResearchTaskBoardSection({
             className="px-3 py-2 rounded-md bg-sky-700 hover:bg-sky-600 text-white text-xs font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
           >
             {syncStatus === "loading" ? "載入中" : "載入 BigQuery"}
+          </button>
+          <button
+            onClick={onLoadResearchTaskSyncAudit}
+            disabled={!hasBigQueryCredentials || syncStatus === "syncing" || syncStatus === "loading"}
+            className="px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+          >
+            同步稽核
           </button>
           <button
             onClick={onExportResearchTaskSyncJson}
@@ -172,6 +186,53 @@ export function ResearchTaskBoardSection({
           </p>
         </div>
       </div>
+      {auditError ? (
+        <p className="text-[11px] text-rose-300">{auditError}</p>
+      ) : null}
+      {auditRecords.length ? (
+        <div className="rounded-md border border-slate-800 bg-slate-950/40 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs font-bold text-slate-100">同步稽核</p>
+            <span className="rounded border border-slate-700 px-2 py-0.5 text-[10px] font-bold text-slate-400">
+              {auditRecords.length} 批
+            </span>
+          </div>
+          <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
+            {auditRecords.slice(0, 3).map((record) => (
+              <div
+                key={`${record.workspace_id}-${record.actor_id || "system"}-${record.generated_at}`}
+                className="rounded-md border border-slate-800 bg-slate-950/70 p-2 min-w-0"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p className="truncate font-mono text-[11px] font-bold text-slate-100" title={record.generated_at}>
+                    {record.generated_at ? record.generated_at.slice(0, 19).replace("T", " ") : "--"}
+                  </p>
+                  <span className="shrink-0 rounded bg-slate-900 px-2 py-0.5 text-[10px] font-bold text-slate-400">
+                    {record.task_count} 筆
+                  </span>
+                </div>
+                <p className="mt-1 truncate text-[10px] text-slate-500" title={record.actor_id || "system"}>
+                  actor：{record.actor_id || "system"}
+                </p>
+                <div className="mt-2 grid grid-cols-3 gap-1 text-center">
+                  <div className="rounded bg-slate-900 px-1 py-1">
+                    <p className="text-[10px] text-slate-600">手動</p>
+                    <p className="font-mono font-bold text-cyan-200">{record.manual_override_count}</p>
+                  </div>
+                  <div className="rounded bg-slate-900 px-1 py-1">
+                    <p className="text-[10px] text-slate-600">阻塞</p>
+                    <p className="font-mono font-bold text-rose-200">{record.blocker_count}</p>
+                  </div>
+                  <div className="rounded bg-slate-900 px-1 py-1">
+                    <p className="text-[10px] text-slate-600">待覆核</p>
+                    <p className="font-mono font-bold text-sky-200">{record.ready_count}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       <div className={`rounded-md border p-3 ${statusPanelClass(lifecycle.gateStatus)}`}>
         <div className="flex flex-col xl:flex-row xl:items-start justify-between gap-3">

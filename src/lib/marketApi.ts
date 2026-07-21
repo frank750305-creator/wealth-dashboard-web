@@ -9,6 +9,7 @@ import type {
   PortfolioAnalyzeBigQueryPayload,
   PortfolioOptimizationResponse,
   PortfolioOptimizeBigQueryPayload,
+  ResearchTaskWarehouseAuditResponse,
   ResearchTaskWarehouseLatestResponse,
   ResearchTaskWarehouseStatus,
   ResearchTaskWarehouseSyncPayload,
@@ -87,6 +88,27 @@ export async function fetchLatestResearchTasksFromBigQuery(
   if (!response.ok) {
     const errText = await response.text();
     throw new Error(`研究任務 BigQuery 載入異常 (代碼: ${response.status})\n${errText}`);
+  }
+
+  return response.json();
+}
+
+export async function fetchResearchTaskSyncAudit(
+  limit = 12,
+  workspaceId = "default",
+): Promise<ResearchTaskWarehouseAuditResponse> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    workspace_id: workspaceId.trim() || "default",
+  });
+  const response = await fetch(`/api/v1/research/tasks/bigquery/audit?${params.toString()}`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`研究任務同步稽核讀取異常 (代碼: ${response.status})\n${errText}`);
   }
 
   return response.json();

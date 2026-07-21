@@ -38,6 +38,7 @@ import {
   fetchBigQueryAssetProfile,
   fetchBigQueryAssets,
   fetchLatestResearchTasksFromBigQuery,
+  fetchResearchTaskSyncAudit,
   fetchResearchTaskWarehouseStatus,
   syncResearchTasksToBigQuery,
 } from "@/lib/marketApi";
@@ -165,6 +166,7 @@ import type {
   BigQueryAsset,
   BigQueryAssetHistoryResponse,
   BigQueryAssetProfileResponse,
+  ResearchTaskWarehouseAuditRecord,
   ResearchTaskWarehouseStatus,
 } from "@/types/market";
 import { AllocationDraftSection } from "./AllocationDraftSection";
@@ -306,6 +308,8 @@ export function MarketDataPanel() {
   const [researchTaskSyncMessage, setResearchTaskSyncMessage] = useState("");
   const [researchTaskWarehouseStatus, setResearchTaskWarehouseStatus] = useState<ResearchTaskWarehouseStatus | null>(null);
   const [researchTaskWarehouseError, setResearchTaskWarehouseError] = useState("");
+  const [researchTaskAuditRecords, setResearchTaskAuditRecords] = useState<ResearchTaskWarehouseAuditRecord[]>([]);
+  const [researchTaskAuditError, setResearchTaskAuditError] = useState("");
   const [watchlistMemoCopyStatus, setWatchlistMemoCopyStatus] = useState<"idle" | "copied">("idle");
   const sources = data?.sources ?? [];
   const securedCount = sources.filter((source) => source.status !== "needs_secret").length;
@@ -1634,6 +1638,31 @@ export function MarketDataPanel() {
       setResearchTaskSyncMessage(err instanceof Error ? err.message : String(err));
     }
   };
+  const handleLoadResearchTaskSyncAudit = async () => {
+    setResearchTaskSyncStatus("loading");
+    setResearchTaskSyncMessage("同步稽核載入中。");
+
+    try {
+      const result = await fetchResearchTaskSyncAudit(12, researchTaskWorkspaceId);
+      if (result.status === "schema_outdated") {
+        const message = `研究任務表需先同步升級欄位：${result.missingFields?.join(", ") || "--"}`;
+        setResearchTaskAuditError(message);
+        setResearchTaskSyncStatus("error");
+        setResearchTaskSyncMessage(message);
+        return;
+      }
+
+      setResearchTaskAuditRecords(result.auditRecords);
+      setResearchTaskAuditError("");
+      setResearchTaskSyncStatus("loaded");
+      setResearchTaskSyncMessage(`已載入 ${result.auditCount} 筆同步稽核 ${result.workspaceId}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setResearchTaskAuditError(message);
+      setResearchTaskSyncStatus("error");
+      setResearchTaskSyncMessage(message);
+    }
+  };
   const handleResearchTaskOverrideChange = (
     taskId: string,
     patch: Partial<Pick<ResearchTaskOverride, "status" | "owner" | "note">>,
@@ -2039,6 +2068,8 @@ export function MarketDataPanel() {
             workspaceId={researchTaskWorkspaceId}
             warehouseTable={researchTaskWarehouseStatus?.taskTable}
             warehouseError={researchTaskWarehouseError}
+            auditRecords={researchTaskAuditRecords}
+            auditError={researchTaskAuditError}
             syncStatus={researchTaskSyncStatus}
             syncMessage={researchTaskSyncMessage}
             onWorkspaceIdChange={setResearchTaskWorkspaceId}
@@ -2046,6 +2077,7 @@ export function MarketDataPanel() {
             onResetTaskOverride={handleResetResearchTaskOverride}
             onSyncResearchTasksToBigQuery={handleSyncResearchTasksToBigQuery}
             onLoadResearchTasksFromBigQuery={handleLoadResearchTasksFromBigQuery}
+            onLoadResearchTaskSyncAudit={handleLoadResearchTaskSyncAudit}
             onExportResearchTaskCsv={handleExportResearchTaskCsv}
             onExportResearchTaskLifecycleCsv={handleExportResearchTaskLifecycleCsv}
             onExportResearchTaskSyncJson={handleExportResearchTaskSyncJson}

@@ -23,6 +23,7 @@ try:
     )
     from .research_task_service import (
         load_latest_research_task_records,
+        load_research_task_sync_audit,
         research_task_warehouse_status,
         sync_research_task_records,
     )
@@ -43,6 +44,7 @@ except ImportError:
     )
     from research_task_service import (
         load_latest_research_task_records,
+        load_research_task_sync_audit,
         research_task_warehouse_status,
         sync_research_task_records,
     )
@@ -442,6 +444,16 @@ async def latest_research_tasks_from_bigquery(limit: int = 50, workspace_id: Opt
         return {
             "generatedAt": datetime.now(timezone.utc).isoformat(),
             **load_latest_research_task_records(limit=limit, workspace_id=workspace_id),
+        }
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+@app.get("/api/v1/research/tasks/bigquery/audit")
+async def research_task_sync_audit(limit: int = 12, workspace_id: Optional[str] = None):
+    try:
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            **load_research_task_sync_audit(limit=limit, workspace_id=workspace_id),
         }
     except MarketDataError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc))

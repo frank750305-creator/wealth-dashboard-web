@@ -412,3 +412,25 @@ export type ResearchTaskWarehouseLatestResponse = {
   missingFields?: string[];
   records: ResearchTaskWarehouseSyncRecord[];
 };
+
+export type ResearchTaskWarehouseAuditRecord = {
+  workspace_id: string;
+  actor_id: string | null;
+  generated_at: string;
+  latest_updated_at: string | null;
+  task_count: number;
+  manual_override_count: number;
+  blocker_count: number;
+  ready_count: number;
+};
+
+export type ResearchTaskWarehouseAuditResponse = {
+  generatedAt: string;
+  status: "loaded" | "missing" | "schema_outdated" | string;
+  table: string;
+  workspaceId: string;
+  limit: number;
+  auditCount: number;
+  missingFields?: string[];
+  auditRecords: ResearchTaskWarehouseAuditRecord[];
+};

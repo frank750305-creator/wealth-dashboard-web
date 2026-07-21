@@ -184,6 +184,75 @@ def load_latest_research_task_records(limit: int = 50, workspace_id: Optional[st
     }
 
 
+def load_research_task_sync_audit(limit: int = 12, workspace_id: Optional[str] = None) -> Dict:
+    bigquery = _bigquery_module()
+    client = _bigquery_client(bigquery)
+    table_id = _research_task_table_id()
+    bounded_limit = max(1, min(int(limit or 12), 50))
+    clean_workspace_id = _normalize_key(workspace_id, DEFAULT_WORKSPACE_ID)
+    if not _research_task_table_exists(client, table_id):
+        return {
+            "status": "missing",
+            "table": table_id,
+            "workspaceId": clean_workspace_id,
+            "limit": bounded_limit,
+            "auditCount": 0,
+            "auditRecords": [],
+        }
+    missing_fields = _research_task_missing_fields(client, table_id)
+    if missing_fields:
+        return {
+            "status": "schema_outdated",
+            "table": table_id,
+            "workspaceId": clean_workspace_id,
+            "limit": bounded_limit,
+            "auditCount": 0,
+            "missingFields": missing_fields,
+            "auditRecords": [],
+        }
+
+    query = f"""
+    SELECT
+        workspace_id,
+        actor_id,
+        generated_at,
+        COUNT(1) AS task_count,
+        COUNTIF(is_manual_override) AS manual_override_count,
+        COUNTIF(status = 'blocked') AS blocker_count,
+        COUNTIF(status = 'ready') AS ready_count,
+        MAX(updated_at) AS latest_updated_at
+    FROM `{table_id}`
+    WHERE workspace_id = @workspace_id
+    GROUP BY workspace_id, actor_id, generated_at
+    ORDER BY generated_at DESC
+    LIMIT @limit
+    """
+
+    try:
+        rows = list(
+            client.query(
+                query,
+                job_config=bigquery.QueryJobConfig(
+                    query_parameters=[
+                        bigquery.ScalarQueryParameter("workspace_id", "STRING", clean_workspace_id),
+                        bigquery.ScalarQueryParameter("limit", "INT64", bounded_limit),
+                    ]
+                ),
+            ).result()
+        )
+    except Exception as exc:
+        raise MarketDataQueryError(f"BigQuery research task sync audit query failed: {exc}") from exc
+
+    return {
+        "status": "loaded",
+        "table": table_id,
+        "workspaceId": clean_workspace_id,
+        "limit": bounded_limit,
+        "auditCount": len(rows),
+        "auditRecords": [_row_to_research_task_audit_record(row) for row in rows],
+    }
+
+
 def _ensure_research_task_table(bigquery, client) -> str:
     table_id = _research_task_table_id()
 
@@ -296,6 +365,19 @@ def _row_to_research_task_record(row) -> Dict:
     return {
         field: _serializable_value(row.get(field))
         for field in RESEARCH_TASK_FIELD_NAMES
+    }
+
+
+def _row_to_research_task_audit_record(row) -> Dict:
+    return {
+        "workspace_id": _serializable_value(row.get("workspace_id")),
+        "actor_id": _serializable_value(row.get("actor_id")),
+        "generated_at": _serializable_value(row.get("generated_at")),
+        "latest_updated_at": _serializable_value(row.get("latest_updated_at")),
+        "task_count": _int_value(row.get("task_count")),
+        "manual_override_count": _int_value(row.get("manual_override_count")),
+        "blocker_count": _int_value(row.get("blocker_count")),
+        "ready_count": _int_value(row.get("ready_count")),
     }
 
 
