@@ -27,6 +27,10 @@ try:
         research_task_warehouse_status,
         sync_research_task_records,
     )
+    from .trading_ticket_service import (
+        load_latest_trade_ticket_records,
+        sync_trade_ticket_records,
+    )
 except ImportError:
     from market_data_service import (
         MarketDataError,
@@ -47,6 +51,10 @@ except ImportError:
         load_research_task_sync_audit,
         research_task_warehouse_status,
         sync_research_task_records,
+    )
+    from trading_ticket_service import (
+        load_latest_trade_ticket_records,
+        sync_trade_ticket_records,
     )
 
 app = FastAPI(title="高資產傳承與所得稅擇優核算大腦", version="4.0_Ultimate")
@@ -198,28 +206,6 @@ async def platform_data_products():
                 ],
             },
         ],
-    }
-
-@app.get("/api/v1/trading/tickets")
-async def trading_tickets(portfolio_id: Optional[str] = None, batch_id: Optional[str] = None):
-    return {
-        "generatedAt": datetime.now(timezone.utc).isoformat(),
-        "status": "not_connected",
-        "portfolioId": portfolio_id,
-        "batchId": batch_id,
-        "tickets": [],
-        "schema": {
-            "ticket_id": "string",
-            "portfolio_id": "string",
-            "batch_id": "string",
-            "symbol": "string",
-            "side": "buy | sell | hold",
-            "notional": "number",
-            "currency": "string",
-            "cash_impact": "number",
-            "status": "draft | approved | routed | filled | cancelled",
-        },
-        "nextAction": "Connect approved trade ticket rows from the frontend execution workflow to a persistent order table before routing.",
     }
 
 # --- 法規常數 ---
@@ -477,6 +463,40 @@ class ResearchTaskSyncPayload(BaseModel):
     records: List[ResearchTaskSyncRecordPayload]
     lifecycle: Optional[Dict] = None
 
+class TradeTicketSyncRecordPayload(BaseModel):
+    workspace_id: Optional[str] = None
+    actor_id: Optional[str] = None
+    ticket_id: str
+    idempotency_key: Optional[str] = None
+    generated_at: str
+    updated_at: str
+    portfolio_id: Optional[str] = None
+    batch_id: Optional[str] = None
+    symbol: str
+    direction: str
+    status: str = "draft"
+    ticket_amount: float = 0
+    cash_impact: float = 0
+    current_amount: float = 0
+    current_weight: float = 0
+    target_amount: float = 0
+    target_weight: float = 0
+    trade_amount: float = 0
+    trade_weight: float = 0
+    score: Optional[float] = None
+    signal: Optional[str] = None
+    note: Optional[str] = None
+    ticket_note: Optional[str] = None
+    minimum_trade_amount: float = 0
+
+class TradeTicketSyncPayload(BaseModel):
+    workspace_id: Optional[str] = None
+    actor_id: Optional[str] = None
+    portfolio_id: Optional[str] = None
+    batch_id: Optional[str] = None
+    generated_at: Optional[str] = None
+    records: List[TradeTicketSyncRecordPayload]
+
 def calc_tw_tax(net_inc: float) -> float:
     if net_inc <= 56: return net_inc * 0.05
     elif net_inc <= 126: return net_inc * 0.12 - 3.92
@@ -546,6 +566,44 @@ async def sync_research_tasks_to_bigquery(payload: ResearchTaskSyncPayload):
         return {
             "generatedAt": datetime.now(timezone.utc).isoformat(),
             **sync_research_task_records(records),
+        }
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+@app.get("/api/v1/trading/tickets")
+async def trading_tickets(
+    workspace_id: Optional[str] = None,
+    portfolio_id: Optional[str] = None,
+    batch_id: Optional[str] = None,
+    limit: int = 100,
+):
+    try:
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            **load_latest_trade_ticket_records(
+                limit=limit,
+                workspace_id=workspace_id,
+                portfolio_id=portfolio_id,
+                batch_id=batch_id,
+            ),
+        }
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+@app.post("/api/v1/trading/tickets")
+async def sync_trading_tickets(payload: TradeTicketSyncPayload):
+    try:
+        records = []
+        for record in payload.records:
+            item = record.model_dump()
+            item["workspace_id"] = item.get("workspace_id") or payload.workspace_id
+            item["actor_id"] = item.get("actor_id") or payload.actor_id
+            item["portfolio_id"] = item.get("portfolio_id") or payload.portfolio_id
+            item["batch_id"] = item.get("batch_id") or payload.batch_id
+            records.append(item)
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            **sync_trade_ticket_records(records),
         }
     except MarketDataError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc))
