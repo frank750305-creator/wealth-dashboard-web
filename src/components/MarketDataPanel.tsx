@@ -9,6 +9,7 @@ import {
 import {
   assetComparisonCsv,
   assetProfileCsv,
+  assetResearchReportMarkdown,
   comparisonRowFromProfile,
   coverageStatus,
   daysSinceDate,
@@ -1207,6 +1208,15 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleExportAssetResearchReport = () => {
+    if (!assetProfile) return;
+
+    downloadTextFile(
+      `bigquery-asset-research-${assetProfile.symbol}-${resultStamp()}.md`,
+      assetResearchReportMarkdown({ profile: assetProfile, history: assetHistory }),
+      "text/markdown;charset=utf-8",
+    );
+  };
   const handleCompareAssets = async () => {
     const symbols = parseSymbolList(comparisonSymbols);
     if (!hasBigQueryCredentials || !symbols.length) return;
@@ -1735,6 +1745,7 @@ export function MarketDataPanel() {
           onAssetHistoryLimitChange={setAssetHistoryLimit}
           assetProfileQualityCards={assetProfileQualityCards}
           onExportAssetProfileCsv={handleExportAssetProfileCsv}
+          onExportAssetResearchReport={handleExportAssetResearchReport}
         />
         <section className="bg-slate-950 border border-slate-800 rounded-lg p-4 space-y-4">
           <WatchlistControlsSection

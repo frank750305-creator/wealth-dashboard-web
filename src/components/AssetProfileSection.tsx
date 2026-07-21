@@ -32,6 +32,7 @@ type AssetProfileSectionProps = {
   onAssetHistoryLimitChange: (value: number) => void;
   assetProfileQualityCards: AssetProfileQualityCard[];
   onExportAssetProfileCsv: () => void;
+  onExportAssetResearchReport: () => void;
 };
 
 function formatPercent(value: number | null | undefined) {
@@ -60,6 +61,7 @@ export function AssetProfileSection({
   onAssetHistoryLimitChange: setAssetHistoryLimit,
   assetProfileQualityCards,
   onExportAssetProfileCsv: handleExportAssetProfileCsv,
+  onExportAssetResearchReport: handleExportAssetResearchReport,
 }: AssetProfileSectionProps) {
   return (
         <section className="bg-slate-950 border border-slate-800 rounded-lg p-4 space-y-4">
@@ -161,12 +163,20 @@ export function AssetProfileSection({
                     {assetProfile.summary.first_date ?? "--"} ~ {assetProfile.summary.latest_date ?? "--"} · {assetProfile.priceBasis}
                   </p>
                 </div>
-                <button
-                  onClick={handleExportAssetProfileCsv}
-                  className="self-start md:self-auto px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
-                >
-                  商品 CSV
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={handleExportAssetProfileCsv}
+                    className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
+                  >
+                    商品 CSV
+                  </button>
+                  <button
+                    onClick={handleExportAssetResearchReport}
+                    className="px-3 py-2 text-xs font-bold rounded-md bg-cyan-700 hover:bg-cyan-600 text-white"
+                  >
+                    研究 Memo
+                  </button>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-2 text-xs">

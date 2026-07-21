@@ -1,4 +1,4 @@
-import type { BigQueryAssetProfileResponse } from "@/types/market";
+import type { BigQueryAssetHistoryResponse, BigQueryAssetProfileResponse } from "@/types/market";
 
 export type QualityStatus = "strong" | "watch" | "risk" | "neutral";
 export type AssetDecisionSignal = "candidate" | "watch" | "risk" | "neutral";
@@ -223,6 +223,118 @@ export function assetProfileCsv(profile: BigQueryAssetProfileResponse) {
   ];
 
   return rows.map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+function markdownPercent(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value) ? `${(value * 100).toFixed(2)}%` : "--";
+}
+
+function markdownMetricLine(label: string, value: string) {
+  return `| ${label} | ${value} |`;
+}
+
+function assetResearchDecision(profile: BigQueryAssetProfileResponse, history?: BigQueryAssetHistoryResponse | null) {
+  const comparisonRow = comparisonRowFromProfile(profile);
+  const historyStatus = history?.quality.status ?? "neutral";
+  const maxDrawdown = history?.metrics.maxDrawdown ?? profile.metrics.maxDrawdown;
+  const volatility = history?.metrics.annualizedVolatility ?? profile.metrics.annualizedVolatility;
+
+  if (comparisonRow.signal === "risk" || historyStatus === "risk") {
+    return {
+      label: "暫緩",
+      reason: "資料品質或風險指標進入異常區，先完成資料與風險檢查。",
+    };
+  }
+  if (typeof maxDrawdown === "number" && Math.abs(maxDrawdown) >= 0.3) {
+    return {
+      label: "觀察",
+      reason: "最大回撤偏大，需要壓力測試與部位上限。",
+    };
+  }
+  if (typeof volatility === "number" && volatility >= 0.35) {
+    return {
+      label: "觀察",
+      reason: "年化波動偏高，建議先進入 watchlist，不直接放大權重。",
+    };
+  }
+  if (comparisonRow.signal === "candidate" && historyStatus === "strong") {
+    return {
+      label: "候選",
+      reason: "資料品質、報酬與風險條件可進入投組比較。",
+    };
+  }
+  return {
+    label: "觀察",
+    reason: "資料足以研究，但仍需和同類資產、基準與配置限制一起比較。",
+  };
+}
+
+export function assetResearchReportMarkdown({
+  profile,
+  history,
+}: {
+  profile: BigQueryAssetProfileResponse;
+  history?: BigQueryAssetHistoryResponse | null;
+}) {
+  const comparisonRow = comparisonRowFromProfile(profile);
+  const decision = assetResearchDecision(profile, history);
+  const qualityWarnings = history?.quality.warnings.length
+    ? history.quality.warnings
+    : ["目前沒有明顯資料品質阻塞項"];
+  const nextActions = history?.quality.nextActions.length
+    ? history.quality.nextActions
+    : ["補齊歷史 drill-down 後再輸出正式研究結論"];
+  const recentRows = (history?.prices ?? profile.recentPrices).slice(-10).reverse();
+
+  return [
+    `# ${profile.symbol} 單一資產研究 Memo`,
+    "",
+    `產出時間：${new Date().toISOString()}`,
+    `價格口徑：${profile.priceBasis}`,
+    "",
+    "## 初步結論",
+    "",
+    `- 研究狀態：${decision.label}`,
+    `- 判斷理由：${decision.reason}`,
+    `- Watchlist 訊號：${decisionSignalLabel(comparisonRow.signal)}，${comparisonRow.signalNote}`,
+    `- 綜合分數：${comparisonRow.score}`,
+    "",
+    "## 核心指標",
+    "",
+    "| 指標 | 數值 |",
+    "| --- | ---: |",
+    markdownMetricLine("最新價格", formatPrice(profile.metrics.latestPrice)),
+    markdownMetricLine("期間報酬", markdownPercent(history?.metrics.totalReturn ?? profile.metrics.totalReturn)),
+    markdownMetricLine("年化報酬", markdownPercent(history?.metrics.annualizedReturn ?? profile.metrics.annualizedReturn)),
+    markdownMetricLine("年化波動", markdownPercent(history?.metrics.annualizedVolatility ?? profile.metrics.annualizedVolatility)),
+    markdownMetricLine("最大回撤", markdownPercent(history?.metrics.maxDrawdown ?? profile.metrics.maxDrawdown)),
+    markdownMetricLine("最佳單日", markdownPercent(history?.metrics.bestDay ?? profile.metrics.bestDay)),
+    markdownMetricLine("最差單日", markdownPercent(history?.metrics.worstDay ?? profile.metrics.worstDay)),
+    "",
+    "## 資料品質",
+    "",
+    `- 主檔區間：${profile.summary.first_date ?? "--"} ~ ${profile.summary.latest_date ?? "--"}`,
+    `- 主檔筆數：${formatCount(profile.summary.row_count)}`,
+    `- 缺漏價格：${formatCount(profile.summary.missing_selected_price_rows)}`,
+    `- 歷史品質分數：${history ? `${history.quality.score} / ${qualityLabel(history.quality.status)}` : "--"}`,
+    "",
+    ...qualityWarnings.map((item) => `- ${item}`),
+    "",
+    "## 下一步",
+    "",
+    ...nextActions.map((item) => `- ${item}`),
+    "",
+    "## 最近價格",
+    "",
+    "| 日期 | Selected | Daily Return |",
+    "| --- | ---: | ---: |",
+    ...recentRows.map((point) => (
+      `| ${point.date ?? "--"} | ${formatPrice(point.selected_price)} | ${markdownPercent(point.daily_return)} |`
+    )),
+    "",
+    "> 本 memo 用於內部研究與資料檢核，不等同交易建議。",
+    "",
+  ].join("\n");
 }
 
 export function parseSymbolList(value: string) {
