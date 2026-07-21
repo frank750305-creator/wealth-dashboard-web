@@ -10,6 +10,7 @@ try:
     from .market_data_service import (
         MarketDataError,
         bigquery_market_status,
+        load_bigquery_asset_history,
         load_bigquery_asset_profile,
         load_bigquery_market_diagnostics,
         load_portfolio_return_input,
@@ -24,6 +25,7 @@ except ImportError:
     from market_data_service import (
         MarketDataError,
         bigquery_market_status,
+        load_bigquery_asset_history,
         load_bigquery_asset_profile,
         load_bigquery_market_diagnostics,
         load_portfolio_return_input,
@@ -402,6 +404,28 @@ async def market_bigquery_asset_profile(symbol: str, price_basis: str = "adjuste
                 symbol=symbol,
                 price_basis=price_basis,
                 recent_limit=recent_limit,
+            ),
+        }
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+@app.get("/api/v1/market/bigquery/assets/{symbol}/history")
+async def market_bigquery_asset_history(
+    symbol: str,
+    price_basis: str = "adjusted",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    limit: int = 365,
+):
+    try:
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            **load_bigquery_asset_history(
+                symbol=symbol,
+                price_basis=price_basis,
+                start_date=start_date,
+                end_date=end_date,
+                limit=limit,
             ),
         }
     except MarketDataError as exc:

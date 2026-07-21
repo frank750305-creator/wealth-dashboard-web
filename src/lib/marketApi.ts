@@ -1,6 +1,7 @@
 import type {
   BigQueryMarketStatus,
   BigQueryMarketDiagnostics,
+  BigQueryAssetHistoryResponse,
   BigQueryAssetProfileResponse,
   BigQueryAssetSearchResponse,
   MarketSourcesResponse,
@@ -91,6 +92,36 @@ export async function fetchBigQueryAssetProfile(
   if (!response.ok) {
     const errText = await response.text();
     throw new Error(`BigQuery 商品詳情讀取異常 (代碼: ${response.status})\n${errText}`);
+  }
+
+  return response.json();
+}
+
+export async function fetchBigQueryAssetHistory(
+  symbol: string,
+  priceBasis: "adjusted" | "raw" = "adjusted",
+  options: { startDate?: string; endDate?: string; limit?: number } = {},
+): Promise<BigQueryAssetHistoryResponse> {
+  const cleanSymbol = symbol.trim();
+  const params = new URLSearchParams({
+    price_basis: priceBasis,
+    limit: String(options.limit ?? 365),
+  });
+  if (options.startDate) {
+    params.set("start_date", options.startDate);
+  }
+  if (options.endDate) {
+    params.set("end_date", options.endDate);
+  }
+
+  const response = await fetch(`/api/v1/market/bigquery/assets/${encodeURIComponent(cleanSymbol)}/history?${params.toString()}`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`BigQuery 歷史資料讀取異常 (代碼: ${response.status})\n${errText}`);
   }
 
   return response.json();

@@ -163,6 +163,57 @@ export type BigQueryAssetProfileResponse = {
   recentPrices: BigQueryAssetPricePoint[];
 };
 
+export type BigQueryAssetHistorySummary = {
+  requested_start_date: string | null;
+  requested_end_date: string | null;
+  first_date: string | null;
+  latest_date: string | null;
+  row_count: number;
+  selected_price_rows: number;
+  missing_selected_price_rows: number;
+  max_gap_days: number | null;
+  limit: number;
+};
+
+export type BigQueryAssetHistoryMetrics = {
+  firstPrice: number | null;
+  latestPrice: number | null;
+  totalReturn: number | null;
+  annualizedReturn: number | null;
+  annualizedVolatility: number | null;
+  maxDrawdown: number | null;
+  bestDay: number | null;
+  worstDay: number | null;
+};
+
+export type BigQueryAssetHistoryQualityCheck = {
+  id: string;
+  label: string;
+  score: number;
+  status: BigQueryQualityStatus;
+  evidence: string;
+  action: string;
+};
+
+export type BigQueryAssetHistoryQuality = {
+  score: number;
+  status: BigQueryQualityStatus;
+  checks: BigQueryAssetHistoryQualityCheck[];
+  warnings: string[];
+  nextActions: string[];
+};
+
+export type BigQueryAssetHistoryResponse = {
+  generatedAt: string;
+  status: Omit<BigQueryMarketStatus, "generatedAt">;
+  symbol: string;
+  priceBasis: "adjusted" | "raw";
+  summary: BigQueryAssetHistorySummary;
+  metrics: BigQueryAssetHistoryMetrics;
+  quality: BigQueryAssetHistoryQuality;
+  prices: BigQueryAssetPricePoint[];
+};
+
 export type PortfolioAnalyzeBigQueryPayload = {
   weights_by_symbol: Record<string, number>;
   benchmark_symbol?: string | null;

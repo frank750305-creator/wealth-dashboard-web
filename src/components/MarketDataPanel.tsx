@@ -32,7 +32,7 @@ import {
   rebalanceDraftCsv,
   rebalanceDraftRows,
 } from "@/lib/rebalanceWorkflow";
-import { fetchBigQueryAssetProfile, fetchBigQueryAssets } from "@/lib/marketApi";
+import { fetchBigQueryAssetHistory, fetchBigQueryAssetProfile, fetchBigQueryAssets } from "@/lib/marketApi";
 import {
   buildClientWorkspaceProvisioningItems,
   buildPlatformEntitlementItems,
@@ -134,6 +134,7 @@ import {
 } from "@/lib/tradeExecutionWorkflow";
 import type {
   BigQueryAsset,
+  BigQueryAssetHistoryResponse,
   BigQueryAssetProfileResponse,
 } from "@/types/market";
 import { AllocationDraftSection } from "./AllocationDraftSection";
@@ -219,6 +220,10 @@ export function MarketDataPanel() {
   const [assetPriceBasis, setAssetPriceBasis] = useState<"adjusted" | "raw">("adjusted");
   const [assetSuggestions, setAssetSuggestions] = useState<BigQueryAsset[]>([]);
   const [assetProfile, setAssetProfile] = useState<BigQueryAssetProfileResponse | null>(null);
+  const [assetHistory, setAssetHistory] = useState<BigQueryAssetHistoryResponse | null>(null);
+  const [assetHistoryStartDate, setAssetHistoryStartDate] = useState("");
+  const [assetHistoryEndDate, setAssetHistoryEndDate] = useState("");
+  const [assetHistoryLimit, setAssetHistoryLimit] = useState(365);
   const [assetPanelError, setAssetPanelError] = useState<string | null>(null);
   const [isSearchingAssets, setIsSearchingAssets] = useState(false);
   const [isLoadingAssetProfile, setIsLoadingAssetProfile] = useState(false);
@@ -1174,11 +1179,20 @@ export function MarketDataPanel() {
     setIsLoadingAssetProfile(true);
     setAssetPanelError(null);
     try {
-      const response = await fetchBigQueryAssetProfile(cleanSymbol, assetPriceBasis);
-      setAssetQuery(response.symbol);
-      setAssetProfile(response);
+      const [profileResponse, historyResponse] = await Promise.all([
+        fetchBigQueryAssetProfile(cleanSymbol, assetPriceBasis),
+        fetchBigQueryAssetHistory(cleanSymbol, assetPriceBasis, {
+          startDate: assetHistoryStartDate || undefined,
+          endDate: assetHistoryEndDate || undefined,
+          limit: assetHistoryLimit,
+        }),
+      ]);
+      setAssetQuery(profileResponse.symbol);
+      setAssetProfile(profileResponse);
+      setAssetHistory(historyResponse);
     } catch (err: unknown) {
       setAssetProfile(null);
+      setAssetHistory(null);
       setAssetPanelError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsLoadingAssetProfile(false);
@@ -1712,6 +1726,13 @@ export function MarketDataPanel() {
           assetPanelError={assetPanelError}
           assetSuggestions={assetSuggestions}
           assetProfile={assetProfile}
+          assetHistory={assetHistory}
+          assetHistoryStartDate={assetHistoryStartDate}
+          assetHistoryEndDate={assetHistoryEndDate}
+          assetHistoryLimit={assetHistoryLimit}
+          onAssetHistoryStartDateChange={setAssetHistoryStartDate}
+          onAssetHistoryEndDateChange={setAssetHistoryEndDate}
+          onAssetHistoryLimitChange={setAssetHistoryLimit}
           assetProfileQualityCards={assetProfileQualityCards}
           onExportAssetProfileCsv={handleExportAssetProfileCsv}
         />

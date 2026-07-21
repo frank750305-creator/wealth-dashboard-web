@@ -382,6 +382,152 @@ def load_bigquery_asset_profile(*, symbol: str, price_basis: str = "adjusted", r
     }
 
 
+def load_bigquery_asset_history(
+    *,
+    symbol: str,
+    price_basis: str = "adjusted",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    limit: int = 365,
+) -> Dict:
+    clean_symbol = (symbol or "").strip()
+    if not clean_symbol:
+        raise MarketDataError("Symbol is required.")
+
+    start_dt = _parse_optional_iso_date(start_date, "start_date")
+    end_dt = _parse_optional_iso_date(end_date, "end_date")
+    if start_dt and end_dt and start_dt > end_dt:
+        raise MarketDataError("start_date cannot be later than end_date.")
+
+    bigquery = _bigquery_module()
+    client = _bigquery_client(bigquery)
+    selected_price_column = _price_column(price_basis)
+    normalized_price_basis = _normalize_price_basis(price_basis)
+    price_table = _table_path("BIGQUERY_PRICE_TABLE", DEFAULT_PRICE_TABLE)
+    bounded_limit = max(20, min(int(limit or 365), 2000))
+
+    where_clauses = ["symbol = @symbol"]
+    query_parameters = [
+        bigquery.ScalarQueryParameter("symbol", "STRING", clean_symbol),
+        bigquery.ScalarQueryParameter("limit", "INT64", bounded_limit),
+    ]
+    if start_dt:
+        where_clauses.append("DATE(date) >= @start_date")
+        query_parameters.append(bigquery.ScalarQueryParameter("start_date", "DATE", start_dt))
+    if end_dt:
+        where_clauses.append("DATE(date) <= @end_date")
+        query_parameters.append(bigquery.ScalarQueryParameter("end_date", "DATE", end_dt))
+
+    query = f"""
+    SELECT
+        DATE(date) AS price_date,
+        SAFE_CAST(adj_price AS FLOAT64) AS adj_price,
+        SAFE_CAST(raw_price AS FLOAT64) AS raw_price,
+        SAFE_CAST({selected_price_column} AS FLOAT64) AS selected_price
+    FROM {price_table}
+    WHERE {" AND ".join(where_clauses)}
+    ORDER BY price_date DESC
+    LIMIT @limit
+    """
+
+    try:
+        rows = list(
+            client.query(
+                query,
+                job_config=bigquery.QueryJobConfig(query_parameters=query_parameters),
+            ).result()
+        )
+    except Exception as exc:
+        raise MarketDataQueryError(f"BigQuery asset history query failed: {exc}") from exc
+
+    records = [
+        {
+            "date": row["price_date"],
+            "raw_price": row["raw_price"],
+            "adj_price": row["adj_price"],
+            "selected_price": row["selected_price"],
+        }
+        for row in rows
+    ]
+    if not records:
+        raise MarketDataError(f"No BigQuery price history found for: {clean_symbol}")
+
+    frame = pd.DataFrame.from_records(records)
+    frame["date"] = pd.to_datetime(frame["date"])
+    for column in ("adj_price", "raw_price", "selected_price"):
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
+
+    frame = frame.sort_values("date")
+    frame["daily_return"] = frame["selected_price"].pct_change(fill_method=None).replace([np.inf, -np.inf], np.nan)
+    valid_frame = frame[frame["selected_price"].notna() & (frame["selected_price"] > 0)].copy()
+    if valid_frame.empty:
+        raise MarketDataError(f"No valid {normalized_price_basis} price history found for: {clean_symbol}")
+
+    valid_returns = valid_frame["selected_price"].pct_change(fill_method=None).replace([np.inf, -np.inf], np.nan)
+    first_price = float(valid_frame["selected_price"].iloc[0])
+    latest_price = float(valid_frame["selected_price"].iloc[-1])
+    first_date = valid_frame["date"].iloc[0]
+    latest_date = valid_frame["date"].iloc[-1]
+    elapsed_days = max(int((latest_date - first_date).days), 0)
+    total_return = latest_price / first_price - 1 if first_price > 0 else None
+    annualized_return = (
+        (latest_price / first_price) ** (365.25 / elapsed_days) - 1
+        if first_price > 0 and elapsed_days > 0
+        else None
+    )
+    annualized_volatility = (
+        float(valid_returns.std(ddof=0) * np.sqrt(252))
+        if valid_returns.dropna().shape[0] > 1
+        else None
+    )
+    drawdown_series = valid_frame["selected_price"] / valid_frame["selected_price"].cummax() - 1
+    date_gaps = valid_frame["date"].sort_values().diff().dt.days.dropna()
+    max_gap_days = int(date_gaps.max()) if not date_gaps.empty else None
+
+    frame_for_output = frame.copy()
+    frame_for_output["date"] = frame_for_output["date"].dt.strftime("%Y-%m-%d")
+    summary = {
+        "requested_start_date": start_dt.isoformat() if start_dt else None,
+        "requested_end_date": end_dt.isoformat() if end_dt else None,
+        "first_date": frame["date"].min().strftime("%Y-%m-%d"),
+        "latest_date": frame["date"].max().strftime("%Y-%m-%d"),
+        "row_count": int(len(frame)),
+        "selected_price_rows": int(valid_frame.shape[0]),
+        "missing_selected_price_rows": int(len(frame) - valid_frame.shape[0]),
+        "max_gap_days": max_gap_days,
+        "limit": bounded_limit,
+    }
+    metrics = {
+        "firstPrice": _finite_or_none(first_price),
+        "latestPrice": _finite_or_none(latest_price),
+        "totalReturn": _finite_or_none(total_return),
+        "annualizedReturn": _finite_or_none(annualized_return),
+        "annualizedVolatility": _finite_or_none(annualized_volatility),
+        "maxDrawdown": _finite_or_none(drawdown_series.min()),
+        "bestDay": _finite_or_none(valid_returns.max()),
+        "worstDay": _finite_or_none(valid_returns.min()),
+    }
+
+    return {
+        "status": bigquery_market_status(),
+        "symbol": clean_symbol,
+        "priceBasis": normalized_price_basis,
+        "summary": summary,
+        "metrics": metrics,
+        "quality": _build_asset_history_quality(summary),
+        "prices": [
+            {
+                "date": row["date"],
+                "raw_price": _finite_or_none(row["raw_price"]),
+                "adj_price": _finite_or_none(row["adj_price"]),
+                "selected_price": _finite_or_none(row["selected_price"]),
+                "daily_return": _finite_or_none(row["daily_return"]),
+            }
+            for row in frame_for_output.to_dict("records")
+        ],
+    }
+
+
 def load_portfolio_return_input(
     *,
     symbols: Iterable[str],
@@ -790,12 +936,114 @@ def _quality_next_actions(dimensions: List[Dict], blockers: List[str]) -> List[s
     return list(dict.fromkeys(actions))[:4]
 
 
+def _build_asset_history_quality(summary: Dict) -> Dict:
+    row_count = _safe_number(summary.get("row_count"))
+    selected_rows = _safe_number(summary.get("selected_price_rows"))
+    missing_rows = _safe_number(summary.get("missing_selected_price_rows"))
+    max_gap_days = summary.get("max_gap_days")
+    first_date = summary.get("first_date")
+    latest_date = summary.get("latest_date")
+    elapsed_days = _elapsed_days(first_date, latest_date)
+    latest_days = _days_since_iso_date(latest_date)
+    completeness_score = round((selected_rows / row_count) * 100) if row_count > 0 else 0
+    horizon_score = 100 if elapsed_days >= 365 else 75 if elapsed_days >= 180 else 50 if elapsed_days >= 60 else 25
+    gap_score = _history_gap_score(max_gap_days)
+    freshness_score = _freshness_score(latest_days)
+    checks = [
+        _history_quality_check(
+            "completeness",
+            "價格完整度",
+            completeness_score,
+            f"{int(selected_rows)} / {int(row_count)} selected prices",
+            "回補缺漏價格" if missing_rows else "價格欄位完整",
+        ),
+        _history_quality_check(
+            "horizon",
+            "歷史長度",
+            horizon_score,
+            f"{elapsed_days} days",
+            "拉長查詢區間或回補歷史" if horizon_score < 85 else "歷史視窗足以支援波動分析",
+        ),
+        _history_quality_check(
+            "continuity",
+            "時間連續性",
+            gap_score,
+            f"max gap {max_gap_days if max_gap_days is not None else '--'}d",
+            "檢查交易日缺口" if gap_score < 85 else "未見重大時間缺口",
+        ),
+        _history_quality_check(
+            "freshness",
+            "最新日",
+            freshness_score,
+            f"{latest_days if latest_days is not None else '--'} days since latest price",
+            "檢查最新批次" if freshness_score < 85 else "最新日可用",
+        ),
+    ]
+    total_score = round(sum(check["score"] for check in checks) / len(checks))
+    warnings = [
+        f"{check['label']}: {check['evidence']}"
+        for check in checks
+        if check["status"] != "strong"
+    ]
+    next_actions = [check["action"] for check in checks if check["status"] != "strong"]
+    if not next_actions:
+        next_actions = ["可進入報酬、波動與 drawdown drill-down", "可納入 watchlist 比較與投組分析"]
+
+    return {
+        "score": total_score,
+        "status": _quality_status(total_score),
+        "checks": checks,
+        "warnings": warnings[:4],
+        "nextActions": list(dict.fromkeys(next_actions))[:4],
+    }
+
+
+def _history_quality_check(id: str, label: str, score: int, evidence: str, action: str) -> Dict:
+    bounded_score = max(0, min(int(score), 100))
+    return {
+        "id": id,
+        "label": label,
+        "score": bounded_score,
+        "status": _quality_status(bounded_score),
+        "evidence": evidence,
+        "action": action,
+    }
+
+
+def _history_gap_score(max_gap_days) -> int:
+    if max_gap_days is None:
+        return 0
+    try:
+        numeric = float(max_gap_days)
+    except (TypeError, ValueError):
+        return 0
+    if numeric <= 5:
+        return 100
+    if numeric <= 14:
+        return 75
+    if numeric <= 45:
+        return 45
+    return 15
+
+
+def _elapsed_days(first_date: Optional[str], latest_date: Optional[str]) -> int:
+    start = _parse_optional_iso_date(first_date, "first_date")
+    end = _parse_optional_iso_date(latest_date, "latest_date")
+    if not start or not end:
+        return 0
+    return max(0, (end - start).days)
+
+
 def _safe_number(value) -> float:
     try:
         numeric = float(value)
     except (TypeError, ValueError):
         return 0
     return numeric if np.isfinite(numeric) else 0
+
+
+def _finite_or_none(value):
+    return float(value) if value is not None and np.isfinite(value) else None
 
 
 def _coverage_score(value: float, *, strong: float, watch: float) -> int:
@@ -840,6 +1088,15 @@ def _days_since_iso_date(value: Optional[str]) -> Optional[int]:
     except ValueError:
         return None
     return max(0, (date.today() - parsed).days)
+
+
+def _parse_optional_iso_date(value: Optional[str], label: str) -> Optional[date]:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError as exc:
+        raise MarketDataError(f"{label} must be an ISO date string.") from exc
 
 
 def _summary_row_to_dict(row, *, date_fields: tuple[str, ...]) -> Dict:
