@@ -14,6 +14,7 @@ import {
   type BigQueryPortfolioMetricCard,
   type BigQueryPortfolioMetricGroup,
 } from "./BigQueryPortfolioMetricGroups";
+import { BigQueryPortfolioModeComparison } from "./BigQueryPortfolioModeComparison";
 import { BigQueryPortfolioMonitoringCenter } from "./BigQueryPortfolioMonitoringCenter";
 import { BigQueryPortfolioPresetBar } from "./BigQueryPortfolioPresetBar";
 import { BigQueryPortfolioResultExportBar } from "./BigQueryPortfolioResultExportBar";
@@ -376,13 +377,6 @@ function formatMetricDelta(value: number | null, kind: "percent" | "number") {
   const sign = value > 0 ? "+" : "";
   if (kind === "percent") return `${sign}${(value * 100).toFixed(2)}%`;
   return `${sign}${value.toFixed(2)}`;
-}
-
-function metricDeltaClass(value: number | null) {
-  if (value === null || !Number.isFinite(value)) return "text-slate-500";
-  if (value > 0) return "text-emerald-300";
-  if (value < 0) return "text-rose-300";
-  return "text-slate-300";
 }
 
 function isFiniteNumber(value: number | null | undefined): value is number {
@@ -2656,47 +2650,11 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
             formatMetric={formatMetric}
           />
 
-          {modeComparisonRows.length ? (
-            <div className="bg-slate-950 border border-slate-800 rounded-lg p-3">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 mb-3">
-                <div>
-                  <p className="text-[11px] text-slate-500">模式比較</p>
-                  <p className="text-[11px] text-slate-600 mt-0.5">近期交集法 vs 長線重建法</p>
-                </div>
-                <p className="text-[11px] text-slate-600 font-mono">
-                  Delta = 長線重建法 - 近期交集法
-                </p>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[760px] text-xs">
-                  <thead>
-                    <tr className="text-left text-[11px] text-slate-600">
-                      <th className="py-2 pr-3 font-medium">Metric</th>
-                      <th className="py-2 px-3 font-medium text-right">近期交集法</th>
-                      <th className="py-2 px-3 font-medium text-right">長線重建法</th>
-                      <th className="py-2 pl-3 font-medium text-right">Delta</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {modeComparisonRows.map((row) => (
-                      <tr key={row.key} className="border-t border-slate-900">
-                        <td className="py-2 pr-3 text-slate-300">{row.label}</td>
-                        <td className="py-2 px-3 text-right font-mono text-slate-300">
-                          {formatMetric(row.overlapValue, row.kind)}
-                        </td>
-                        <td className="py-2 px-3 text-right font-mono text-cyan-200">
-                          {formatMetric(row.longRebuildValue, row.kind)}
-                        </td>
-                        <td className={`py-2 pl-3 text-right font-mono ${metricDeltaClass(row.delta)}`}>
-                          {formatMetricDelta(row.delta, row.kind)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ) : null}
+          <BigQueryPortfolioModeComparison
+            rows={modeComparisonRows}
+            formatMetric={formatMetric}
+            formatMetricDelta={formatMetricDelta}
+          />
 
           {rebalanceRows.length ? (
             <div className="bg-slate-950 border border-slate-800 rounded-lg p-3">
