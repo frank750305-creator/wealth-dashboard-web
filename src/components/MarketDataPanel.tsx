@@ -69,6 +69,8 @@ import {
 import {
   buildMarketAlertEvents,
   marketAlertCsv,
+  buildMarketAlertOwnerQueues,
+  marketAlertOwnerQueueCsv,
 } from "@/lib/marketAlertEvents";
 import {
   buildDataLicenseComplianceItems,
@@ -694,6 +696,7 @@ export function MarketDataPanel() {
     riskOwner,
     decisionApprover,
   });
+  const marketAlertOwnerQueues = buildMarketAlertOwnerQueues(marketAlertEvents);
   const marketHighAlertCount = marketAlertEvents.filter((event) => event.priority === "high").length;
   const marketMediumAlertCount = marketAlertEvents.filter((event) => event.priority === "medium").length;
   const marketAlertDecision = marketAlertEvents.length
@@ -1415,6 +1418,15 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleExportMarketAlertOwnerQueueCsv = () => {
+    if (!marketAlertOwnerQueues.length) return;
+
+    downloadTextFile(
+      `bigquery-market-alert-owner-queue-${resultStamp()}.csv`,
+      marketAlertOwnerQueueCsv(marketAlertOwnerQueues),
+      "text/csv;charset=utf-8",
+    );
+  };
   const buildAssetComparisonMemo = () =>
     assetComparisonMemo(visibleComparisonRows, {
       name: watchlistPresetName.trim() || "未命名 Watchlist",
@@ -2004,7 +2016,9 @@ export function MarketDataPanel() {
                           <MarketAlertSection
                             marketAlertDecision={marketAlertDecision}
                             onExportMarketAlertCsv={handleExportMarketAlertCsv}
+                            onExportMarketAlertOwnerQueueCsv={handleExportMarketAlertOwnerQueueCsv}
                             marketAlertEvents={marketAlertEvents}
+                            marketAlertOwnerQueues={marketAlertOwnerQueues}
                             marketHighAlertCount={marketHighAlertCount}
                             marketMediumAlertCount={marketMediumAlertCount}
                             platformExceptionCount={platformExceptionItems.length}

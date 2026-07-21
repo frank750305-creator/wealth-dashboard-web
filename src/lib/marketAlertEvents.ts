@@ -13,6 +13,21 @@ export type MarketAlertEvent = {
   action: string;
 };
 
+export type MarketAlertOwnerQueue = {
+  owner: string;
+  status: MarketAlertStatus;
+  priority: MarketAlertPriority;
+  total: number;
+  high: number;
+  medium: number;
+  low: number;
+  block: number;
+  watch: number;
+  pass: number;
+  topSource: string;
+  nextAction: string;
+};
+
 type CoverageUniverseAlertInput = {
   label: string;
   status: MarketAlertStatus;
@@ -116,6 +131,18 @@ function slaEscalationTierLabel(tier: MarketAlertSlaTier) {
 function marketAlertPriorityFromStatus(status: MarketAlertStatus): MarketAlertPriority {
   if (status === "block") return "high";
   if (status === "watch") return "medium";
+  return "low";
+}
+
+function marketAlertStatusFromEvents(events: MarketAlertEvent[]): MarketAlertStatus {
+  if (events.some((event) => event.status === "block")) return "block";
+  if (events.some((event) => event.status === "watch")) return "watch";
+  return "pass";
+}
+
+function marketAlertPriorityFromEvents(events: MarketAlertEvent[]): MarketAlertPriority {
+  if (events.some((event) => event.priority === "high")) return "high";
+  if (events.some((event) => event.priority === "medium")) return "medium";
   return "low";
 }
 
@@ -258,6 +285,86 @@ export function marketAlertCsv(rows: MarketAlertEvent[]) {
     row.owner,
     row.evidence,
     row.action,
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+export function buildMarketAlertOwnerQueues(rows: MarketAlertEvent[]): MarketAlertOwnerQueue[] {
+  const groups = rows.reduce<Record<string, MarketAlertEvent[]>>((accumulator, row) => {
+    const owner = row.owner.trim() || "未分派";
+    accumulator[owner] = [...(accumulator[owner] ?? []), row];
+    return accumulator;
+  }, {});
+  const priorityRank: Record<MarketAlertPriority, number> = { high: 0, medium: 1, low: 2 };
+  const statusRank: Record<MarketAlertStatus, number> = { block: 0, watch: 1, pass: 2 };
+
+  return Object.entries(groups)
+    .map(([owner, events]) => {
+      const sortedEvents = [...events].sort(
+        (left, right) =>
+          priorityRank[left.priority] - priorityRank[right.priority] ||
+          statusRank[left.status] - statusRank[right.status],
+      );
+      const sourceCount = events.reduce<Record<string, number>>((accumulator, event) => {
+        accumulator[event.source] = (accumulator[event.source] ?? 0) + 1;
+        return accumulator;
+      }, {});
+      const topSource = Object.entries(sourceCount).sort((left, right) => right[1] - left[1])[0]?.[0] ?? "--";
+
+      return {
+        owner,
+        status: marketAlertStatusFromEvents(events),
+        priority: marketAlertPriorityFromEvents(events),
+        total: events.length,
+        high: events.filter((event) => event.priority === "high").length,
+        medium: events.filter((event) => event.priority === "medium").length,
+        low: events.filter((event) => event.priority === "low").length,
+        block: events.filter((event) => event.status === "block").length,
+        watch: events.filter((event) => event.status === "watch").length,
+        pass: events.filter((event) => event.status === "pass").length,
+        topSource,
+        nextAction: sortedEvents[0]?.action ?? "維持監控",
+      };
+    })
+    .sort(
+      (left, right) =>
+        priorityRank[left.priority] - priorityRank[right.priority] ||
+        statusRank[left.status] - statusRank[right.status] ||
+        right.total - left.total ||
+        left.owner.localeCompare(right.owner, "zh-Hant"),
+    )
+    .slice(0, 12);
+}
+
+export function marketAlertOwnerQueueCsv(rows: MarketAlertOwnerQueue[]) {
+  const header = [
+    "owner",
+    "priority",
+    "status",
+    "total",
+    "high",
+    "medium",
+    "low",
+    "block",
+    "watch",
+    "pass",
+    "top_source",
+    "next_action",
+  ];
+  const csvRows = rows.map((row) => [
+    row.owner,
+    executionHandoffPriorityLabel(row.priority),
+    executionReviewLabel(row.status),
+    row.total,
+    row.high,
+    row.medium,
+    row.low,
+    row.block,
+    row.watch,
+    row.pass,
+    row.topSource,
+    row.nextAction,
   ]);
 
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");

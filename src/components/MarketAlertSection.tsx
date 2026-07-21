@@ -1,5 +1,6 @@
 import type {
   MarketAlertEvent,
+  MarketAlertOwnerQueue,
   MarketAlertPriority,
   MarketAlertStatus,
 } from "@/lib/marketAlertEvents";
@@ -7,7 +8,9 @@ import type {
 type MarketAlertSectionProps = {
   marketAlertDecision: MarketAlertStatus;
   onExportMarketAlertCsv: () => void;
+  onExportMarketAlertOwnerQueueCsv: () => void;
   marketAlertEvents: MarketAlertEvent[];
+  marketAlertOwnerQueues: MarketAlertOwnerQueue[];
   marketHighAlertCount: number;
   marketMediumAlertCount: number;
   platformExceptionCount: number;
@@ -46,7 +49,9 @@ function marketAlertPriorityClass(priority: MarketAlertPriority) {
 export function MarketAlertSection({
   marketAlertDecision,
   onExportMarketAlertCsv,
+  onExportMarketAlertOwnerQueueCsv,
   marketAlertEvents,
+  marketAlertOwnerQueues,
   marketHighAlertCount,
   marketMediumAlertCount,
   platformExceptionCount,
@@ -65,13 +70,22 @@ export function MarketAlertSection({
             將資料品質、決策漏斗、KRI、SLA 與例外事項合併成可分派的警示事件流
           </p>
         </div>
-        <button
-          onClick={onExportMarketAlertCsv}
-          disabled={!marketAlertEvents.length}
-          className="px-3 py-2 rounded-md bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-100 text-xs font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
-        >
-          警示 CSV
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={onExportMarketAlertOwnerQueueCsv}
+            disabled={!marketAlertOwnerQueues.length}
+            className="px-3 py-2 rounded-md bg-cyan-700 hover:bg-cyan-600 text-white text-xs font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+          >
+            分派 CSV
+          </button>
+          <button
+            onClick={onExportMarketAlertCsv}
+            disabled={!marketAlertEvents.length}
+            className="px-3 py-2 rounded-md bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-100 text-xs font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+          >
+            警示 CSV
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
@@ -89,6 +103,38 @@ export function MarketAlertSection({
           </div>
         ))}
       </div>
+
+      {marketAlertOwnerQueues.length ? (
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-2 text-xs">
+          {marketAlertOwnerQueues.slice(0, 6).map((queue) => (
+            <div key={queue.owner} className={`rounded-md border p-3 min-w-0 ${executionReviewRowClass(queue.status)}`}>
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-bold text-slate-100 truncate">{queue.owner}</p>
+                  <p className="mt-1 text-[11px] text-slate-500 truncate">主要來源：{queue.topSource}</p>
+                </div>
+                <span className={`shrink-0 rounded border px-2 py-0.5 text-[10px] font-bold ${marketAlertPriorityClass(queue.priority)}`}>
+                  {marketAlertPriorityLabel(queue.priority)}
+                </span>
+              </div>
+              <div className="mt-3 grid grid-cols-4 gap-2">
+                {[
+                  ["總數", queue.total],
+                  ["高", queue.high],
+                  ["中", queue.medium],
+                  ["阻塞", queue.block],
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded bg-slate-950/70 px-2 py-1.5">
+                    <p className="text-[10px] text-slate-600">{label}</p>
+                    <p className="font-mono font-bold text-slate-100">{value}</p>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-3 text-[11px] leading-relaxed text-slate-500">{queue.nextAction}</p>
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       {marketAlertEvents.length ? (
         <div className="overflow-x-auto">
