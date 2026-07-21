@@ -4,6 +4,9 @@ import type {
   BigQueryAssetHistoryResponse,
   BigQueryAssetProfileResponse,
   BigQueryAssetSearchResponse,
+  DecisionFunnelWarehouseLatestResponse,
+  DecisionFunnelWarehouseSyncPayload,
+  DecisionFunnelWarehouseSyncResponse,
   ExecutionFillWarehouseLatestResponse,
   ExecutionFillWarehouseSyncPayload,
   ExecutionFillWarehouseSyncResponse,
@@ -537,6 +540,54 @@ export async function syncOperatingKriToBigQuery(
   if (!response.ok) {
     const errText = await response.text();
     throw new Error(`營運 KRI BigQuery 同步異常 (代碼: ${response.status})\n${errText}`);
+  }
+
+  return response.json();
+}
+
+export async function fetchLatestDecisionFunnelFromBigQuery({
+  limit = 100,
+  workspaceId = "default",
+  portfolioId = "",
+  batchId = "",
+}: {
+  limit?: number;
+  workspaceId?: string;
+  portfolioId?: string;
+  batchId?: string;
+}): Promise<DecisionFunnelWarehouseLatestResponse> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    workspace_id: workspaceId.trim() || "default",
+  });
+  if (portfolioId.trim()) params.set("portfolio_id", portfolioId.trim());
+  if (batchId.trim()) params.set("batch_id", batchId.trim());
+
+  const response = await fetch(`/api/v1/trading/decision-funnel?${params.toString()}`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`決策漏斗 BigQuery 載入異常 (代碼: ${response.status})\n${errText}`);
+  }
+
+  return response.json();
+}
+
+export async function syncDecisionFunnelToBigQuery(
+  payload: DecisionFunnelWarehouseSyncPayload,
+): Promise<DecisionFunnelWarehouseSyncResponse> {
+  const response = await fetch("/api/v1/trading/decision-funnel", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`決策漏斗 BigQuery 同步異常 (代碼: ${response.status})\n${errText}`);
   }
 
   return response.json();

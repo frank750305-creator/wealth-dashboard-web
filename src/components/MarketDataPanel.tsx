@@ -37,6 +37,7 @@ import {
   fetchBigQueryAssetHistory,
   fetchBigQueryAssetProfile,
   fetchBigQueryAssets,
+  fetchLatestDecisionFunnelFromBigQuery,
   fetchLatestExecutionFillsFromBigQuery,
   fetchLatestExecutionRouteEventsFromBigQuery,
   fetchLatestExecutionRoutesFromBigQuery,
@@ -48,6 +49,7 @@ import {
   fetchLatestResearchTasksFromBigQuery,
   fetchResearchTaskSyncAudit,
   fetchResearchTaskWarehouseStatus,
+  syncDecisionFunnelToBigQuery,
   syncExecutionFillsToBigQuery,
   syncExecutionRouteEventsToBigQuery,
   syncExecutionRoutesToBigQuery,
@@ -135,6 +137,7 @@ import {
 import {
   buildCioOperatingBriefItems,
   buildDecisionFunnelStages,
+  buildDecisionFunnelSyncPayload,
   buildOperatingKriItems,
   buildOperatingKriSyncPayload,
   buildSlaEscalationSyncPayload,
@@ -394,6 +397,11 @@ export function MarketDataPanel() {
   >("idle");
   const [operatingKriSyncMessage, setOperatingKriSyncMessage] = useState("");
   const [operatingKriWarehouseCount, setOperatingKriWarehouseCount] = useState(0);
+  const [decisionFunnelSyncStatus, setDecisionFunnelSyncStatus] = useState<
+    "idle" | "syncing" | "loading" | "synced" | "loaded" | "error"
+  >("idle");
+  const [decisionFunnelSyncMessage, setDecisionFunnelSyncMessage] = useState("");
+  const [decisionFunnelWarehouseCount, setDecisionFunnelWarehouseCount] = useState(0);
   const [watchlistMemoCopyStatus, setWatchlistMemoCopyStatus] = useState<"idle" | "copied">("idle");
   const sources = data?.sources ?? [];
   const securedCount = sources.filter((source) => source.status !== "needs_secret").length;
@@ -2081,6 +2089,64 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleSyncDecisionFunnelToBigQuery = async () => {
+    if (!decisionFunnelStages.length) return;
+
+    setDecisionFunnelSyncStatus("syncing");
+    setDecisionFunnelSyncMessage("決策漏斗同步中。");
+
+    try {
+      const result = await syncDecisionFunnelToBigQuery(
+        buildDecisionFunnelSyncPayload({
+          stages: decisionFunnelStages,
+          generatedAt: decisionGeneratedAt,
+          workspaceId: researchTaskWorkspaceId,
+          actorId: riskOwner,
+          portfolioId: tradeTicketPortfolioId,
+          batchId: tradeTicketBatchId,
+          totalRows: comparisonRows.length,
+          visibleRows: visibleComparisonRows.length,
+          candidateCount: candidateVisibleCount,
+          activeAllocationCount: activeAllocationRows.length,
+          activeRebalanceCount: activeRebalanceRows.length,
+          tradeTicketCount: tradeTickets.length,
+          filledTradeCount,
+          blockCount: decisionFunnelBlockCount,
+          watchCount: decisionFunnelWatchCount,
+        }),
+      );
+      const isSynced = result.status === "synced";
+      setDecisionFunnelSyncStatus(isSynced ? "synced" : "error");
+      setDecisionFunnelWarehouseCount(result.insertedCount);
+      setDecisionFunnelSyncMessage(`${result.insertedCount}/${result.receivedCount} 個決策階段寫入 ${result.table}`);
+    } catch (err: unknown) {
+      setDecisionFunnelSyncStatus("error");
+      setDecisionFunnelSyncMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
+  const handleLoadDecisionFunnelFromBigQuery = async () => {
+    setDecisionFunnelSyncStatus("loading");
+    setDecisionFunnelSyncMessage("決策漏斗載入中。");
+
+    try {
+      const result = await fetchLatestDecisionFunnelFromBigQuery({
+        limit: 100,
+        workspaceId: researchTaskWorkspaceId,
+        portfolioId: tradeTicketPortfolioId,
+      });
+      if (result.status === "schema_outdated") {
+        setDecisionFunnelSyncStatus("error");
+        setDecisionFunnelSyncMessage(`決策漏斗表需先同步升級欄位：${result.missingFields?.join(", ") || "--"}`);
+        return;
+      }
+      setDecisionFunnelWarehouseCount(result.stageCount);
+      setDecisionFunnelSyncStatus("loaded");
+      setDecisionFunnelSyncMessage(`已讀取 ${result.stageCount} 個決策階段 ${result.workspaceId}`);
+    } catch (err: unknown) {
+      setDecisionFunnelSyncStatus("error");
+      setDecisionFunnelSyncMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
   const handleExportDecisionFunnelCsv = () => {
     if (!decisionFunnelStages.length) return;
 
@@ -3004,6 +3070,12 @@ export function MarketDataPanel() {
 
                           <DecisionFunnelSection
                             decisionFunnelDecision={decisionFunnelDecision}
+                            hasBigQueryCredentials={hasBigQueryCredentials}
+                            syncStatus={decisionFunnelSyncStatus}
+                            syncMessage={decisionFunnelSyncMessage}
+                            warehouseStageCount={decisionFunnelWarehouseCount}
+                            onSyncDecisionFunnelToBigQuery={handleSyncDecisionFunnelToBigQuery}
+                            onLoadDecisionFunnelFromBigQuery={handleLoadDecisionFunnelFromBigQuery}
                             onExportDecisionFunnelCsv={handleExportDecisionFunnelCsv}
                             decisionFunnelStages={decisionFunnelStages}
                             decisionFunnelBlockCount={decisionFunnelBlockCount}

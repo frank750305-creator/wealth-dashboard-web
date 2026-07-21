@@ -12,6 +12,7 @@ import type {
   TradeTicketRow,
 } from "@/lib/tradeExecutionWorkflow";
 import type {
+  DecisionFunnelWarehouseSyncPayload,
   OperatingKriWarehouseSyncPayload,
   SlaEscalationWarehouseSyncPayload,
 } from "@/types/market";
@@ -685,4 +686,102 @@ export function decisionFunnelCsv(rows: DecisionFunnelStage[]) {
   ]);
 
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+const DECISION_FUNNEL_STAGE_KEYS: Record<string, string> = {
+  資料載入: "data_load",
+  研究篩選: "research_filter",
+  候選名單: "candidate_pool",
+  模型配置: "model_allocation",
+  再平衡交易: "rebalance_trades",
+  成交回報: "execution_fills",
+  營運放行: "operating_release",
+  例外關閉: "exception_close",
+};
+
+function decisionFunnelStageKey(label: string, index: number) {
+  return DECISION_FUNNEL_STAGE_KEYS[label] ?? `stage_${index + 1}`;
+}
+
+export function buildDecisionFunnelSyncPayload({
+  stages,
+  generatedAt,
+  workspaceId,
+  actorId,
+  portfolioId,
+  batchId,
+  totalRows,
+  visibleRows,
+  candidateCount,
+  activeAllocationCount,
+  activeRebalanceCount,
+  tradeTicketCount,
+  filledTradeCount,
+  blockCount,
+  watchCount,
+}: {
+  stages: DecisionFunnelStage[];
+  generatedAt: string;
+  workspaceId?: string;
+  actorId?: string;
+  portfolioId?: string;
+  batchId?: string;
+  totalRows: number;
+  visibleRows: number;
+  candidateCount: number;
+  activeAllocationCount: number;
+  activeRebalanceCount: number;
+  tradeTicketCount: number;
+  filledTradeCount: number;
+  blockCount: number;
+  watchCount: number;
+}): DecisionFunnelWarehouseSyncPayload {
+  const cleanWorkspaceId = normalizeWarehouseKey(workspaceId, "default");
+  const cleanActorId = normalizeWarehouseKey(actorId, "system");
+  const cleanPortfolioId = normalizeWarehouseKey(portfolioId, "default-portfolio");
+  const cleanBatchId = normalizeWarehouseKey(batchId, generatedAt);
+  const records = stages.map((stage, index) => {
+    const stageKey = decisionFunnelStageKey(stage.label, index);
+    const funnelId = `${cleanPortfolioId}:${cleanBatchId}:FUNNEL:${stageKey}`;
+
+    return {
+      workspace_id: cleanWorkspaceId,
+      actor_id: cleanActorId,
+      funnel_id: funnelId,
+      idempotency_key: `${cleanWorkspaceId}:${cleanActorId}:${funnelId}:${generatedAt}`,
+      generated_at: generatedAt,
+      updated_at: generatedAt,
+      portfolio_id: cleanPortfolioId,
+      batch_id: cleanBatchId,
+      stage_key: stageKey,
+      stage_order: index + 1,
+      label: stage.label,
+      status: stage.status,
+      value: stage.value,
+      conversion: stage.conversion,
+      owner: stage.owner,
+      note: stage.note,
+      total_rows: totalRows,
+      visible_rows: visibleRows,
+      candidate_count: candidateCount,
+      active_allocation_count: activeAllocationCount,
+      active_rebalance_count: activeRebalanceCount,
+      trade_ticket_count: tradeTicketCount,
+      filled_trade_count: filledTradeCount,
+      block_count: blockCount,
+      watch_count: watchCount,
+      source: "decision_funnel",
+    };
+  });
+
+  return {
+    table: "decision_funnel",
+    workspace_id: cleanWorkspaceId,
+    actor_id: cleanActorId,
+    portfolio_id: cleanPortfolioId,
+    batch_id: cleanBatchId,
+    generated_at: generatedAt,
+    record_count: records.length,
+    records,
+  };
 }

@@ -57,6 +57,10 @@ try:
         load_latest_operating_kri_records,
         sync_operating_kri_records,
     )
+    from .decision_funnel_service import (
+        load_latest_decision_funnel_records,
+        sync_decision_funnel_records,
+    )
 except ImportError:
     from market_data_service import (
         MarketDataError,
@@ -107,6 +111,10 @@ except ImportError:
     from operating_kri_service import (
         load_latest_operating_kri_records,
         sync_operating_kri_records,
+    )
+    from decision_funnel_service import (
+        load_latest_decision_funnel_records,
+        sync_decision_funnel_records,
     )
 
 app = FastAPI(title="高資產傳承與所得稅擇優核算大腦", version="4.0_Ultimate")
@@ -275,6 +283,7 @@ async def platform_data_products():
                     "/api/v1/trading/platform-exceptions",
                     "/api/v1/trading/sla-escalations",
                     "/api/v1/trading/operating-kri",
+                    "/api/v1/trading/decision-funnel",
                 ],
             },
         ],
@@ -789,6 +798,42 @@ class OperatingKriSyncPayload(BaseModel):
     generated_at: Optional[str] = None
     records: List[OperatingKriSyncRecordPayload]
 
+class DecisionFunnelSyncRecordPayload(BaseModel):
+    workspace_id: Optional[str] = None
+    actor_id: Optional[str] = None
+    funnel_id: str
+    idempotency_key: Optional[str] = None
+    generated_at: str
+    updated_at: str
+    portfolio_id: Optional[str] = None
+    batch_id: Optional[str] = None
+    stage_key: str
+    stage_order: int = 0
+    label: str
+    status: str
+    value: Optional[str] = None
+    conversion: Optional[str] = None
+    owner: Optional[str] = None
+    note: Optional[str] = None
+    total_rows: float = 0
+    visible_rows: float = 0
+    candidate_count: float = 0
+    active_allocation_count: float = 0
+    active_rebalance_count: float = 0
+    trade_ticket_count: float = 0
+    filled_trade_count: float = 0
+    block_count: int = 0
+    watch_count: int = 0
+    source: str = "decision_funnel"
+
+class DecisionFunnelSyncPayload(BaseModel):
+    workspace_id: Optional[str] = None
+    actor_id: Optional[str] = None
+    portfolio_id: Optional[str] = None
+    batch_id: Optional[str] = None
+    generated_at: Optional[str] = None
+    records: List[DecisionFunnelSyncRecordPayload]
+
 def calc_tw_tax(net_inc: float) -> float:
     if net_inc <= 56: return net_inc * 0.05
     elif net_inc <= 126: return net_inc * 0.12 - 3.92
@@ -1164,6 +1209,44 @@ async def sync_trading_operating_kri(payload: OperatingKriSyncPayload):
         return {
             "generatedAt": datetime.now(timezone.utc).isoformat(),
             **sync_operating_kri_records(records),
+        }
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+@app.get("/api/v1/trading/decision-funnel")
+async def trading_decision_funnel(
+    workspace_id: Optional[str] = None,
+    portfolio_id: Optional[str] = None,
+    batch_id: Optional[str] = None,
+    limit: int = 100,
+):
+    try:
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            **load_latest_decision_funnel_records(
+                limit=limit,
+                workspace_id=workspace_id,
+                portfolio_id=portfolio_id,
+                batch_id=batch_id,
+            ),
+        }
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+@app.post("/api/v1/trading/decision-funnel")
+async def sync_trading_decision_funnel(payload: DecisionFunnelSyncPayload):
+    try:
+        records = []
+        for record in payload.records:
+            item = record.model_dump()
+            item["workspace_id"] = item.get("workspace_id") or payload.workspace_id
+            item["actor_id"] = item.get("actor_id") or payload.actor_id
+            item["portfolio_id"] = item.get("portfolio_id") or payload.portfolio_id
+            item["batch_id"] = item.get("batch_id") or payload.batch_id
+            records.append(item)
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            **sync_decision_funnel_records(records),
         }
     except MarketDataError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc))
