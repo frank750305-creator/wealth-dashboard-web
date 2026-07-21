@@ -92,6 +92,11 @@ import {
   dataRemediationCsv,
 } from "@/lib/dataGovernanceCatalog";
 import {
+  buildDataProductObservabilityItems,
+  dataProductObservabilityCsv,
+  summarizeDataProductObservability,
+} from "@/lib/dataProductObservability";
+import {
   buildCoverageUniverseItems,
   buildDataContractItems,
   buildDataPipelineHealthItems,
@@ -233,6 +238,7 @@ import { CommitteeApprovalSection } from "./CommitteeApprovalSection";
 import { CommercializationSection } from "./CommercializationSection";
 import { MarketDataConsoleHeader } from "./MarketDataConsoleHeader";
 import { DataOperationsSection } from "./DataOperationsSection";
+import { DataProductObservabilitySection } from "./DataProductObservabilitySection";
 import { DecisionFunnelSection } from "./DecisionFunnelSection";
 import { DecisionAuditSection } from "./DecisionAuditSection";
 import { EnterpriseReadinessSection } from "./EnterpriseReadinessSection";
@@ -1169,6 +1175,47 @@ export function MarketDataPanel() {
   const revenueForecastDecision = revenueForecastItems.length
     ? combinedExecutionStatus(revenueForecastItems.map((item) => item.status))
     : "watch";
+  const dataProductObservabilityItems = buildDataProductObservabilityItems({
+    hasBigQueryCredentials,
+    dataPipelineDecision,
+    dataContractDecision,
+    dataProductCatalogItems,
+    apiServiceCatalogItems,
+    researchTaskGeneratedCount: researchTaskItems.length,
+    researchTaskAuditRecords,
+    tradeTicketGeneratedCount: tradeTickets.length,
+    tradeTicketWarehouseCount,
+    executionRouteGeneratedCount: executionRouteRows.length,
+    executionRouteWarehouseCount,
+    executionRouteEventGeneratedCount: executionRouteEventRows.length,
+    executionRouteEventWarehouseCount,
+    executionFillGeneratedCount: executionFillRows.length,
+    executionFillWarehouseCount,
+    postTradeAttributionGeneratedCount: postTradeAttributionRows.length,
+    postTradeAttributionWarehouseCount,
+    platformExceptionGeneratedCount: platformExceptionItems.length,
+    platformExceptionWarehouseCount,
+    slaEscalationGeneratedCount: slaEscalationItems.length,
+    slaEscalationWarehouseCount,
+    operatingKriGeneratedCount: operatingKriItems.length,
+    operatingKriWarehouseCount,
+    decisionFunnelGeneratedCount: decisionFunnelStages.length,
+    decisionFunnelWarehouseCount,
+    marketAlertGeneratedCount: marketAlertEvents.length,
+    marketAlertWarehouseCount,
+    marketAlertOwnerQueueGeneratedCount: marketAlertOwnerQueues.length,
+    marketAlertOwnerQueueWarehouseCount,
+    marketAlertRunbookGeneratedCount: marketAlertRunbookItems.length,
+    marketAlertRunbookWarehouseCount,
+    marketAlertAuditRecords,
+    riskOwner,
+    decisionOwner,
+    executionOwner,
+  });
+  const dataProductObservabilitySummary = summarizeDataProductObservability(
+    dataProductObservabilityItems,
+    apiServiceCatalogItems,
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1336,6 +1383,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `bigquery-data-product-catalog-${resultStamp()}.csv`,
       dataProductCatalogCsv(dataProductCatalogItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportDataProductObservabilityCsv = () => {
+    if (!dataProductObservabilityItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-data-product-observability-${resultStamp()}.csv`,
+      dataProductObservabilityCsv(dataProductObservabilityItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -2810,6 +2866,11 @@ export function MarketDataPanel() {
                 dataLineageWatchCount={dataLineageWatchCount}
                 dataLineageItems={dataLineageItems}
                 onExportDataLineageCsv={handleExportDataLineageCsv}
+              />
+              <DataProductObservabilitySection
+                summary={dataProductObservabilitySummary}
+                items={dataProductObservabilityItems}
+                onExportCsv={handleExportDataProductObservabilityCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
