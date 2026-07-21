@@ -93,7 +93,9 @@ import {
 } from "@/lib/dataGovernanceCatalog";
 import {
   buildDataProductObservabilityItems,
+  buildDataProductReliabilityActions,
   dataProductObservabilityCsv,
+  dataProductReliabilityActionsCsv,
   summarizeDataProductObservability,
 } from "@/lib/dataProductObservability";
 import {
@@ -1216,6 +1218,7 @@ export function MarketDataPanel() {
     dataProductObservabilityItems,
     apiServiceCatalogItems,
   );
+  const dataProductReliabilityActions = buildDataProductReliabilityActions(dataProductObservabilityItems);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1392,6 +1395,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-data-product-observability-${resultStamp()}.csv`,
       dataProductObservabilityCsv(dataProductObservabilityItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportDataProductReliabilityActionsCsv = () => {
+    if (!dataProductReliabilityActions.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-data-product-actions-${resultStamp()}.csv`,
+      dataProductReliabilityActionsCsv(dataProductReliabilityActions),
       "text/csv;charset=utf-8",
     );
   };
@@ -2870,7 +2882,9 @@ export function MarketDataPanel() {
               <DataProductObservabilitySection
                 summary={dataProductObservabilitySummary}
                 items={dataProductObservabilityItems}
+                reliabilityActions={dataProductReliabilityActions}
                 onExportCsv={handleExportDataProductObservabilityCsv}
+                onExportReliabilityCsv={handleExportDataProductReliabilityActionsCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}

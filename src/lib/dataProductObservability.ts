@@ -32,6 +32,20 @@ export type DataProductObservabilitySummary = {
   averageCoveragePercent: number | null;
 };
 
+export type DataProductReliabilityPriority = "high" | "medium" | "low";
+
+export type DataProductReliabilityAction = {
+  domain: string;
+  product: string;
+  status: DataProductObservabilityStatus;
+  priority: DataProductReliabilityPriority;
+  owner: string;
+  sla: string;
+  trigger: string;
+  evidence: string;
+  action: string;
+};
+
 type BuildDataProductObservabilityItemsInput = {
   hasBigQueryCredentials: boolean;
   dataPipelineDecision: DataProductObservabilityStatus;
@@ -80,6 +94,12 @@ function statusLabel(status: DataProductObservabilityStatus) {
   if (status === "pass") return "通過";
   if (status === "watch") return "觀察";
   return "暫停";
+}
+
+function priorityLabel(priority: DataProductReliabilityPriority) {
+  if (priority === "high") return "高";
+  if (priority === "medium") return "中";
+  return "低";
 }
 
 function combinedStatus(statuses: DataProductObservabilityStatus[]): DataProductObservabilityStatus {
@@ -336,6 +356,65 @@ export function summarizeDataProductObservability(
   };
 }
 
+function reliabilityPriority(row: DataProductObservabilityItem): DataProductReliabilityPriority {
+  if (row.status === "block") return "high";
+  if (row.status === "watch") return "medium";
+  if (row.coveragePercent !== null && row.coveragePercent < 1) return "medium";
+  return "low";
+}
+
+function reliabilitySla(priority: DataProductReliabilityPriority) {
+  if (priority === "high") return "4 小時內處理";
+  if (priority === "medium") return "24 小時內覆核";
+  return "每週例行確認";
+}
+
+function reliabilityTrigger(row: DataProductObservabilityItem) {
+  if (row.status === "block") return "資料產品暫停或憑證/管線阻擋";
+  if (row.coveragePercent === null) return "尚無可衡量落庫覆蓋率";
+  if (row.coveragePercent < 1) return "BigQuery 落庫數低於前端產出數";
+  return "例行服務健康追蹤";
+}
+
+export function buildDataProductReliabilityActions(
+  rows: DataProductObservabilityItem[],
+): DataProductReliabilityAction[] {
+  const actionableRows = rows.filter(
+    (row) => row.status !== "pass" || row.coveragePercent === null || row.coveragePercent < 1,
+  );
+  const sourceRows = actionableRows.length ? actionableRows : rows.slice(0, 4);
+  const priorityRank: Record<DataProductReliabilityPriority, number> = { high: 0, medium: 1, low: 2 };
+  const statusRank: Record<DataProductObservabilityStatus, number> = { block: 0, watch: 1, pass: 2 };
+
+  return sourceRows
+    .map((row) => {
+      const priority = reliabilityPriority(row);
+
+      return {
+        domain: row.domain,
+        product: row.product,
+        status: row.status,
+        priority,
+        owner: row.owner,
+        sla: reliabilitySla(priority),
+        trigger: reliabilityTrigger(row),
+        evidence:
+          row.coveragePercent === null
+            ? `${row.generatedRecords} generated / ${row.warehouseRecords} warehouse`
+            : `${(row.coveragePercent * 100).toFixed(1)}% coverage / ${row.apiCoverage}`,
+        action: row.action,
+      };
+    })
+    .sort(
+      (left, right) =>
+        priorityRank[left.priority] - priorityRank[right.priority] ||
+        statusRank[left.status] - statusRank[right.status] ||
+        left.domain.localeCompare(right.domain, "zh-Hant") ||
+        left.product.localeCompare(right.product, "zh-Hant"),
+    )
+    .slice(0, 12);
+}
+
 export function dataProductObservabilityCsv(rows: DataProductObservabilityItem[]) {
   const header = [
     "domain",
@@ -360,6 +439,23 @@ export function dataProductObservabilityCsv(rows: DataProductObservabilityItem[]
     row.apiCoverage,
     row.auditTrail,
     row.owner,
+    row.evidence,
+    row.action,
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+export function dataProductReliabilityActionsCsv(rows: DataProductReliabilityAction[]) {
+  const header = ["domain", "product", "priority", "status", "owner", "sla", "trigger", "evidence", "action"];
+  const csvRows = rows.map((row) => [
+    row.domain,
+    row.product,
+    priorityLabel(row.priority),
+    statusLabel(row.status),
+    row.owner,
+    row.sla,
+    row.trigger,
     row.evidence,
     row.action,
   ]);
