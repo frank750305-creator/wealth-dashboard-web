@@ -91,12 +91,14 @@ import {
   buildResearchTaskItems,
   buildResearchTaskSummary,
   loadResearchTaskOverridesFromStorage,
+  loadResearchTaskWorkspaceIdFromStorage,
   researchTaskBigQueryDdl,
   researchTaskBigQuerySchemaJson,
   researchTaskCsv,
   researchTaskLifecycleCsv,
   researchTaskSyncPayloadJson,
   writeResearchTaskOverridesToStorage,
+  writeResearchTaskWorkspaceIdToStorage,
   type ResearchTaskOverride,
 } from "@/lib/researchTaskWorkflow";
 import {
@@ -991,6 +993,7 @@ export function MarketDataPanel() {
       const taskOverrides = loadResearchTaskOverridesFromStorage();
       setSavedWatchlistPresets(presets);
       setResearchTaskOverrides(taskOverrides);
+      setResearchTaskWorkspaceId(loadResearchTaskWorkspaceIdFromStorage());
       setSelectedWatchlistPresetId((currentId) => currentId || presets[0]?.id || "");
       setWatchlistPresetName((currentName) => currentName || presets[0]?.name || "核心 ETF");
     }, 0);
@@ -1663,6 +1666,10 @@ export function MarketDataPanel() {
       setResearchTaskSyncMessage(message);
     }
   };
+  const handleResearchTaskWorkspaceIdChange = (workspaceId: string) => {
+    setResearchTaskWorkspaceId(workspaceId);
+    writeResearchTaskWorkspaceIdToStorage(workspaceId);
+  };
   const handleResearchTaskOverrideChange = (
     taskId: string,
     patch: Partial<Pick<ResearchTaskOverride, "status" | "owner" | "note">>,
@@ -2072,7 +2079,7 @@ export function MarketDataPanel() {
             auditError={researchTaskAuditError}
             syncStatus={researchTaskSyncStatus}
             syncMessage={researchTaskSyncMessage}
-            onWorkspaceIdChange={setResearchTaskWorkspaceId}
+            onWorkspaceIdChange={handleResearchTaskWorkspaceIdChange}
             onTaskOverrideChange={handleResearchTaskOverrideChange}
             onResetTaskOverride={handleResetResearchTaskOverride}
             onSyncResearchTasksToBigQuery={handleSyncResearchTasksToBigQuery}

@@ -126,6 +126,7 @@ type BuildResearchTaskItemsInput = {
 };
 
 const researchTaskOverrideStorageKey = "wealth-dashboard.researchTaskOverrides";
+const researchTaskWorkspaceStorageKey = "wealth-dashboard.researchTaskWorkspaceId";
 const researchTaskWarehouseTable = "research_tasks";
 
 const researchTaskBigQueryFields = [
@@ -310,6 +311,16 @@ export function loadResearchTaskOverridesFromStorage(): ResearchTaskOverride[] {
 export function writeResearchTaskOverridesToStorage(overrides: ResearchTaskOverride[]) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(researchTaskOverrideStorageKey, JSON.stringify(overrides));
+}
+
+export function loadResearchTaskWorkspaceIdFromStorage() {
+  if (typeof window === "undefined") return "default";
+  return normalizeWarehouseKey(window.localStorage.getItem(researchTaskWorkspaceStorageKey) || undefined, "default");
+}
+
+export function writeResearchTaskWorkspaceIdToStorage(workspaceId: string) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(researchTaskWorkspaceStorageKey, normalizeWarehouseKey(workspaceId, "default"));
 }
 
 export function applyResearchTaskOverrides(tasks: ResearchTaskItem[], overrides: ResearchTaskOverride[]) {
