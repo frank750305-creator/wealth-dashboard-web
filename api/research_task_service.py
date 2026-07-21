@@ -56,11 +56,10 @@ RESEARCH_TASK_LANES = {"data", "research", "risk", "allocation", "control"}
 
 def research_task_warehouse_status() -> Dict:
     project_id, dataset, _, _ = _settings()
-    table_name = _research_task_table_name()
     return {
         "projectId": project_id,
         "dataset": dataset,
-        "taskTable": f"{project_id}.{dataset}.{table_name}",
+        "taskTable": _research_task_table_id(),
         "hasServiceAccountEnv": bool(_service_account_json()),
         "hasGoogleApplicationCredentials": bool(os.getenv("GOOGLE_APPLICATION_CREDENTIALS")),
         "requiredEnvVars": [
@@ -113,8 +112,17 @@ def sync_research_task_records(records: List[Dict]) -> Dict:
 def load_latest_research_task_records(limit: int = 50) -> Dict:
     bigquery = _bigquery_module()
     client = _bigquery_client(bigquery)
-    table_id = _ensure_research_task_table(bigquery, client)
+    table_id = _research_task_table_id()
     bounded_limit = max(1, min(int(limit or 50), 200))
+    if not _research_task_table_exists(client, table_id):
+        return {
+            "status": "missing",
+            "table": table_id,
+            "limit": bounded_limit,
+            "recordCount": 0,
+            "records": [],
+        }
+
     field_list = ", ".join(RESEARCH_TASK_FIELD_NAMES)
     query = f"""
     SELECT {field_list}
@@ -156,9 +164,7 @@ def load_latest_research_task_records(limit: int = 50) -> Dict:
 
 
 def _ensure_research_task_table(bigquery, client) -> str:
-    project_id, dataset, _, _ = _settings()
-    table_name = _research_task_table_name()
-    table_id = f"{project_id}.{dataset}.{table_name}"
+    table_id = _research_task_table_id()
 
     schema = [
         bigquery.SchemaField("task_id", "STRING", mode="REQUIRED", description="Stable research task id"),
@@ -194,6 +200,16 @@ def _ensure_research_task_table(bigquery, client) -> str:
         raise MarketDataConfigError(f"BigQuery research task table could not be created: {exc}") from exc
 
     return table_id
+
+
+def _research_task_table_exists(client, table_id: str) -> bool:
+    try:
+        client.get_table(table_id)
+        return True
+    except Exception as exc:
+        if exc.__class__.__name__ == "NotFound":
+            return False
+        raise MarketDataQueryError(f"BigQuery research task table lookup failed: {exc}") from exc
 
 
 def _normalize_research_task_record(record: Dict) -> Dict:
@@ -245,6 +261,11 @@ def _research_task_table_name() -> str:
     table_name = os.getenv("BIGQUERY_RESEARCH_TASK_TABLE", DEFAULT_RESEARCH_TASK_TABLE)
     _validate_identifier("BIGQUERY_RESEARCH_TASK_TABLE", table_name)
     return table_name
+
+
+def _research_task_table_id() -> str:
+    project_id, dataset, _, _ = _settings()
+    return f"{project_id}.{dataset}.{_research_task_table_name()}"
 
 
 def _required_text(record: Dict, field: str) -> str:

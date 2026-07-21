@@ -399,7 +399,7 @@ export type ResearchTaskWarehouseSyncResponse = {
 
 export type ResearchTaskWarehouseLatestResponse = {
   generatedAt: string;
-  status: "loaded" | string;
+  status: "loaded" | "missing" | string;
   table: string;
   limit: number;
   recordCount: number;
