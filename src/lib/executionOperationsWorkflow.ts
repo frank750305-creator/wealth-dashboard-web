@@ -6,6 +6,7 @@ import type {
   TradeBatchRow,
   TradeTicketRow,
 } from "@/lib/tradeExecutionWorkflow";
+import type { PostTradeAttributionWarehouseSyncPayload } from "@/types/market";
 
 export type ExecutionHandoffPriority = "high" | "medium" | "low";
 
@@ -50,6 +51,23 @@ function executionReviewLabel(status: ExecutionReviewStatus) {
   if (status === "pass") return "通過";
   if (status === "watch") return "觀察";
   return "暫停";
+}
+
+function normalizeWarehouseKey(value: string | undefined, fallback: string) {
+  const cleanValue = value?.trim();
+  return cleanValue || fallback;
+}
+
+const POST_TRADE_ATTRIBUTION_METRIC_KEYS: Record<string, string> = {
+  成交完成率: "completion_rate",
+  未成交殘單: "unfilled_residual",
+  交易成本: "execution_cost",
+  成交後現金偏差: "cash_impact_after_cost",
+  未成交市場曝險: "residual_market_impact",
+};
+
+function postTradeAttributionMetricKey(label: string, index: number) {
+  return POST_TRADE_ATTRIBUTION_METRIC_KEYS[label] ?? `metric_${index + 1}`;
 }
 
 export function executionHandoffPriorityLabel(priority: ExecutionHandoffPriority) {
@@ -316,6 +334,69 @@ export function postTradeAttributionItems({
             : "未成交曝險在目前門檻內",
     },
   ];
+}
+
+export function buildPostTradeAttributionSyncPayload({
+  rows,
+  generatedAt,
+  workspaceId,
+  actorId,
+  portfolioId,
+  batchId,
+  reviewDays,
+  benchmarkMovePercent,
+  residualMarketImpact,
+}: {
+  rows: ExecutionReviewItem[];
+  generatedAt: string;
+  workspaceId?: string;
+  actorId?: string;
+  portfolioId?: string;
+  batchId?: string;
+  reviewDays: number;
+  benchmarkMovePercent: number;
+  residualMarketImpact: number;
+}): PostTradeAttributionWarehouseSyncPayload {
+  const cleanWorkspaceId = normalizeWarehouseKey(workspaceId, "default");
+  const cleanActorId = normalizeWarehouseKey(actorId, "system");
+  const cleanPortfolioId = normalizeWarehouseKey(portfolioId, "default-portfolio");
+  const cleanBatchId = normalizeWarehouseKey(batchId, generatedAt);
+  const records = rows.map((row, index) => {
+    const metricKey = postTradeAttributionMetricKey(row.label, index);
+    const attributionId = `${cleanPortfolioId}:${cleanBatchId}:PTA:${metricKey}`;
+
+    return {
+      workspace_id: cleanWorkspaceId,
+      actor_id: cleanActorId,
+      attribution_id: attributionId,
+      idempotency_key: `${cleanWorkspaceId}:${cleanActorId}:${attributionId}:${generatedAt}`,
+      generated_at: generatedAt,
+      updated_at: generatedAt,
+      portfolio_id: cleanPortfolioId,
+      batch_id: cleanBatchId,
+      review_days: Math.max(1, Math.floor(reviewDays)),
+      benchmark_move_percent: benchmarkMovePercent,
+      residual_market_impact: residualMarketImpact,
+      metric_key: metricKey,
+      label: row.label,
+      status: row.status,
+      value: row.value,
+      threshold: row.threshold,
+      note: row.note,
+      source: "post_trade_attribution",
+    };
+  });
+
+  return {
+    table: "post_trade_attribution",
+    workspace_id: cleanWorkspaceId,
+    actor_id: cleanActorId,
+    portfolio_id: cleanPortfolioId,
+    batch_id: cleanBatchId,
+    generated_at: generatedAt,
+    record_count: records.length,
+    records,
+  };
 }
 
 export function platformExceptionQueueItems({

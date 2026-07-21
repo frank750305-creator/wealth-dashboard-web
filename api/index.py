@@ -41,6 +41,10 @@ try:
         load_latest_execution_fill_records,
         sync_execution_fill_records,
     )
+    from .post_trade_attribution_service import (
+        load_latest_post_trade_attribution_records,
+        sync_post_trade_attribution_records,
+    )
 except ImportError:
     from market_data_service import (
         MarketDataError,
@@ -75,6 +79,10 @@ except ImportError:
     from execution_fill_service import (
         load_latest_execution_fill_records,
         sync_execution_fill_records,
+    )
+    from post_trade_attribution_service import (
+        load_latest_post_trade_attribution_records,
+        sync_post_trade_attribution_records,
     )
 
 app = FastAPI(title="高資產傳承與所得稅擇優核算大腦", version="4.0_Ultimate")
@@ -239,6 +247,7 @@ async def platform_data_products():
                     "/api/v1/trading/routes",
                     "/api/v1/trading/route-events",
                     "/api/v1/trading/fills",
+                    "/api/v1/trading/post-trade-attribution",
                 ],
             },
         ],
@@ -640,6 +649,34 @@ class ExecutionFillSyncPayload(BaseModel):
     generated_at: Optional[str] = None
     records: List[ExecutionFillSyncRecordPayload]
 
+class PostTradeAttributionSyncRecordPayload(BaseModel):
+    workspace_id: Optional[str] = None
+    actor_id: Optional[str] = None
+    attribution_id: str
+    idempotency_key: Optional[str] = None
+    generated_at: str
+    updated_at: str
+    portfolio_id: Optional[str] = None
+    batch_id: Optional[str] = None
+    review_days: int = 0
+    benchmark_move_percent: float = 0
+    residual_market_impact: float = 0
+    metric_key: str
+    label: str
+    status: str
+    value: Optional[str] = None
+    threshold: Optional[str] = None
+    note: Optional[str] = None
+    source: str = "post_trade_attribution"
+
+class PostTradeAttributionSyncPayload(BaseModel):
+    workspace_id: Optional[str] = None
+    actor_id: Optional[str] = None
+    portfolio_id: Optional[str] = None
+    batch_id: Optional[str] = None
+    generated_at: Optional[str] = None
+    records: List[PostTradeAttributionSyncRecordPayload]
+
 def calc_tw_tax(net_inc: float) -> float:
     if net_inc <= 56: return net_inc * 0.05
     elif net_inc <= 126: return net_inc * 0.12 - 3.92
@@ -863,6 +900,44 @@ async def sync_trading_execution_fills(payload: ExecutionFillSyncPayload):
         return {
             "generatedAt": datetime.now(timezone.utc).isoformat(),
             **sync_execution_fill_records(records),
+        }
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+@app.get("/api/v1/trading/post-trade-attribution")
+async def trading_post_trade_attribution(
+    workspace_id: Optional[str] = None,
+    portfolio_id: Optional[str] = None,
+    batch_id: Optional[str] = None,
+    limit: int = 100,
+):
+    try:
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            **load_latest_post_trade_attribution_records(
+                limit=limit,
+                workspace_id=workspace_id,
+                portfolio_id=portfolio_id,
+                batch_id=batch_id,
+            ),
+        }
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+@app.post("/api/v1/trading/post-trade-attribution")
+async def sync_trading_post_trade_attribution(payload: PostTradeAttributionSyncPayload):
+    try:
+        records = []
+        for record in payload.records:
+            item = record.model_dump()
+            item["workspace_id"] = item.get("workspace_id") or payload.workspace_id
+            item["actor_id"] = item.get("actor_id") or payload.actor_id
+            item["portfolio_id"] = item.get("portfolio_id") or payload.portfolio_id
+            item["batch_id"] = item.get("batch_id") or payload.batch_id
+            records.append(item)
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            **sync_post_trade_attribution_records(records),
         }
     except MarketDataError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc))

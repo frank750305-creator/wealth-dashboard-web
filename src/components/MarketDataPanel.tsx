@@ -40,6 +40,7 @@ import {
   fetchLatestExecutionFillsFromBigQuery,
   fetchLatestExecutionRouteEventsFromBigQuery,
   fetchLatestExecutionRoutesFromBigQuery,
+  fetchLatestPostTradeAttributionsFromBigQuery,
   fetchLatestTradeTicketsFromBigQuery,
   fetchLatestResearchTasksFromBigQuery,
   fetchResearchTaskSyncAudit,
@@ -47,6 +48,7 @@ import {
   syncExecutionFillsToBigQuery,
   syncExecutionRouteEventsToBigQuery,
   syncExecutionRoutesToBigQuery,
+  syncPostTradeAttributionsToBigQuery,
   syncTradeTicketsToBigQuery,
   syncResearchTasksToBigQuery,
 } from "@/lib/marketApi";
@@ -152,6 +154,7 @@ import {
 } from "@/lib/executionReviewWorkflow";
 import {
   buildExecutionHandoffItems,
+  buildPostTradeAttributionSyncPayload,
   executionHandoffCsv,
   platformExceptionCsv,
   platformExceptionQueueItems,
@@ -362,6 +365,11 @@ export function MarketDataPanel() {
   >("idle");
   const [executionFillSyncMessage, setExecutionFillSyncMessage] = useState("");
   const [executionFillWarehouseCount, setExecutionFillWarehouseCount] = useState(0);
+  const [postTradeAttributionSyncStatus, setPostTradeAttributionSyncStatus] = useState<
+    "idle" | "syncing" | "loading" | "synced" | "loaded" | "error"
+  >("idle");
+  const [postTradeAttributionSyncMessage, setPostTradeAttributionSyncMessage] = useState("");
+  const [postTradeAttributionWarehouseCount, setPostTradeAttributionWarehouseCount] = useState(0);
   const [watchlistMemoCopyStatus, setWatchlistMemoCopyStatus] = useState<"idle" | "copied">("idle");
   const sources = data?.sources ?? [];
   const securedCount = sources.filter((source) => source.status !== "needs_secret").length;
@@ -1798,6 +1806,58 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleSyncPostTradeAttributionsToBigQuery = async () => {
+    if (!postTradeAttributionRows.length) return;
+
+    setPostTradeAttributionSyncStatus("syncing");
+    setPostTradeAttributionSyncMessage("交易後歸因同步中。");
+
+    try {
+      const result = await syncPostTradeAttributionsToBigQuery(
+        buildPostTradeAttributionSyncPayload({
+          rows: postTradeAttributionRows,
+          generatedAt: decisionGeneratedAt,
+          workspaceId: researchTaskWorkspaceId,
+          actorId: riskOwner,
+          portfolioId: tradeTicketPortfolioId,
+          batchId: tradeTicketBatchId,
+          reviewDays: postTradeReviewDays,
+          benchmarkMovePercent: postTradeBenchmarkMovePercent,
+          residualMarketImpact: postTradeResidualMarketImpact,
+        }),
+      );
+      const isSynced = result.status === "synced";
+      setPostTradeAttributionSyncStatus(isSynced ? "synced" : "error");
+      setPostTradeAttributionWarehouseCount(result.insertedCount);
+      setPostTradeAttributionSyncMessage(`${result.insertedCount}/${result.receivedCount} 筆交易後歸因寫入 ${result.table}`);
+    } catch (err: unknown) {
+      setPostTradeAttributionSyncStatus("error");
+      setPostTradeAttributionSyncMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
+  const handleLoadPostTradeAttributionsFromBigQuery = async () => {
+    setPostTradeAttributionSyncStatus("loading");
+    setPostTradeAttributionSyncMessage("交易後歸因載入中。");
+
+    try {
+      const result = await fetchLatestPostTradeAttributionsFromBigQuery({
+        limit: 100,
+        workspaceId: researchTaskWorkspaceId,
+        portfolioId: tradeTicketPortfolioId,
+      });
+      if (result.status === "schema_outdated") {
+        setPostTradeAttributionSyncStatus("error");
+        setPostTradeAttributionSyncMessage(`交易後歸因表需先同步升級欄位：${result.missingFields?.join(", ") || "--"}`);
+        return;
+      }
+      setPostTradeAttributionWarehouseCount(result.attributionCount);
+      setPostTradeAttributionSyncStatus("loaded");
+      setPostTradeAttributionSyncMessage(`已讀取 ${result.attributionCount} 筆交易後歸因 ${result.workspaceId}`);
+    } catch (err: unknown) {
+      setPostTradeAttributionSyncStatus("error");
+      setPostTradeAttributionSyncMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
   const handleExportPostTradeAttributionCsv = () => {
     if (!postTradeAttributionRows.length) return;
 
@@ -2690,6 +2750,12 @@ export function MarketDataPanel() {
                             onPostTradeReviewDaysChange={setPostTradeReviewDays}
                             postTradeBenchmarkMovePercent={postTradeBenchmarkMovePercent}
                             onPostTradeBenchmarkMovePercentChange={setPostTradeBenchmarkMovePercent}
+                            hasBigQueryCredentials={hasBigQueryCredentials}
+                            syncStatus={postTradeAttributionSyncStatus}
+                            syncMessage={postTradeAttributionSyncMessage}
+                            warehouseAttributionCount={postTradeAttributionWarehouseCount}
+                            onSyncPostTradeAttributionsToBigQuery={handleSyncPostTradeAttributionsToBigQuery}
+                            onLoadPostTradeAttributionsFromBigQuery={handleLoadPostTradeAttributionsFromBigQuery}
                             onExportPostTradeAttributionCsv={handleExportPostTradeAttributionCsv}
                             postTradeAttributionRows={postTradeAttributionRows}
                             postTradeBlockCount={postTradeBlockCount}
