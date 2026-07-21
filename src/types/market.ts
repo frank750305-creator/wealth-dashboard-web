@@ -434,3 +434,63 @@ export type ResearchTaskWarehouseAuditResponse = {
   missingFields?: string[];
   auditRecords: ResearchTaskWarehouseAuditRecord[];
 };
+
+export type TradeTicketWarehouseRecord = {
+  workspace_id: string;
+  actor_id: string;
+  ticket_id: string;
+  idempotency_key: string;
+  generated_at: string;
+  updated_at: string;
+  portfolio_id: string | null;
+  batch_id: string | null;
+  symbol: string;
+  direction: string;
+  status: string;
+  ticket_amount: number;
+  cash_impact: number;
+  current_amount: number;
+  current_weight: number;
+  target_amount: number;
+  target_weight: number;
+  trade_amount: number;
+  trade_weight: number;
+  score: number | null;
+  signal: string | null;
+  note: string | null;
+  ticket_note: string | null;
+  minimum_trade_amount: number;
+};
+
+export type TradeTicketWarehouseSyncPayload = {
+  table: string;
+  workspace_id: string;
+  actor_id: string;
+  portfolio_id: string;
+  batch_id: string;
+  generated_at: string;
+  record_count: number;
+  records: TradeTicketWarehouseRecord[];
+};
+
+export type TradeTicketWarehouseSyncResponse = {
+  generatedAt: string;
+  status: "synced" | "partial_error" | string;
+  table: string;
+  receivedCount: number;
+  insertedCount: number;
+  errors: unknown[];
+};
+
+export type TradeTicketWarehouseLatestResponse = {
+  generatedAt: string;
+  status: "loaded" | "missing" | "schema_outdated" | string;
+  table: string;
+  workspaceId: string;
+  portfolioId?: string | null;
+  batchId?: string | null;
+  limit: number;
+  ticketCount: number;
+  missingFields?: string[];
+  tickets: TradeTicketWarehouseRecord[];
+};

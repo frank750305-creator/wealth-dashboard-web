@@ -37,9 +37,11 @@ import {
   fetchBigQueryAssetHistory,
   fetchBigQueryAssetProfile,
   fetchBigQueryAssets,
+  fetchLatestTradeTicketsFromBigQuery,
   fetchLatestResearchTasksFromBigQuery,
   fetchResearchTaskSyncAudit,
   fetchResearchTaskWarehouseStatus,
+  syncTradeTicketsToBigQuery,
   syncResearchTasksToBigQuery,
 } from "@/lib/marketApi";
 import {
@@ -160,6 +162,7 @@ import {
 } from "@/lib/investmentCommitteeWorkflow";
 import {
   buildExecutionFillRows,
+  buildTradeTicketSyncPayload,
   executionFillCsv,
   tradeBatchCsv,
   tradeBatchRows,
@@ -315,6 +318,11 @@ export function MarketDataPanel() {
   const [researchTaskWarehouseError, setResearchTaskWarehouseError] = useState("");
   const [researchTaskAuditRecords, setResearchTaskAuditRecords] = useState<ResearchTaskWarehouseAuditRecord[]>([]);
   const [researchTaskAuditError, setResearchTaskAuditError] = useState("");
+  const [tradeTicketSyncStatus, setTradeTicketSyncStatus] = useState<
+    "idle" | "syncing" | "loading" | "synced" | "loaded" | "error"
+  >("idle");
+  const [tradeTicketSyncMessage, setTradeTicketSyncMessage] = useState("");
+  const [tradeTicketWarehouseCount, setTradeTicketWarehouseCount] = useState(0);
   const [watchlistMemoCopyStatus, setWatchlistMemoCopyStatus] = useState<"idle" | "copied">("idle");
   const sources = data?.sources ?? [];
   const securedCount = sources.filter((source) => source.status !== "needs_secret").length;
@@ -480,6 +488,8 @@ export function MarketDataPanel() {
   const committeeBlockCount = committeeApprovalItems.filter((item) => item.status === "block").length;
   const committeeWatchCount = committeeApprovalItems.filter((item) => item.status === "watch").length;
   const decisionAuditId = buildDecisionAuditId(watchlistPresetName, comparisonSymbols, decisionGeneratedAt);
+  const tradeTicketPortfolioId = selectedWatchlistPresetId || watchlistPresetName.trim() || "default-portfolio";
+  const tradeTicketBatchId = decisionAuditId;
   const decisionAuditGeneratedText = formatDecisionAuditTime(decisionGeneratedAt);
   const decisionAuditRecords = buildDecisionAuditRecords({
     auditId: decisionAuditId,
@@ -1395,6 +1405,56 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleSyncTradeTicketsToBigQuery = async () => {
+    if (!tradeTickets.length) return;
+
+    setTradeTicketSyncStatus("syncing");
+    setTradeTicketSyncMessage("交易票同步中。");
+
+    try {
+      const result = await syncTradeTicketsToBigQuery(
+        buildTradeTicketSyncPayload({
+          tickets: tradeTickets,
+          generatedAt: decisionGeneratedAt,
+          workspaceId: researchTaskWorkspaceId,
+          actorId: decisionOwner,
+          portfolioId: tradeTicketPortfolioId,
+          batchId: tradeTicketBatchId,
+          minimumTradeAmount,
+        }),
+      );
+      const isSynced = result.status === "synced";
+      setTradeTicketSyncStatus(isSynced ? "synced" : "error");
+      setTradeTicketWarehouseCount(result.insertedCount);
+      setTradeTicketSyncMessage(`${result.insertedCount}/${result.receivedCount} 張交易票寫入 ${result.table}`);
+    } catch (err: unknown) {
+      setTradeTicketSyncStatus("error");
+      setTradeTicketSyncMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
+  const handleLoadTradeTicketsFromBigQuery = async () => {
+    setTradeTicketSyncStatus("loading");
+    setTradeTicketSyncMessage("交易票載入中。");
+
+    try {
+      const result = await fetchLatestTradeTicketsFromBigQuery({
+        limit: 100,
+        workspaceId: researchTaskWorkspaceId,
+        portfolioId: tradeTicketPortfolioId,
+      });
+      if (result.status === "schema_outdated") {
+        setTradeTicketSyncStatus("error");
+        setTradeTicketSyncMessage(`交易票表需先同步升級欄位：${result.missingFields?.join(", ") || "--"}`);
+        return;
+      }
+      setTradeTicketWarehouseCount(result.ticketCount);
+      setTradeTicketSyncStatus("loaded");
+      setTradeTicketSyncMessage(`已讀取 ${result.ticketCount} 張交易票 ${result.workspaceId}`);
+    } catch (err: unknown) {
+      setTradeTicketSyncStatus("error");
+      setTradeTicketSyncMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
   const handleExportTradeBatchCsv = () => {
     if (!tradeBatches.length) return;
 
@@ -2182,8 +2242,14 @@ export function MarketDataPanel() {
                           minimumTradeAmount={minimumTradeAmount}
                           onMinimumTradeAmountChange={setMinimumTradeAmount}
                           onExportTradeTicketCsv={handleExportTradeTicketCsv}
+                          onSyncTradeTicketsToBigQuery={handleSyncTradeTicketsToBigQuery}
+                          onLoadTradeTicketsFromBigQuery={handleLoadTradeTicketsFromBigQuery}
                           tradeTickets={tradeTickets}
                           skippedTradeCount={skippedTradeCount}
+                          hasBigQueryCredentials={hasBigQueryCredentials}
+                          syncStatus={tradeTicketSyncStatus}
+                          syncMessage={tradeTicketSyncMessage}
+                          warehouseTicketCount={tradeTicketWarehouseCount}
                         />
 
                         <div className="border-t border-slate-800 pt-3 space-y-3">

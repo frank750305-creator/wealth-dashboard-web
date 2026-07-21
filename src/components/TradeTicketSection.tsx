@@ -8,8 +8,14 @@ type TradeTicketSectionProps = {
   minimumTradeAmount: number;
   onMinimumTradeAmountChange: (value: number) => void;
   onExportTradeTicketCsv: () => void;
+  onSyncTradeTicketsToBigQuery: () => void;
+  onLoadTradeTicketsFromBigQuery: () => void;
   tradeTickets: TradeTicketRow[];
   skippedTradeCount: number;
+  hasBigQueryCredentials: boolean;
+  syncStatus: "idle" | "syncing" | "loading" | "synced" | "loaded" | "error";
+  syncMessage: string;
+  warehouseTicketCount: number;
 };
 
 function formatPercent(value: number | null | undefined) {
@@ -26,8 +32,14 @@ export function TradeTicketSection({
   minimumTradeAmount,
   onMinimumTradeAmountChange,
   onExportTradeTicketCsv,
+  onSyncTradeTicketsToBigQuery,
+  onLoadTradeTicketsFromBigQuery,
   tradeTickets,
   skippedTradeCount,
+  hasBigQueryCredentials,
+  syncStatus,
+  syncMessage,
+  warehouseTicketCount,
 }: TradeTicketSectionProps) {
   const buyAmount = tradeTickets
     .filter((row) => row.direction === "buy")
@@ -43,7 +55,7 @@ export function TradeTicketSection({
             再用最小交易金額過濾，形成可交給人工覆核的交易清單
           </p>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-[170px_auto] gap-2 text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-[170px_repeat(3,auto)] gap-2 text-xs">
           <label className="space-y-1">
             <span className="text-slate-500">最小交易金額</span>
             <input
@@ -56,6 +68,20 @@ export function TradeTicketSection({
             />
           </label>
           <button
+            onClick={onSyncTradeTicketsToBigQuery}
+            disabled={!hasBigQueryCredentials || !tradeTickets.length || syncStatus === "syncing" || syncStatus === "loading"}
+            className="sm:self-end px-3 py-2 rounded-md bg-cyan-700 hover:bg-cyan-600 text-white font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+          >
+            {syncStatus === "syncing" ? "同步中" : "同步 BigQuery"}
+          </button>
+          <button
+            onClick={onLoadTradeTicketsFromBigQuery}
+            disabled={!hasBigQueryCredentials || syncStatus === "syncing" || syncStatus === "loading"}
+            className="sm:self-end px-3 py-2 rounded-md bg-sky-700 hover:bg-sky-600 text-white font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+          >
+            {syncStatus === "loading" ? "載入中" : "載入 BigQuery"}
+          </button>
+          <button
             onClick={onExportTradeTicketCsv}
             disabled={!tradeTickets.length}
             className="sm:self-end px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
@@ -64,12 +90,18 @@ export function TradeTicketSection({
           </button>
         </div>
       </div>
+      {syncMessage ? (
+        <p className={`text-[11px] ${syncStatus === "error" ? "text-rose-300" : "text-slate-500"}`}>
+          {syncMessage}
+        </p>
+      ) : null}
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
         {[
           ["可執行", `${tradeTickets.length} 檔`],
           ["低於門檻", `${Math.max(0, skippedTradeCount)} 檔`],
           ["買入合計", formatCurrency(buyAmount)],
+          ["倉儲票數", `${warehouseTicketCount} 張`],
           ["現金淨額", formatCurrency(netCash)],
         ].map(([label, value]) => (
           <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 p-3 min-w-0">

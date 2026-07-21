@@ -14,6 +14,9 @@ import type {
   ResearchTaskWarehouseStatus,
   ResearchTaskWarehouseSyncPayload,
   ResearchTaskWarehouseSyncResponse,
+  TradeTicketWarehouseLatestResponse,
+  TradeTicketWarehouseSyncPayload,
+  TradeTicketWarehouseSyncResponse,
 } from "@/types/market";
 
 export async function fetchMarketSources(): Promise<MarketSourcesResponse> {
@@ -126,6 +129,54 @@ export async function syncResearchTasksToBigQuery(
   if (!response.ok) {
     const errText = await response.text();
     throw new Error(`研究任務 BigQuery 同步異常 (代碼: ${response.status})\n${errText}`);
+  }
+
+  return response.json();
+}
+
+export async function fetchLatestTradeTicketsFromBigQuery({
+  limit = 100,
+  workspaceId = "default",
+  portfolioId = "",
+  batchId = "",
+}: {
+  limit?: number;
+  workspaceId?: string;
+  portfolioId?: string;
+  batchId?: string;
+}): Promise<TradeTicketWarehouseLatestResponse> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    workspace_id: workspaceId.trim() || "default",
+  });
+  if (portfolioId.trim()) params.set("portfolio_id", portfolioId.trim());
+  if (batchId.trim()) params.set("batch_id", batchId.trim());
+
+  const response = await fetch(`/api/v1/trading/tickets?${params.toString()}`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`交易票 BigQuery 載入異常 (代碼: ${response.status})\n${errText}`);
+  }
+
+  return response.json();
+}
+
+export async function syncTradeTicketsToBigQuery(
+  payload: TradeTicketWarehouseSyncPayload,
+): Promise<TradeTicketWarehouseSyncResponse> {
+  const response = await fetch("/api/v1/trading/tickets", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`交易票 BigQuery 同步異常 (代碼: ${response.status})\n${errText}`);
   }
 
   return response.json();

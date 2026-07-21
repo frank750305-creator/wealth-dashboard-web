@@ -1,3 +1,5 @@
+import type { TradeTicketWarehouseSyncPayload } from "@/types/market";
+
 export type RebalanceDirection = "buy" | "sell" | "hold";
 
 export type RebalanceDraftRow = {
@@ -43,6 +45,11 @@ export type ExecutionFillRow = TradeTicketRow & {
   fillStatus: ExecutionReviewStatus;
   fillNote: string;
 };
+
+function normalizeWarehouseKey(value: string | undefined, fallback: string) {
+  const cleanValue = String(value || fallback).trim().replaceAll(" ", "-").slice(0, 80);
+  return cleanValue || fallback;
+}
 
 function csvCell(value: unknown) {
   const stringValue = String(value ?? "");
@@ -102,6 +109,69 @@ export function tradeTicketCsv(rows: TradeTicketRow[], minimumTradeAmount: numbe
   ]);
 
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+export function buildTradeTicketSyncPayload({
+  tickets,
+  generatedAt,
+  workspaceId,
+  actorId,
+  portfolioId,
+  batchId,
+  minimumTradeAmount,
+}: {
+  tickets: TradeTicketRow[];
+  generatedAt: string;
+  workspaceId?: string;
+  actorId?: string;
+  portfolioId?: string;
+  batchId?: string;
+  minimumTradeAmount: number;
+}): TradeTicketWarehouseSyncPayload {
+  const cleanWorkspaceId = normalizeWarehouseKey(workspaceId, "default");
+  const cleanActorId = normalizeWarehouseKey(actorId, "system");
+  const cleanPortfolioId = normalizeWarehouseKey(portfolioId, "default-portfolio");
+  const cleanBatchId = normalizeWarehouseKey(batchId, generatedAt);
+  const records = tickets.map((ticket) => {
+    const ticketId = `${cleanPortfolioId}:${cleanBatchId}:${ticket.symbol}:${ticket.direction}`;
+    return {
+      workspace_id: cleanWorkspaceId,
+      actor_id: cleanActorId,
+      ticket_id: ticketId,
+      idempotency_key: `${cleanWorkspaceId}:${cleanActorId}:${ticketId}:${generatedAt}`,
+      generated_at: generatedAt,
+      updated_at: generatedAt,
+      portfolio_id: cleanPortfolioId,
+      batch_id: cleanBatchId,
+      symbol: ticket.symbol,
+      direction: ticket.direction,
+      status: "draft",
+      ticket_amount: ticket.ticketAmount,
+      cash_impact: ticket.cashImpact,
+      current_amount: ticket.currentAmount,
+      current_weight: ticket.currentWeight,
+      target_amount: ticket.targetAmount,
+      target_weight: ticket.targetWeight,
+      trade_amount: ticket.tradeAmount,
+      trade_weight: ticket.tradeWeight,
+      score: ticket.score,
+      signal: ticket.signal,
+      note: ticket.note,
+      ticket_note: ticket.ticketNote,
+      minimum_trade_amount: minimumTradeAmount,
+    };
+  });
+
+  return {
+    table: "trade_tickets",
+    workspace_id: cleanWorkspaceId,
+    actor_id: cleanActorId,
+    portfolio_id: cleanPortfolioId,
+    batch_id: cleanBatchId,
+    generated_at: generatedAt,
+    record_count: records.length,
+    records,
+  };
 }
 
 export function tradeBatchRows(

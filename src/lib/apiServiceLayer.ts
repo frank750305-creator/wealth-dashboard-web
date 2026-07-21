@@ -264,6 +264,18 @@ export function buildApiServiceCatalogItems({
       serviceLevel: "送交交易前需有審核軌跡",
       action: tradeTickets.length ? "可進入執行交接" : "先建立交易票與批次規則",
     },
+    {
+      method: "POST",
+      endpoint: "/api/v1/trading/tickets",
+      product: "交易票同步",
+      status: tradeTickets.length ? portfolioStatus : "watch",
+      owner: cleanDecisionOwner,
+      consumer: "交易 / 營運",
+      input: "TradeTicketSyncPayload、workspace_id、portfolio_id、batch_id",
+      output: "寫入筆數、資料表、錯誤明細",
+      serviceLevel: "送交執行前需先持久化交易票",
+      action: tradeTickets.length ? "可把交易票寫入 BigQuery" : "先建立交易票與批次規則",
+    },
   ];
 }
 
@@ -495,6 +507,20 @@ export function buildApiContractBlueprintItems({
       owner: cleanDecisionOwner,
       breakingRisk: "高：交易方向、金額與現金影響欄位需可追溯",
       action: "接交易前審查與執行回填前，先建立欄位凍結規則",
+    },
+    {
+      method: "POST",
+      endpoint: "/api/v1/trading/tickets",
+      product: "交易票同步",
+      version: "v1",
+      auth: "internal",
+      requestSchema: "TradeTicketSyncPayload & { workspace_id: string; portfolio_id: string; batch_id: string }",
+      responseSchema: "TradeTicketSyncResult",
+      stability: "draft",
+      status: serviceStatus("/api/v1/trading/tickets"),
+      owner: cleanDecisionOwner,
+      breakingRisk: "高：ticket_id、方向、金額、現金影響與 batch_id 需可追溯",
+      action: "正式路由前需補 ticket approval 與 execution venue 欄位",
     },
   ];
 }
