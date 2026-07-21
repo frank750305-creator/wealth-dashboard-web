@@ -618,3 +618,65 @@ export type ExecutionRouteEventWarehouseLatestResponse = {
   missingFields?: string[];
   events: ExecutionRouteEventWarehouseRecord[];
 };
+
+export type ExecutionFillWarehouseRecord = {
+  workspace_id: string;
+  actor_id: string;
+  fill_id: string;
+  ticket_id: string;
+  route_id: string | null;
+  idempotency_key: string;
+  generated_at: string;
+  updated_at: string;
+  portfolio_id: string | null;
+  batch_id: string | null;
+  symbol: string;
+  direction: string;
+  fill_status: string;
+  ticket_amount: number;
+  filled_notional: number;
+  unfilled_notional: number;
+  fill_completion_rate: number;
+  slippage_bps: number;
+  commission_bps: number;
+  slippage_cost: number;
+  commission_cost: number;
+  total_cost: number;
+  cash_impact: number;
+  cash_impact_after_cost: number;
+  source: string;
+  note: string | null;
+};
+
+export type ExecutionFillWarehouseSyncPayload = {
+  table: string;
+  workspace_id: string;
+  actor_id: string;
+  portfolio_id: string;
+  batch_id: string;
+  generated_at: string;
+  record_count: number;
+  records: ExecutionFillWarehouseRecord[];
+};
+
+export type ExecutionFillWarehouseSyncResponse = {
+  generatedAt: string;
+  status: "synced" | "partial_error" | string;
+  table: string;
+  receivedCount: number;
+  insertedCount: number;
+  errors: unknown[];
+};
+
+export type ExecutionFillWarehouseLatestResponse = {
+  generatedAt: string;
+  status: "loaded" | "missing" | "schema_outdated" | string;
+  table: string;
+  workspaceId: string;
+  portfolioId?: string | null;
+  batchId?: string | null;
+  limit: number;
+  fillCount: number;
+  missingFields?: string[];
+  fills: ExecutionFillWarehouseRecord[];
+};

@@ -1,4 +1,5 @@
 import type {
+  ExecutionFillWarehouseSyncPayload,
   ExecutionRouteEventWarehouseSyncPayload,
   ExecutionRouteWarehouseSyncPayload,
   TradeTicketWarehouseSyncPayload,
@@ -933,4 +934,74 @@ export function executionFillCsv(rows: ExecutionFillRow[]) {
   ]);
 
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+export function buildExecutionFillSyncPayload({
+  fills,
+  routes = [],
+  generatedAt,
+  workspaceId,
+  actorId,
+  portfolioId,
+  batchId,
+}: {
+  fills: ExecutionFillRow[];
+  routes?: ExecutionRouteRow[];
+  generatedAt: string;
+  workspaceId?: string;
+  actorId?: string;
+  portfolioId?: string;
+  batchId?: string;
+}): ExecutionFillWarehouseSyncPayload {
+  const cleanWorkspaceId = normalizeWarehouseKey(workspaceId, "default");
+  const cleanActorId = normalizeWarehouseKey(actorId, "system");
+  const cleanPortfolioId = normalizeWarehouseKey(portfolioId, "default-portfolio");
+  const cleanBatchId = normalizeWarehouseKey(batchId, generatedAt);
+  const routeByTicketKey = new Map(routes.map((route) => [`${route.symbol}:${route.direction}`, route]));
+  const records = fills.map((fill) => {
+    const ticketId = `${cleanPortfolioId}:${cleanBatchId}:${fill.symbol}:${fill.direction}`;
+    const fillId = `${cleanPortfolioId}:${cleanBatchId}:FILL:${fill.symbol}:${fill.direction}`;
+    const route = routeByTicketKey.get(`${fill.symbol}:${fill.direction}`);
+    const routeId = route ? `${cleanPortfolioId}:${cleanBatchId}:${route.routeId}` : null;
+
+    return {
+      workspace_id: cleanWorkspaceId,
+      actor_id: cleanActorId,
+      fill_id: fillId,
+      ticket_id: ticketId,
+      route_id: routeId,
+      idempotency_key: `${cleanWorkspaceId}:${cleanActorId}:${fillId}:${generatedAt}`,
+      generated_at: generatedAt,
+      updated_at: generatedAt,
+      portfolio_id: cleanPortfolioId,
+      batch_id: cleanBatchId,
+      symbol: fill.symbol,
+      direction: fill.direction,
+      fill_status: fill.fillStatus,
+      ticket_amount: fill.ticketAmount,
+      filled_notional: fill.filledNotional,
+      unfilled_notional: fill.unfilledNotional,
+      fill_completion_rate: fill.fillCompletionRate,
+      slippage_bps: fill.slippageBps,
+      commission_bps: fill.commissionBps,
+      slippage_cost: fill.slippageCost,
+      commission_cost: fill.commissionCost,
+      total_cost: fill.totalCost,
+      cash_impact: fill.cashImpact,
+      cash_impact_after_cost: fill.cashImpactAfterCost,
+      source: "simulated",
+      note: fill.fillNote,
+    };
+  });
+
+  return {
+    table: "execution_fills",
+    workspace_id: cleanWorkspaceId,
+    actor_id: cleanActorId,
+    portfolio_id: cleanPortfolioId,
+    batch_id: cleanBatchId,
+    generated_at: generatedAt,
+    record_count: records.length,
+    records,
+  };
 }

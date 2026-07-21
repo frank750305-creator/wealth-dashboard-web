@@ -37,6 +37,10 @@ try:
         sync_execution_route_event_records,
         sync_execution_route_records,
     )
+    from .execution_fill_service import (
+        load_latest_execution_fill_records,
+        sync_execution_fill_records,
+    )
 except ImportError:
     from market_data_service import (
         MarketDataError,
@@ -67,6 +71,10 @@ except ImportError:
         load_latest_execution_route_event_records,
         sync_execution_route_event_records,
         sync_execution_route_records,
+    )
+    from execution_fill_service import (
+        load_latest_execution_fill_records,
+        sync_execution_fill_records,
     )
 
 app = FastAPI(title="高資產傳承與所得稅擇優核算大腦", version="4.0_Ultimate")
@@ -230,6 +238,7 @@ async def platform_data_products():
                     "/api/v1/trading/tickets",
                     "/api/v1/trading/routes",
                     "/api/v1/trading/route-events",
+                    "/api/v1/trading/fills",
                 ],
             },
         ],
@@ -595,6 +604,42 @@ class ExecutionRouteEventSyncPayload(BaseModel):
     generated_at: Optional[str] = None
     records: List[ExecutionRouteEventSyncRecordPayload]
 
+class ExecutionFillSyncRecordPayload(BaseModel):
+    workspace_id: Optional[str] = None
+    actor_id: Optional[str] = None
+    fill_id: str
+    ticket_id: str
+    route_id: Optional[str] = None
+    idempotency_key: Optional[str] = None
+    generated_at: str
+    updated_at: str
+    portfolio_id: Optional[str] = None
+    batch_id: Optional[str] = None
+    symbol: str
+    direction: str
+    fill_status: str
+    ticket_amount: float = 0
+    filled_notional: float = 0
+    unfilled_notional: float = 0
+    fill_completion_rate: float = 0
+    slippage_bps: float = 0
+    commission_bps: float = 0
+    slippage_cost: float = 0
+    commission_cost: float = 0
+    total_cost: float = 0
+    cash_impact: float = 0
+    cash_impact_after_cost: float = 0
+    source: str = "simulated"
+    note: Optional[str] = None
+
+class ExecutionFillSyncPayload(BaseModel):
+    workspace_id: Optional[str] = None
+    actor_id: Optional[str] = None
+    portfolio_id: Optional[str] = None
+    batch_id: Optional[str] = None
+    generated_at: Optional[str] = None
+    records: List[ExecutionFillSyncRecordPayload]
+
 def calc_tw_tax(net_inc: float) -> float:
     if net_inc <= 56: return net_inc * 0.05
     elif net_inc <= 126: return net_inc * 0.12 - 3.92
@@ -780,6 +825,44 @@ async def sync_trading_execution_route_events(payload: ExecutionRouteEventSyncPa
         return {
             "generatedAt": datetime.now(timezone.utc).isoformat(),
             **sync_execution_route_event_records(records),
+        }
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+@app.get("/api/v1/trading/fills")
+async def trading_execution_fills(
+    workspace_id: Optional[str] = None,
+    portfolio_id: Optional[str] = None,
+    batch_id: Optional[str] = None,
+    limit: int = 100,
+):
+    try:
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            **load_latest_execution_fill_records(
+                limit=limit,
+                workspace_id=workspace_id,
+                portfolio_id=portfolio_id,
+                batch_id=batch_id,
+            ),
+        }
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+@app.post("/api/v1/trading/fills")
+async def sync_trading_execution_fills(payload: ExecutionFillSyncPayload):
+    try:
+        records = []
+        for record in payload.records:
+            item = record.model_dump()
+            item["workspace_id"] = item.get("workspace_id") or payload.workspace_id
+            item["actor_id"] = item.get("actor_id") or payload.actor_id
+            item["portfolio_id"] = item.get("portfolio_id") or payload.portfolio_id
+            item["batch_id"] = item.get("batch_id") or payload.batch_id
+            records.append(item)
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            **sync_execution_fill_records(records),
         }
     except MarketDataError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc))

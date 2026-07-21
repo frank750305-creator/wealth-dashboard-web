@@ -37,12 +37,14 @@ import {
   fetchBigQueryAssetHistory,
   fetchBigQueryAssetProfile,
   fetchBigQueryAssets,
+  fetchLatestExecutionFillsFromBigQuery,
   fetchLatestExecutionRouteEventsFromBigQuery,
   fetchLatestExecutionRoutesFromBigQuery,
   fetchLatestTradeTicketsFromBigQuery,
   fetchLatestResearchTasksFromBigQuery,
   fetchResearchTaskSyncAudit,
   fetchResearchTaskWarehouseStatus,
+  syncExecutionFillsToBigQuery,
   syncExecutionRouteEventsToBigQuery,
   syncExecutionRoutesToBigQuery,
   syncTradeTicketsToBigQuery,
@@ -166,6 +168,7 @@ import {
 } from "@/lib/investmentCommitteeWorkflow";
 import {
   buildExecutionFillRows,
+  buildExecutionFillSyncPayload,
   buildExecutionRouteEventRows,
   buildExecutionRouteEventSyncPayload,
   buildExecutionRouteRows,
@@ -354,6 +357,11 @@ export function MarketDataPanel() {
   >("idle");
   const [executionRouteEventSyncMessage, setExecutionRouteEventSyncMessage] = useState("");
   const [executionRouteEventWarehouseCount, setExecutionRouteEventWarehouseCount] = useState(0);
+  const [executionFillSyncStatus, setExecutionFillSyncStatus] = useState<
+    "idle" | "syncing" | "loading" | "synced" | "loaded" | "error"
+  >("idle");
+  const [executionFillSyncMessage, setExecutionFillSyncMessage] = useState("");
+  const [executionFillWarehouseCount, setExecutionFillWarehouseCount] = useState(0);
   const [watchlistMemoCopyStatus, setWatchlistMemoCopyStatus] = useState<"idle" | "copied">("idle");
   const sources = data?.sources ?? [];
   const securedCount = sources.filter((source) => source.status !== "needs_secret").length;
@@ -568,7 +576,8 @@ export function MarketDataPanel() {
   });
   const fillBlockCount = executionFillRows.filter((item) => item.fillStatus === "block").length;
   const fillWatchCount = executionFillRows.filter((item) => item.fillStatus === "watch").length;
-  const executionFillDecision: ExecutionReviewStatus = fillBlockCount > 0 ? "block" : fillWatchCount > 0 ? "watch" : "pass";
+  const executionFillDecision: ExecutionReviewStatus =
+    !executionFillRows.length ? "watch" : fillBlockCount > 0 ? "block" : fillWatchCount > 0 ? "watch" : "pass";
   const totalFilledNotional = executionFillRows.reduce((sum, row) => sum + row.filledNotional, 0);
   const totalUnfilledNotional = executionFillRows.reduce((sum, row) => sum + row.unfilledNotional, 0);
   const totalExecutionCost = executionFillRows.reduce((sum, row) => sum + row.totalCost, 0);
@@ -1730,6 +1739,56 @@ export function MarketDataPanel() {
       setExecutionRouteEventSyncMessage(err instanceof Error ? err.message : String(err));
     }
   };
+  const handleSyncExecutionFillsToBigQuery = async () => {
+    if (!executionFillRows.length) return;
+
+    setExecutionFillSyncStatus("syncing");
+    setExecutionFillSyncMessage("成交回報同步中。");
+
+    try {
+      const result = await syncExecutionFillsToBigQuery(
+        buildExecutionFillSyncPayload({
+          fills: executionFillRows,
+          routes: executionRouteRows,
+          generatedAt: decisionGeneratedAt,
+          workspaceId: researchTaskWorkspaceId,
+          actorId: executionOwner,
+          portfolioId: tradeTicketPortfolioId,
+          batchId: tradeTicketBatchId,
+        }),
+      );
+      const isSynced = result.status === "synced";
+      setExecutionFillSyncStatus(isSynced ? "synced" : "error");
+      setExecutionFillWarehouseCount(result.insertedCount);
+      setExecutionFillSyncMessage(`${result.insertedCount}/${result.receivedCount} 筆成交回報寫入 ${result.table}`);
+    } catch (err: unknown) {
+      setExecutionFillSyncStatus("error");
+      setExecutionFillSyncMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
+  const handleLoadExecutionFillsFromBigQuery = async () => {
+    setExecutionFillSyncStatus("loading");
+    setExecutionFillSyncMessage("成交回報載入中。");
+
+    try {
+      const result = await fetchLatestExecutionFillsFromBigQuery({
+        limit: 100,
+        workspaceId: researchTaskWorkspaceId,
+        portfolioId: tradeTicketPortfolioId,
+      });
+      if (result.status === "schema_outdated") {
+        setExecutionFillSyncStatus("error");
+        setExecutionFillSyncMessage(`成交回報表需先同步升級欄位：${result.missingFields?.join(", ") || "--"}`);
+        return;
+      }
+      setExecutionFillWarehouseCount(result.fillCount);
+      setExecutionFillSyncStatus("loaded");
+      setExecutionFillSyncMessage(`已讀取 ${result.fillCount} 筆成交回報 ${result.workspaceId}`);
+    } catch (err: unknown) {
+      setExecutionFillSyncStatus("error");
+      setExecutionFillSyncMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
   const handleExportExecutionFillCsv = () => {
     if (!executionFillRows.length) return;
 
@@ -2611,6 +2670,12 @@ export function MarketDataPanel() {
                             onFillSlippageBpsChange={setFillSlippageBps}
                             fillCommissionBps={fillCommissionBps}
                             onFillCommissionBpsChange={setFillCommissionBps}
+                            hasBigQueryCredentials={hasBigQueryCredentials}
+                            syncStatus={executionFillSyncStatus}
+                            syncMessage={executionFillSyncMessage}
+                            warehouseFillCount={executionFillWarehouseCount}
+                            onSyncExecutionFillsToBigQuery={handleSyncExecutionFillsToBigQuery}
+                            onLoadExecutionFillsFromBigQuery={handleLoadExecutionFillsFromBigQuery}
                             onExportExecutionFillCsv={handleExportExecutionFillCsv}
                             executionFillRows={executionFillRows}
                             totalFilledNotional={totalFilledNotional}
