@@ -540,6 +540,18 @@ export function buildApiServiceCatalogItems({
       serviceLevel: "runbook 需可落庫，支援事故復盤與稽核",
       action: tradeTickets.length ? "可把 market alert runbook 寫入 BigQuery" : "先建立市場警示 runbook",
     },
+    {
+      method: "GET",
+      endpoint: "/api/v1/trading/market-alert-audit",
+      product: "市場警示同步稽核",
+      status: tradeTickets.length ? portfolioStatus : "watch",
+      owner: cleanRiskOwner,
+      consumer: "營運 / 風控 / 平台審計 / 值班主管",
+      input: "workspace_id、portfolio_id、batch_id、limit",
+      output: "同步批次、警示數、分派數、runbook 數、阻塞與觀察統計",
+      serviceLevel: "警示、分派與 runbook 同步後需可比對批次完整性",
+      action: tradeTickets.length ? "可查詢 market alert warehouse audit" : "先同步市場警示與營運分派",
+    },
   ];
 }
 
@@ -1022,7 +1034,7 @@ export function buildApiContractBlueprintItems({
       status: serviceStatus("/api/v1/trading/market-alerts"),
       owner: cleanRiskOwner,
       breakingRisk: "高：警示優先級與負責人會影響營運放行與客戶溝通",
-      action: "可查 BigQuery market alert event stream；下一步補自動稽核查詢",
+      action: "可查 BigQuery market alert event stream；下一步補跨表品質稽核",
     },
     {
       method: "POST",
@@ -1036,7 +1048,7 @@ export function buildApiContractBlueprintItems({
       status: serviceStatus("/api/v1/trading/market-alerts"),
       owner: cleanRiskOwner,
       breakingRisk: "高：警示事件是營運指揮中心依據，欄位需向後相容",
-      action: "把市場警示固定成可查詢資料；下一步補自動稽核查詢",
+      action: "把市場警示固定成可查詢資料；下一步補跨表品質稽核",
     },
     {
       method: "GET",
@@ -1050,7 +1062,7 @@ export function buildApiContractBlueprintItems({
       status: serviceStatus("/api/v1/trading/market-alert-owner-queues"),
       owner: cleanRiskOwner,
       breakingRisk: "高：owner queue 會影響責任分派、SLA 與交班紀錄",
-      action: "可查 BigQuery market alert owner queue；下一步補自動稽核查詢",
+      action: "可查 BigQuery market alert owner queue；下一步補跨表品質稽核",
     },
     {
       method: "POST",
@@ -1064,7 +1076,7 @@ export function buildApiContractBlueprintItems({
       status: serviceStatus("/api/v1/trading/market-alert-owner-queues"),
       owner: cleanRiskOwner,
       breakingRisk: "高：分派統計與下一步處理會影響營運責任歸屬",
-      action: "把警示分派固定成可查詢資料；下一步補自動稽核查詢",
+      action: "把警示分派固定成可查詢資料；下一步補跨表品質稽核",
     },
     {
       method: "GET",
@@ -1078,7 +1090,7 @@ export function buildApiContractBlueprintItems({
       status: serviceStatus("/api/v1/trading/market-alert-runbooks"),
       owner: cleanRiskOwner,
       breakingRisk: "高：runbook 會影響事故處理、升級與復盤稽核",
-      action: "可查 BigQuery market alert runbook；下一步補自動稽核查詢",
+      action: "可查 BigQuery market alert runbook；下一步補跨表品質稽核",
     },
     {
       method: "POST",
@@ -1092,7 +1104,21 @@ export function buildApiContractBlueprintItems({
       status: serviceStatus("/api/v1/trading/market-alert-runbooks"),
       owner: cleanRiskOwner,
       breakingRisk: "高：runbook 欄位是事故處理流程契約，需向後相容",
-      action: "把警示 runbook 固定成可查詢資料；下一步補自動稽核查詢",
+      action: "把警示 runbook 固定成可查詢資料；下一步補跨表品質稽核",
+    },
+    {
+      method: "GET",
+      endpoint: "/api/v1/trading/market-alert-audit",
+      product: "市場警示同步稽核",
+      version: "v1",
+      auth: "internal",
+      requestSchema: "{ portfolio_id?: string; batch_id?: string; limit?: number }",
+      responseSchema: "MarketAlertWarehouseAuditResult",
+      stability: "draft",
+      status: serviceStatus("/api/v1/trading/market-alert-audit"),
+      owner: cleanRiskOwner,
+      breakingRisk: "中：generated_at 批次比對會影響稽核完整性判斷",
+      action: "可檢查警示、分派與 runbook 同步批次是否完整",
     },
   ];
 }

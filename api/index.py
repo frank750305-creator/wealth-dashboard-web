@@ -68,6 +68,7 @@ try:
     from .market_alert_operations_service import (
         load_latest_market_alert_owner_queue_records,
         load_latest_market_alert_runbook_records,
+        load_market_alert_sync_audit,
         sync_market_alert_owner_queue_records,
         sync_market_alert_runbook_records,
     )
@@ -133,6 +134,7 @@ except ImportError:
     from market_alert_operations_service import (
         load_latest_market_alert_owner_queue_records,
         load_latest_market_alert_runbook_records,
+        load_market_alert_sync_audit,
         sync_market_alert_owner_queue_records,
         sync_market_alert_runbook_records,
     )
@@ -307,6 +309,7 @@ async def platform_data_products():
                     "/api/v1/trading/market-alerts",
                     "/api/v1/trading/market-alert-owner-queues",
                     "/api/v1/trading/market-alert-runbooks",
+                    "/api/v1/trading/market-alert-audit",
                 ],
             },
         ],
@@ -1493,6 +1496,26 @@ async def sync_trading_market_alert_runbooks(payload: MarketAlertRunbookSyncPayl
         return {
             "generatedAt": datetime.now(timezone.utc).isoformat(),
             **sync_market_alert_runbook_records(records),
+        }
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+@app.get("/api/v1/trading/market-alert-audit")
+async def trading_market_alert_audit(
+    workspace_id: Optional[str] = None,
+    portfolio_id: Optional[str] = None,
+    batch_id: Optional[str] = None,
+    limit: int = 12,
+):
+    try:
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            **load_market_alert_sync_audit(
+                limit=limit,
+                workspace_id=workspace_id,
+                portfolio_id=portfolio_id,
+                batch_id=batch_id,
+            ),
         }
     except MarketDataError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc))

@@ -18,6 +18,7 @@ import type {
   ExecutionRouteEventWarehouseSyncResponse,
   MarketSourcesResponse,
   MarketAlertWarehouseLatestResponse,
+  MarketAlertWarehouseAuditResponse,
   MarketAlertWarehouseSyncPayload,
   MarketAlertWarehouseSyncResponse,
   MarketAlertOwnerQueueWarehouseLatestResponse,
@@ -741,6 +742,37 @@ export async function syncMarketAlertRunbooksToBigQuery(
   if (!response.ok) {
     const errText = await response.text();
     throw new Error(`市場警示 Runbook BigQuery 同步異常 (代碼: ${response.status})\n${errText}`);
+  }
+
+  return response.json();
+}
+
+export async function fetchMarketAlertWarehouseAudit({
+  limit = 12,
+  workspaceId = "default",
+  portfolioId = "",
+  batchId = "",
+}: {
+  limit?: number;
+  workspaceId?: string;
+  portfolioId?: string;
+  batchId?: string;
+}): Promise<MarketAlertWarehouseAuditResponse> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    workspace_id: workspaceId.trim() || "default",
+  });
+  if (portfolioId.trim()) params.set("portfolio_id", portfolioId.trim());
+  if (batchId.trim()) params.set("batch_id", batchId.trim());
+
+  const response = await fetch(`/api/v1/trading/market-alert-audit?${params.toString()}`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`市場警示同步稽核讀取異常 (代碼: ${response.status})\n${errText}`);
   }
 
   return response.json();

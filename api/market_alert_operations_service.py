@@ -15,6 +15,11 @@ try:
     )
     from .research_task_service import DEFAULT_ACTOR_ID, DEFAULT_WORKSPACE_ID, _normalize_key, _serializable_value
     from .trading_ticket_service import _optional_text, _required_choice, _required_text
+    from .market_alert_service import (
+        _market_alert_missing_fields,
+        _market_alert_table_exists,
+        _market_alert_table_id,
+    )
 except ImportError:
     from market_data_service import (
         MarketDataConfigError,
@@ -27,6 +32,11 @@ except ImportError:
     )
     from research_task_service import DEFAULT_ACTOR_ID, DEFAULT_WORKSPACE_ID, _normalize_key, _serializable_value
     from trading_ticket_service import _optional_text, _required_choice, _required_text
+    from market_alert_service import (
+        _market_alert_missing_fields,
+        _market_alert_table_exists,
+        _market_alert_table_id,
+    )
 
 
 DEFAULT_MARKET_ALERT_OWNER_QUEUE_TABLE = "market_alert_owner_queues"
@@ -83,6 +93,22 @@ RUNBOOK_FIELD_NAMES = [
     "command_priority",
     "total_alerts",
     "source_system",
+]
+MARKET_ALERT_AUDIT_FIELD_NAMES = [
+    "workspace_id",
+    "actor_id",
+    "generated_at",
+    "portfolio_id",
+    "batch_id",
+    "latest_updated_at",
+    "alert_count",
+    "high_priority_count",
+    "block_count",
+    "watch_count",
+    "alert_owner_count",
+    "owner_queue_count",
+    "owner_queue_total",
+    "runbook_count",
 ]
 
 
@@ -281,6 +307,179 @@ def load_latest_market_alert_runbook_records(
         "limit": bounded_limit,
         "runbookCount": len(rows),
         "runbooks": [_row_to_record(row, RUNBOOK_FIELD_NAMES) for row in rows],
+    }
+
+
+def load_market_alert_sync_audit(
+    limit: int = 12,
+    workspace_id: Optional[str] = None,
+    portfolio_id: Optional[str] = None,
+    batch_id: Optional[str] = None,
+) -> Dict:
+    bigquery = _bigquery_module()
+    client = _bigquery_client(bigquery)
+    alert_table_id = _market_alert_table_id()
+    owner_queue_table_id = _owner_queue_table_id()
+    runbook_table_id = _runbook_table_id()
+    bounded_limit = max(1, min(int(limit or 12), 50))
+    clean_workspace_id = _normalize_key(workspace_id, DEFAULT_WORKSPACE_ID)
+    clean_portfolio_id = _optional_text({"portfolio_id": portfolio_id}, "portfolio_id")
+    clean_batch_id = _optional_text({"batch_id": batch_id}, "batch_id")
+
+    missing_tables = []
+    if not _market_alert_table_exists(client, alert_table_id):
+        missing_tables.append(alert_table_id)
+    if not _table_exists(client, owner_queue_table_id, "market alert owner queue"):
+        missing_tables.append(owner_queue_table_id)
+    if not _table_exists(client, runbook_table_id, "market alert runbook"):
+        missing_tables.append(runbook_table_id)
+    if missing_tables:
+        return {
+            "status": "missing",
+            "table": alert_table_id,
+            "ownerQueueTable": owner_queue_table_id,
+            "runbookTable": runbook_table_id,
+            "workspaceId": clean_workspace_id,
+            "portfolioId": clean_portfolio_id,
+            "batchId": clean_batch_id,
+            "limit": bounded_limit,
+            "auditCount": 0,
+            "missingTables": missing_tables,
+            "auditRecords": [],
+        }
+
+    missing_fields = [
+        *[f"market_alert_events.{field}" for field in _market_alert_missing_fields(client, alert_table_id)],
+        *[f"market_alert_owner_queues.{field}" for field in _missing_fields(client, owner_queue_table_id, OWNER_QUEUE_FIELD_NAMES, "market alert owner queue")],
+        *[f"market_alert_runbooks.{field}" for field in _missing_fields(client, runbook_table_id, RUNBOOK_FIELD_NAMES, "market alert runbook")],
+    ]
+    if missing_fields:
+        return {
+            "status": "schema_outdated",
+            "table": alert_table_id,
+            "ownerQueueTable": owner_queue_table_id,
+            "runbookTable": runbook_table_id,
+            "workspaceId": clean_workspace_id,
+            "portfolioId": clean_portfolio_id,
+            "batchId": clean_batch_id,
+            "limit": bounded_limit,
+            "auditCount": 0,
+            "missingFields": missing_fields,
+            "auditRecords": [],
+        }
+
+    conditions = ["workspace_id = @workspace_id"]
+    parameters = [bigquery.ScalarQueryParameter("workspace_id", "STRING", clean_workspace_id)]
+    if clean_portfolio_id:
+        conditions.append("portfolio_id = @portfolio_id")
+        parameters.append(bigquery.ScalarQueryParameter("portfolio_id", "STRING", clean_portfolio_id))
+    if clean_batch_id:
+        conditions.append("batch_id = @batch_id")
+        parameters.append(bigquery.ScalarQueryParameter("batch_id", "STRING", clean_batch_id))
+    parameters.append(bigquery.ScalarQueryParameter("limit", "INT64", bounded_limit))
+    where_clause = " AND ".join(conditions)
+
+    query = f"""
+    WITH alert_batches AS (
+        SELECT
+            workspace_id,
+            ANY_VALUE(actor_id) AS actor_id,
+            generated_at,
+            portfolio_id,
+            batch_id,
+            COUNT(1) AS alert_count,
+            COUNTIF(priority = 'high') AS high_priority_count,
+            COUNTIF(status = 'block') AS block_count,
+            COUNTIF(status = 'watch') AS watch_count,
+            COUNT(DISTINCT owner) AS alert_owner_count,
+            MAX(updated_at) AS latest_alert_updated_at
+        FROM `{alert_table_id}`
+        WHERE {where_clause}
+        GROUP BY workspace_id, generated_at, portfolio_id, batch_id
+    ),
+    owner_batches AS (
+        SELECT
+            workspace_id,
+            generated_at,
+            portfolio_id,
+            batch_id,
+            COUNT(1) AS owner_queue_count,
+            SUM(total) AS owner_queue_total,
+            MAX(updated_at) AS latest_owner_queue_updated_at
+        FROM `{owner_queue_table_id}`
+        WHERE {where_clause}
+        GROUP BY workspace_id, generated_at, portfolio_id, batch_id
+    ),
+    runbook_batches AS (
+        SELECT
+            workspace_id,
+            generated_at,
+            portfolio_id,
+            batch_id,
+            COUNT(1) AS runbook_count,
+            MAX(updated_at) AS latest_runbook_updated_at
+        FROM `{runbook_table_id}`
+        WHERE {where_clause}
+        GROUP BY workspace_id, generated_at, portfolio_id, batch_id
+    )
+    SELECT
+        alerts.workspace_id,
+        alerts.actor_id,
+        alerts.generated_at,
+        alerts.portfolio_id,
+        alerts.batch_id,
+        (
+            SELECT MAX(ts)
+            FROM UNNEST([
+                alerts.latest_alert_updated_at,
+                owner_queues.latest_owner_queue_updated_at,
+                runbooks.latest_runbook_updated_at
+            ]) AS ts
+        ) AS latest_updated_at,
+        alerts.alert_count,
+        alerts.high_priority_count,
+        alerts.block_count,
+        alerts.watch_count,
+        alerts.alert_owner_count,
+        COALESCE(owner_queues.owner_queue_count, 0) AS owner_queue_count,
+        COALESCE(owner_queues.owner_queue_total, 0) AS owner_queue_total,
+        COALESCE(runbooks.runbook_count, 0) AS runbook_count
+    FROM alert_batches AS alerts
+    LEFT JOIN owner_batches AS owner_queues
+        ON alerts.workspace_id = owner_queues.workspace_id
+        AND alerts.generated_at = owner_queues.generated_at
+        AND alerts.portfolio_id = owner_queues.portfolio_id
+        AND alerts.batch_id = owner_queues.batch_id
+    LEFT JOIN runbook_batches AS runbooks
+        ON alerts.workspace_id = runbooks.workspace_id
+        AND alerts.generated_at = runbooks.generated_at
+        AND alerts.portfolio_id = runbooks.portfolio_id
+        AND alerts.batch_id = runbooks.batch_id
+    ORDER BY alerts.generated_at DESC
+    LIMIT @limit
+    """
+
+    try:
+        rows = list(
+            client.query(
+                query,
+                job_config=bigquery.QueryJobConfig(query_parameters=parameters),
+            ).result()
+        )
+    except Exception as exc:
+        raise MarketDataQueryError(f"BigQuery market alert sync audit query failed: {exc}") from exc
+
+    return {
+        "status": "loaded",
+        "table": alert_table_id,
+        "ownerQueueTable": owner_queue_table_id,
+        "runbookTable": runbook_table_id,
+        "workspaceId": clean_workspace_id,
+        "portfolioId": clean_portfolio_id,
+        "batchId": clean_batch_id,
+        "limit": bounded_limit,
+        "auditCount": len(rows),
+        "auditRecords": [_row_to_record(row, MARKET_ALERT_AUDIT_FIELD_NAMES) for row in rows],
     }
 
 

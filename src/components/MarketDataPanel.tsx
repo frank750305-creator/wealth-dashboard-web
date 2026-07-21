@@ -39,6 +39,7 @@ import {
   fetchBigQueryAssets,
   fetchLatestDecisionFunnelFromBigQuery,
   fetchLatestExecutionFillsFromBigQuery,
+  fetchMarketAlertWarehouseAudit,
   fetchLatestMarketAlertOwnerQueuesFromBigQuery,
   fetchLatestMarketAlertRunbooksFromBigQuery,
   fetchLatestMarketAlertsFromBigQuery,
@@ -250,6 +251,7 @@ import { PostTradeAttributionSection } from "./PostTradeAttributionSection";
 import { RebalanceDraftSection } from "./RebalanceDraftSection";
 import { ResearchTaskBoardSection } from "./ResearchTaskBoardSection";
 import { SecurityNotesSection } from "./SecurityNotesSection";
+import type { MarketAlertWarehouseAuditRecord } from "@/types/market";
 import { SlaEscalationSection } from "./SlaEscalationSection";
 import { TradeBatchSection } from "./TradeBatchSection";
 import { TradeTicketSection } from "./TradeTicketSection";
@@ -426,6 +428,9 @@ export function MarketDataPanel() {
   >("idle");
   const [marketAlertRunbookSyncMessage, setMarketAlertRunbookSyncMessage] = useState("");
   const [marketAlertRunbookWarehouseCount, setMarketAlertRunbookWarehouseCount] = useState(0);
+  const [marketAlertAuditStatus, setMarketAlertAuditStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  const [marketAlertAuditMessage, setMarketAlertAuditMessage] = useState("");
+  const [marketAlertAuditRecords, setMarketAlertAuditRecords] = useState<MarketAlertWarehouseAuditRecord[]>([]);
   const [watchlistMemoCopyStatus, setWatchlistMemoCopyStatus] = useState<"idle" | "copied">("idle");
   const sources = data?.sources ?? [];
   const securedCount = sources.filter((source) => source.status !== "needs_secret").length;
@@ -2339,6 +2344,34 @@ export function MarketDataPanel() {
       setMarketAlertRunbookSyncMessage(err instanceof Error ? err.message : String(err));
     }
   };
+  const handleLoadMarketAlertWarehouseAudit = async () => {
+    setMarketAlertAuditStatus("loading");
+    setMarketAlertAuditMessage("市場警示稽核載入中。");
+
+    try {
+      const result = await fetchMarketAlertWarehouseAudit({
+        limit: 12,
+        workspaceId: researchTaskWorkspaceId,
+        portfolioId: tradeTicketPortfolioId,
+      });
+      if (result.status === "schema_outdated") {
+        setMarketAlertAuditStatus("error");
+        setMarketAlertAuditMessage(`市場警示稽核需先同步升級欄位：${result.missingFields?.join(", ") || "--"}`);
+        return;
+      }
+      if (result.status === "missing") {
+        setMarketAlertAuditStatus("error");
+        setMarketAlertAuditMessage(`市場警示稽核缺少資料表：${result.missingTables?.join(", ") || result.table}`);
+        return;
+      }
+      setMarketAlertAuditRecords(result.auditRecords);
+      setMarketAlertAuditStatus("loaded");
+      setMarketAlertAuditMessage(`已載入 ${result.auditCount} 批市場警示稽核 ${result.workspaceId}`);
+    } catch (err: unknown) {
+      setMarketAlertAuditStatus("error");
+      setMarketAlertAuditMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
   const handleExportMarketAlertCommandSummaryCsv = () => {
     downloadTextFile(
       `bigquery-market-alert-command-summary-${resultStamp()}.csv`,
@@ -3273,8 +3306,12 @@ export function MarketDataPanel() {
                             runbookSyncStatus={marketAlertRunbookSyncStatus}
                             runbookSyncMessage={marketAlertRunbookSyncMessage}
                             warehouseRunbookCount={marketAlertRunbookWarehouseCount}
+                            auditStatus={marketAlertAuditStatus}
+                            auditMessage={marketAlertAuditMessage}
+                            auditRecords={marketAlertAuditRecords}
                             onSyncMarketAlertsToBigQuery={handleSyncMarketAlertsToBigQuery}
                             onLoadMarketAlertsFromBigQuery={handleLoadMarketAlertsFromBigQuery}
+                            onLoadMarketAlertWarehouseAudit={handleLoadMarketAlertWarehouseAudit}
                             onSyncMarketAlertOwnerQueuesToBigQuery={handleSyncMarketAlertOwnerQueuesToBigQuery}
                             onLoadMarketAlertOwnerQueuesFromBigQuery={handleLoadMarketAlertOwnerQueuesFromBigQuery}
                             onSyncMarketAlertRunbooksToBigQuery={handleSyncMarketAlertRunbooksToBigQuery}

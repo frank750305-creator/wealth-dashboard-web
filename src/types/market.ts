@@ -1146,3 +1146,36 @@ export type MarketAlertRunbookWarehouseLatestResponse = {
   missingFields?: string[];
   runbooks: MarketAlertRunbookWarehouseRecord[];
 };
+
+export type MarketAlertWarehouseAuditRecord = {
+  workspace_id: string;
+  actor_id: string | null;
+  generated_at: string;
+  portfolio_id: string | null;
+  batch_id: string | null;
+  latest_updated_at: string | null;
+  alert_count: number;
+  high_priority_count: number;
+  block_count: number;
+  watch_count: number;
+  alert_owner_count: number;
+  owner_queue_count: number;
+  owner_queue_total: number;
+  runbook_count: number;
+};
+
+export type MarketAlertWarehouseAuditResponse = {
+  generatedAt: string;
+  status: "loaded" | "missing" | "schema_outdated" | string;
+  table: string;
+  ownerQueueTable: string;
+  runbookTable: string;
+  workspaceId: string;
+  portfolioId?: string | null;
+  batchId?: string | null;
+  limit: number;
+  auditCount: number;
+  missingFields?: string[];
+  missingTables?: string[];
+  auditRecords: MarketAlertWarehouseAuditRecord[];
+};

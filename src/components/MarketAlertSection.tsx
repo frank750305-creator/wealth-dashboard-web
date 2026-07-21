@@ -6,6 +6,7 @@ import type {
   MarketAlertRunbookItem,
   MarketAlertStatus,
 } from "@/lib/marketAlertEvents";
+import type { MarketAlertWarehouseAuditRecord } from "@/types/market";
 
 type MarketAlertSectionProps = {
   marketAlertDecision: MarketAlertStatus;
@@ -20,8 +21,12 @@ type MarketAlertSectionProps = {
   runbookSyncStatus: "idle" | "syncing" | "loading" | "synced" | "loaded" | "error";
   runbookSyncMessage: string;
   warehouseRunbookCount: number;
+  auditStatus: "idle" | "loading" | "loaded" | "error";
+  auditMessage: string;
+  auditRecords: MarketAlertWarehouseAuditRecord[];
   onSyncMarketAlertsToBigQuery: () => void;
   onLoadMarketAlertsFromBigQuery: () => void;
+  onLoadMarketAlertWarehouseAudit: () => void;
   onSyncMarketAlertOwnerQueuesToBigQuery: () => void;
   onLoadMarketAlertOwnerQueuesFromBigQuery: () => void;
   onSyncMarketAlertRunbooksToBigQuery: () => void;
@@ -81,8 +86,12 @@ export function MarketAlertSection({
   runbookSyncStatus,
   runbookSyncMessage,
   warehouseRunbookCount,
+  auditStatus,
+  auditMessage,
+  auditRecords,
   onSyncMarketAlertsToBigQuery,
   onLoadMarketAlertsFromBigQuery,
+  onLoadMarketAlertWarehouseAudit,
   onSyncMarketAlertOwnerQueuesToBigQuery,
   onLoadMarketAlertOwnerQueuesFromBigQuery,
   onSyncMarketAlertRunbooksToBigQuery,
@@ -128,6 +137,13 @@ export function MarketAlertSection({
             {syncStatus === "loading" ? "載入中" : "載入 BigQuery"}
           </button>
           <button
+            onClick={onLoadMarketAlertWarehouseAudit}
+            disabled={!hasBigQueryCredentials || auditStatus === "loading"}
+            className="px-3 py-2 rounded-md bg-indigo-700 hover:bg-indigo-600 text-white text-xs font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+          >
+            {auditStatus === "loading" ? "稽核載入中" : "載入稽核"}
+          </button>
+          <button
             onClick={onExportMarketAlertCommandSummaryCsv}
             className="px-3 py-2 rounded-md bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold"
           >
@@ -159,6 +175,11 @@ export function MarketAlertSection({
       {syncMessage ? (
         <p className={`text-[11px] ${syncStatus === "error" ? "text-rose-300" : "text-slate-500"}`}>
           {syncMessage}
+        </p>
+      ) : null}
+      {auditMessage ? (
+        <p className={`text-[11px] ${auditStatus === "error" ? "text-rose-300" : "text-slate-500"}`}>
+          {auditMessage}
         </p>
       ) : null}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 text-xs">
@@ -245,13 +266,14 @@ export function MarketAlertSection({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-2 text-xs">
         {[
           ["警示狀態", executionReviewLabel(marketAlertDecision)],
           ["事件數", `${marketAlertEvents.length} 筆`],
           ["高 / 中優先", `${marketHighAlertCount} / ${marketMediumAlertCount}`],
           ["待處理例外", `${platformExceptionCount} 項`],
           ["倉儲 警示/分派/Runbook", `${warehouseAlertCount} / ${warehouseOwnerQueueCount} / ${warehouseRunbookCount}`],
+          ["稽核批次", `${auditRecords.length} 批`],
         ].map(([label, value]) => (
           <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 p-3 min-w-0">
             <p className="text-[11px] text-slate-600 truncate">{label}</p>
@@ -261,6 +283,50 @@ export function MarketAlertSection({
           </div>
         ))}
       </div>
+
+      {auditRecords.length ? (
+        <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3 space-y-3">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-bold text-slate-100">市場警示同步稽核</p>
+              <p className="mt-0.5 text-[11px] text-slate-500">比對事件、分派與 Runbook 最近批次是否一致</p>
+            </div>
+            <span className="self-start md:self-auto rounded bg-slate-800 px-2 py-0.5 text-[10px] font-bold text-slate-300">
+              {auditRecords.length} 批
+            </span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[980px] text-xs">
+              <thead>
+                <tr className="text-left text-[11px] text-slate-600">
+                  <th className="py-2 px-3 font-medium">批次</th>
+                  <th className="py-2 px-3 font-medium">更新</th>
+                  <th className="py-2 px-3 font-medium text-right">警示</th>
+                  <th className="py-2 px-3 font-medium text-right">高優先</th>
+                  <th className="py-2 px-3 font-medium text-right">阻塞 / 觀察</th>
+                  <th className="py-2 px-3 font-medium text-right">分派 / 總量</th>
+                  <th className="py-2 px-3 font-medium text-right">Runbook</th>
+                  <th className="py-2 px-3 font-medium">Actor</th>
+                </tr>
+              </thead>
+              <tbody>
+                {auditRecords.slice(0, 5).map((record) => (
+                  <tr key={`${record.workspace_id}-${record.generated_at}-${record.batch_id ?? "batch"}`} className="border-t border-slate-900">
+                    <td className="py-2 px-3 font-mono text-slate-300">{record.generated_at}</td>
+                    <td className="py-2 px-3 font-mono text-slate-500">{record.latest_updated_at ?? "--"}</td>
+                    <td className="py-2 px-3 text-right font-mono text-slate-100">{record.alert_count}</td>
+                    <td className="py-2 px-3 text-right font-mono text-rose-200">{record.high_priority_count}</td>
+                    <td className="py-2 px-3 text-right font-mono text-slate-300">{record.block_count} / {record.watch_count}</td>
+                    <td className="py-2 px-3 text-right font-mono text-slate-300">{record.owner_queue_count} / {record.owner_queue_total}</td>
+                    <td className="py-2 px-3 text-right font-mono text-slate-300">{record.runbook_count}</td>
+                    <td className="py-2 px-3 text-slate-500">{record.actor_id ?? "--"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
 
       {marketAlertOwnerQueues.length ? (
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-2 text-xs">
