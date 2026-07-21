@@ -1,7 +1,7 @@
 "use client";
 
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
-import { CartesianGrid, ComposedChart, Line, LineChart, ResponsiveContainer, Scatter, Tooltip, XAxis, YAxis } from "recharts";
+import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { analyzePortfolioFromBigQuery, fetchBigQueryAssets, optimizePortfolioFromBigQuery } from "@/lib/marketApi";
 import type { BigQueryAsset, PortfolioAnalysisResponse, PortfolioOptimizationResponse } from "@/types/market";
 import { BigQueryPortfolioAllocationSummary } from "./BigQueryPortfolioAllocationSummary";
@@ -10,6 +10,7 @@ import { BigQueryPortfolioAssetStatisticsPanel } from "./BigQueryPortfolioAssetS
 import { BigQueryPortfolioAssetTools } from "./BigQueryPortfolioAssetTools";
 import { BigQueryPortfolioCorrelationMatrix } from "./BigQueryPortfolioCorrelationMatrix";
 import { BigQueryPortfolioDecisionSections } from "./BigQueryPortfolioDecisionSections";
+import { BigQueryPortfolioEfficientFrontier } from "./BigQueryPortfolioEfficientFrontier";
 import { BigQueryPortfolioHeader } from "./BigQueryPortfolioHeader";
 import {
   BigQueryPortfolioMetricGroups,
@@ -2626,84 +2627,10 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
             formatMetric={formatMetric}
           />
 
-          {efficientFrontier?.points?.length ? (
-            <div className="bg-slate-950 border border-slate-800 rounded-lg p-3">
-              <div className="flex items-center justify-between gap-3 mb-3">
-                <div>
-                  <p className="text-[11px] text-slate-500">有效前緣</p>
-                  <p className="text-[11px] text-slate-600 mt-0.5">候選組合風險 / 報酬分布</p>
-                </div>
-                <p className="text-[11px] text-slate-600 font-mono">
-                  {efficientFrontier.points.length} scenarios
-                </p>
-              </div>
-              <div className="h-72 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={efficientFrontier.points} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                    <XAxis
-                      type="number"
-                      dataKey="annualVolatility"
-                      name="年化波動"
-                      domain={["auto", "auto"]}
-                      stroke="#64748b"
-                      tick={{ fill: "#64748b", fontSize: 11 }}
-                      tickFormatter={formatChartPercent}
-                    />
-                    <YAxis
-                      type="number"
-                      dataKey="annualReturn"
-                      name="年化報酬"
-                      domain={["auto", "auto"]}
-                      stroke="#64748b"
-                      tick={{ fill: "#64748b", fontSize: 11 }}
-                      tickFormatter={formatChartPercent}
-                    />
-                    <Tooltip
-                      contentStyle={{ background: "#020617", border: "1px solid #1e293b", borderRadius: 8 }}
-                      labelStyle={{ color: "#cbd5e1" }}
-                      formatter={(value, name) => {
-                        const label = String(name);
-                        if (label === "annualVolatility") return [formatChartPercent(value), "年化波動"];
-                        if (label === "sharpe") {
-                          const numeric = Number(value);
-                          return [Number.isFinite(numeric) ? numeric.toFixed(2) : "--", "Sharpe"];
-                        }
-                        return [formatChartPercent(value), "年化報酬"];
-                      }}
-                    />
-                    <Scatter
-                      data={efficientFrontier.points}
-                      name="候選組合"
-                      fill="#475569"
-                      fillOpacity={0.45}
-                      isAnimationActive={false}
-                    />
-                    <Line
-                      data={efficientFrontier.frontier}
-                      type="monotone"
-                      dataKey="annualReturn"
-                      name="有效前緣"
-                      stroke="#22d3ee"
-                      strokeWidth={2.5}
-                      dot={false}
-                      activeDot={{ r: 4, fill: "#67e8f9" }}
-                      isAnimationActive={false}
-                    />
-                    {efficientFrontier.selectedPoint?.annualReturn !== null &&
-                    efficientFrontier.selectedPoint?.annualVolatility !== null ? (
-                      <Scatter
-                        data={[efficientFrontier.selectedPoint]}
-                        name="AI 建議"
-                        fill="#facc15"
-                        isAnimationActive={false}
-                      />
-                    ) : null}
-                  </ComposedChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-          ) : null}
+          <BigQueryPortfolioEfficientFrontier
+            efficientFrontier={efficientFrontier}
+            formatChartPercent={formatChartPercent}
+          />
 
           <div className="grid grid-cols-1 xl:grid-cols-[1.4fr_0.6fr] gap-4">
             <div className="bg-slate-950 border border-slate-800 rounded-lg p-3">
