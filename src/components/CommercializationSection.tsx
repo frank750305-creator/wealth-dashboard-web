@@ -3,6 +3,7 @@ import {
   apiContractStabilityLabel,
   type ApiContractBlueprintItem,
   type ApiServiceCatalogItem,
+  type ApiVersionGovernanceItem,
 } from "@/lib/apiServiceLayer";
 import type { ClientWorkspaceProvisioningItem, PlatformEntitlementItem, UsageBillingItem } from "@/lib/commercialAccessLayer";
 import type { DataProductCatalogItem } from "@/lib/dataGovernanceCatalog";
@@ -25,6 +26,11 @@ type CommercializationSectionProps = {
   apiContractDraftCount: number;
   apiContractBlueprintItems: ApiContractBlueprintItem[];
   onExportApiContractBlueprintJson: () => void;
+  apiVersionGovernanceDecision: ExecutionStatus;
+  apiVersionProductionCount: number;
+  apiVersionMigrationRiskCount: number;
+  apiVersionGovernanceItems: ApiVersionGovernanceItem[];
+  onExportApiVersionGovernanceCsv: () => void;
   platformEntitlementDecision: ExecutionStatus;
   entitlementReadyCount: number;
   entitlementRestrictedCount: number;
@@ -76,6 +82,11 @@ export function CommercializationSection({
   apiContractDraftCount,
   apiContractBlueprintItems,
   onExportApiContractBlueprintJson: handleExportApiContractBlueprintJson,
+  apiVersionGovernanceDecision,
+  apiVersionProductionCount,
+  apiVersionMigrationRiskCount,
+  apiVersionGovernanceItems,
+  onExportApiVersionGovernanceCsv: handleExportApiVersionGovernanceCsv,
   platformEntitlementDecision,
   entitlementReadyCount,
   entitlementRestrictedCount,
@@ -167,6 +178,98 @@ export function CommercializationSection({
                 ) : (
                   <div className="rounded-md border border-dashed border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-500">
                     讀取資料診斷後，這裡會顯示資料產品目錄。
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-slate-800 pt-3 space-y-3">
+                <div className="flex flex-col md:flex-row md:items-end justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="text-xs font-bold text-slate-100">API 版本治理</h4>
+                      <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(apiVersionGovernanceDecision)}`}>
+                        {executionReviewLabel(apiVersionGovernanceDecision)}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-[11px] text-slate-500">
+                      將 API 穩定度轉成發布通道、相容窗口、客戶通知與停用政策
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-end gap-2 text-xs">
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        ["Production", `${apiVersionProductionCount}`],
+                        ["高遷移風險", `${apiVersionMigrationRiskCount}`],
+                      ].map(([label, value]) => (
+                        <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 px-3 py-2 text-right">
+                          <p className="text-[10px] text-slate-600">{label}</p>
+                          <p className="mt-0.5 font-mono font-bold text-slate-100">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      onClick={handleExportApiVersionGovernanceCsv}
+                      disabled={!apiVersionGovernanceItems.length}
+                      className="px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+                    >
+                      版本治理 CSV
+                    </button>
+                  </div>
+                </div>
+
+                {apiVersionGovernanceItems.length ? (
+                  <div className="overflow-x-auto rounded-lg border border-slate-800">
+                    <table className="w-full min-w-[1380px] text-xs">
+                      <thead className="bg-slate-900/80">
+                        <tr className="text-left text-[11px] text-slate-600">
+                          <th className="py-2 px-3 font-medium">Endpoint</th>
+                          <th className="py-2 px-3 font-medium">通道</th>
+                          <th className="py-2 px-3 font-medium">相容窗口</th>
+                          <th className="py-2 px-3 font-medium">客戶通知</th>
+                          <th className="py-2 px-3 font-medium">停用政策</th>
+                          <th className="py-2 px-3 font-medium">遷移風險</th>
+                          <th className="py-2 px-3 font-medium text-right">狀態</th>
+                          <th className="py-2 px-3 font-medium">動作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {apiVersionGovernanceItems.map((item) => (
+                          <tr key={`${item.method}-${item.endpoint}-version`} className={`border-t ${executionReviewRowClass(item.status)}`}>
+                            <td className="py-2 px-3">
+                              <p className="font-mono text-[11px] text-slate-300">{item.endpoint}</p>
+                              <p className="mt-0.5 text-[10px] text-slate-600">
+                                {item.method} · {item.version} · {apiContractStabilityLabel(item.stability)}
+                              </p>
+                            </td>
+                            <td className="py-2 px-3 text-slate-400">{item.releaseChannel}</td>
+                            <td className="py-2 px-3 text-slate-400">{item.compatibilityWindow}</td>
+                            <td className="py-2 px-3 text-slate-500">{item.clientNotice}</td>
+                            <td className="py-2 px-3 text-slate-500">{item.deprecationPolicy}</td>
+                            <td className="py-2 px-3">
+                              <span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${
+                                item.migrationRisk === "high"
+                                  ? "border-rose-500/30 bg-rose-500/10 text-rose-200"
+                                  : item.migrationRisk === "medium"
+                                    ? "border-amber-500/30 bg-amber-500/10 text-amber-200"
+                                    : "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                              }`}>
+                                {item.migrationRisk}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-right">
+                              <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(item.status)}`}>
+                                {executionReviewLabel(item.status)}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-slate-500">{item.action}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-dashed border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-500">
+                    建立 OpenAPI 藍圖後，這裡會顯示 API 版本治理。
                   </div>
                 )}
               </div>

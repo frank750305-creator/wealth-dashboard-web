@@ -30,6 +30,22 @@ export type ApiContractBlueprintItem = {
   action: string;
 };
 
+export type ApiVersionGovernanceItem = {
+  endpoint: string;
+  method: ApiServiceMethod;
+  product: string;
+  version: string;
+  stability: ApiContractStability;
+  status: ApiServiceStatus;
+  owner: string;
+  releaseChannel: string;
+  compatibilityWindow: string;
+  clientNotice: string;
+  deprecationPolicy: string;
+  migrationRisk: "high" | "medium" | "low";
+  action: string;
+};
+
 function csvCell(value: unknown) {
   if (value === null || value === undefined) return "";
   const text = String(value);
@@ -46,6 +62,18 @@ function combinedExecutionStatus(statuses: ApiServiceStatus[]): ApiServiceStatus
   if (statuses.some((status) => status === "block")) return "block";
   if (statuses.some((status) => status === "watch")) return "watch";
   return "pass";
+}
+
+function stabilityStatus(item: ApiContractBlueprintItem): ApiServiceStatus {
+  if (item.status === "block") return "block";
+  if (item.stability === "stable") return item.status;
+  return "watch";
+}
+
+function migrationRiskLevel(breakingRisk: string): ApiVersionGovernanceItem["migrationRisk"] {
+  if (breakingRisk.startsWith("高")) return "high";
+  if (breakingRisk.startsWith("中")) return "medium";
+  return "low";
 }
 
 export function buildApiServiceCatalogItems({
@@ -522,4 +550,62 @@ export function apiContractBlueprintJson(rows: ApiContractBlueprintItem[]) {
     null,
     2,
   );
+}
+
+export function buildApiVersionGovernanceItems(rows: ApiContractBlueprintItem[]): ApiVersionGovernanceItem[] {
+  return rows.map((row) => {
+    const isStable = row.stability === "stable";
+    const isBeta = row.stability === "beta";
+
+    return {
+      endpoint: row.endpoint,
+      method: row.method,
+      product: row.product,
+      version: row.version,
+      stability: row.stability,
+      status: stabilityStatus(row),
+      owner: row.owner,
+      releaseChannel: isStable ? "production" : isBeta ? "controlled-beta" : "internal-draft",
+      compatibilityWindow: isStable ? "180 days" : isBeta ? "90 days" : "30 days",
+      clientNotice: isStable ? "60 days before breaking change" : isBeta ? "30 days before breaking change" : "internal changelog only",
+      deprecationPolicy: isStable ? "breaking change requires new /v2 route" : "breaking change allowed before external release",
+      migrationRisk: migrationRiskLevel(row.breakingRisk),
+      action: isStable ? "維持 v1 向後相容與 optional 欄位策略" : row.action,
+    };
+  });
+}
+
+export function apiVersionGovernanceCsv(rows: ApiVersionGovernanceItem[]) {
+  const header = [
+    "method",
+    "endpoint",
+    "product",
+    "version",
+    "stability",
+    "status",
+    "owner",
+    "release_channel",
+    "compatibility_window",
+    "client_notice",
+    "deprecation_policy",
+    "migration_risk",
+    "action",
+  ];
+  const csvRows = rows.map((row) => [
+    row.method,
+    row.endpoint,
+    row.product,
+    row.version,
+    apiContractStabilityLabel(row.stability),
+    executionReviewLabel(row.status),
+    row.owner,
+    row.releaseChannel,
+    row.compatibilityWindow,
+    row.clientNotice,
+    row.deprecationPolicy,
+    row.migrationRisk,
+    row.action,
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
 }

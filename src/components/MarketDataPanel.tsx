@@ -53,8 +53,10 @@ import {
 import {
   apiContractBlueprintJson,
   apiServiceCatalogCsv,
+  apiVersionGovernanceCsv,
   buildApiContractBlueprintItems,
   buildApiServiceCatalogItems,
+  buildApiVersionGovernanceItems,
 } from "@/lib/apiServiceLayer";
 import {
   buildDataLineageItems,
@@ -818,6 +820,12 @@ export function MarketDataPanel() {
   const apiContractBlueprintDecision = apiContractBlueprintItems.length
     ? combinedExecutionStatus(apiContractBlueprintItems.map((item) => item.status))
     : "watch";
+  const apiVersionGovernanceItems = buildApiVersionGovernanceItems(apiContractBlueprintItems);
+  const apiVersionGovernanceDecision = apiVersionGovernanceItems.length
+    ? combinedExecutionStatus(apiVersionGovernanceItems.map((item) => item.status))
+    : "watch";
+  const apiVersionProductionCount = apiVersionGovernanceItems.filter((item) => item.releaseChannel === "production").length;
+  const apiVersionMigrationRiskCount = apiVersionGovernanceItems.filter((item) => item.migrationRisk === "high").length;
   const platformEntitlementItems = buildPlatformEntitlementItems({
     dataReadinessDecision,
     apiServiceCatalogDecision,
@@ -1173,6 +1181,15 @@ export function MarketDataPanel() {
       `wealth-dashboard-openapi-blueprint-${resultStamp()}.json`,
       apiContractBlueprintJson(apiContractBlueprintItems),
       "application/json;charset=utf-8",
+    );
+  };
+  const handleExportApiVersionGovernanceCsv = () => {
+    if (!apiVersionGovernanceItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-api-version-governance-${resultStamp()}.csv`,
+      apiVersionGovernanceCsv(apiVersionGovernanceItems),
+      "text/csv;charset=utf-8",
     );
   };
   const handleExportPlatformEntitlementCsv = () => {
@@ -1968,6 +1985,11 @@ export function MarketDataPanel() {
                 apiContractDraftCount={apiContractDraftCount}
                 apiContractBlueprintItems={apiContractBlueprintItems}
                 onExportApiContractBlueprintJson={handleExportApiContractBlueprintJson}
+                apiVersionGovernanceDecision={apiVersionGovernanceDecision}
+                apiVersionProductionCount={apiVersionProductionCount}
+                apiVersionMigrationRiskCount={apiVersionMigrationRiskCount}
+                apiVersionGovernanceItems={apiVersionGovernanceItems}
+                onExportApiVersionGovernanceCsv={handleExportApiVersionGovernanceCsv}
                 platformEntitlementDecision={platformEntitlementDecision}
                 entitlementReadyCount={entitlementReadyCount}
                 entitlementRestrictedCount={entitlementRestrictedCount}
