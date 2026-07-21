@@ -96,6 +96,7 @@ import {
   researchTaskBigQuerySchemaJson,
   researchTaskCsv,
   researchTaskLifecycleCsv,
+  researchTaskSyncAuditCsv,
   researchTaskSyncPayloadJson,
   writeResearchTaskOverridesToStorage,
   writeResearchTaskWorkspaceIdToStorage,
@@ -1553,6 +1554,15 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleExportResearchTaskSyncAuditCsv = () => {
+    if (!researchTaskAuditRecords.length) return;
+
+    downloadTextFile(
+      `bigquery-research-task-sync-audit-${resultStamp()}.csv`,
+      researchTaskSyncAuditCsv(researchTaskAuditRecords),
+      "text/csv;charset=utf-8",
+    );
+  };
   const handleExportResearchTaskSyncJson = () => {
     if (!researchTaskItems.length) return;
 
@@ -2099,6 +2109,7 @@ export function MarketDataPanel() {
             onLoadResearchTasksFromBigQuery={handleLoadResearchTasksFromBigQuery}
             onLoadResearchTaskSyncAudit={handleLoadResearchTaskSyncAudit}
             onExportResearchTaskCsv={handleExportResearchTaskCsv}
+            onExportResearchTaskSyncAuditCsv={handleExportResearchTaskSyncAuditCsv}
             onExportResearchTaskLifecycleCsv={handleExportResearchTaskLifecycleCsv}
             onExportResearchTaskSyncJson={handleExportResearchTaskSyncJson}
             onExportResearchTaskBigQueryDdl={handleExportResearchTaskBigQueryDdl}

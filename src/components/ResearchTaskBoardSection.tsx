@@ -34,6 +34,7 @@ type ResearchTaskBoardSectionProps = {
   onLoadResearchTasksFromBigQuery: () => void;
   onLoadResearchTaskSyncAudit: () => void;
   onExportResearchTaskCsv: () => void;
+  onExportResearchTaskSyncAuditCsv: () => void;
   onExportResearchTaskLifecycleCsv: () => void;
   onExportResearchTaskSyncJson: () => void;
   onExportResearchTaskBigQueryDdl: () => void;
@@ -80,6 +81,7 @@ export function ResearchTaskBoardSection({
   onLoadResearchTasksFromBigQuery,
   onLoadResearchTaskSyncAudit,
   onExportResearchTaskCsv,
+  onExportResearchTaskSyncAuditCsv,
   onExportResearchTaskLifecycleCsv,
   onExportResearchTaskSyncJson,
   onExportResearchTaskBigQueryDdl,
@@ -130,6 +132,13 @@ export function ResearchTaskBoardSection({
             className="px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
           >
             同步稽核
+          </button>
+          <button
+            onClick={onExportResearchTaskSyncAuditCsv}
+            disabled={!auditRecords.length}
+            className="px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+          >
+            稽核 CSV
           </button>
           <button
             onClick={onExportResearchTaskSyncJson}

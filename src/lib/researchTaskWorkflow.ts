@@ -8,6 +8,7 @@ import type {
   MarketAlertRunbookItem,
   MarketAlertStatus,
 } from "@/lib/marketAlertEvents";
+import type { ResearchTaskWarehouseAuditRecord } from "@/types/market";
 
 export type ResearchTaskStatus = "blocked" | "active" | "ready" | "done";
 export type ResearchTaskPriority = "high" | "medium" | "low";
@@ -508,6 +509,31 @@ export function researchTaskCsv(rows: ResearchTaskItem[]) {
     row.nextAction,
     row.manualNote ?? "",
     row.manuallyUpdatedAt ?? "",
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+export function researchTaskSyncAuditCsv(rows: ResearchTaskWarehouseAuditRecord[]) {
+  const header = [
+    "workspace_id",
+    "actor_id",
+    "generated_at",
+    "latest_updated_at",
+    "task_count",
+    "manual_override_count",
+    "blocker_count",
+    "ready_count",
+  ];
+  const csvRows = rows.map((row) => [
+    row.workspace_id,
+    row.actor_id ?? "",
+    row.generated_at,
+    row.latest_updated_at ?? "",
+    row.task_count,
+    row.manual_override_count,
+    row.blocker_count,
+    row.ready_count,
   ]);
 
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
