@@ -110,6 +110,51 @@ def sync_research_task_records(records: List[Dict]) -> Dict:
     }
 
 
+def load_latest_research_task_records(limit: int = 50) -> Dict:
+    bigquery = _bigquery_module()
+    client = _bigquery_client(bigquery)
+    table_id = _ensure_research_task_table(bigquery, client)
+    bounded_limit = max(1, min(int(limit or 50), 200))
+    field_list = ", ".join(RESEARCH_TASK_FIELD_NAMES)
+    query = f"""
+    SELECT {field_list}
+    FROM (
+        SELECT
+            {field_list},
+            ROW_NUMBER() OVER (
+                PARTITION BY task_id
+                ORDER BY updated_at DESC, generated_at DESC
+            ) AS row_number
+        FROM `{table_id}`
+    )
+    WHERE row_number = 1
+    ORDER BY updated_at DESC, generated_at DESC
+    LIMIT @limit
+    """
+
+    try:
+        rows = list(
+            client.query(
+                query,
+                job_config=bigquery.QueryJobConfig(
+                    query_parameters=[
+                        bigquery.ScalarQueryParameter("limit", "INT64", bounded_limit),
+                    ]
+                ),
+            ).result()
+        )
+    except Exception as exc:
+        raise MarketDataQueryError(f"BigQuery latest research task query failed: {exc}") from exc
+
+    return {
+        "status": "loaded",
+        "table": table_id,
+        "limit": bounded_limit,
+        "recordCount": len(rows),
+        "records": [_row_to_research_task_record(row) for row in rows],
+    }
+
+
 def _ensure_research_task_table(bigquery, client) -> str:
     project_id, dataset, _, _ = _settings()
     table_name = _research_task_table_name()
@@ -181,6 +226,19 @@ def _normalize_research_task_record(record: Dict) -> Dict:
         "ready_count": _int_value(record.get("ready_count")),
     }
     return {field: clean_record.get(field) for field in RESEARCH_TASK_FIELD_NAMES}
+
+
+def _row_to_research_task_record(row) -> Dict:
+    return {
+        field: _serializable_value(row.get(field))
+        for field in RESEARCH_TASK_FIELD_NAMES
+    }
+
+
+def _serializable_value(value):
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return value
 
 
 def _research_task_table_name() -> str:

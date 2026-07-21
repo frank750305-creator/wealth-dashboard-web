@@ -37,6 +37,7 @@ import {
   fetchBigQueryAssetHistory,
   fetchBigQueryAssetProfile,
   fetchBigQueryAssets,
+  fetchLatestResearchTasksFromBigQuery,
   syncResearchTasksToBigQuery,
 } from "@/lib/marketApi";
 import {
@@ -296,7 +297,9 @@ export function MarketDataPanel() {
   const [selectedWatchlistPresetId, setSelectedWatchlistPresetId] = useState("");
   const [savedWatchlistPresets, setSavedWatchlistPresets] = useState<SavedWatchlistPreset[]>([]);
   const [researchTaskOverrides, setResearchTaskOverrides] = useState<ResearchTaskOverride[]>([]);
-  const [researchTaskSyncStatus, setResearchTaskSyncStatus] = useState<"idle" | "syncing" | "synced" | "error">("idle");
+  const [researchTaskSyncStatus, setResearchTaskSyncStatus] = useState<
+    "idle" | "syncing" | "loading" | "synced" | "loaded" | "error"
+  >("idle");
   const [researchTaskSyncMessage, setResearchTaskSyncMessage] = useState("");
   const [watchlistMemoCopyStatus, setWatchlistMemoCopyStatus] = useState<"idle" | "copied">("idle");
   const sources = data?.sources ?? [];
@@ -1568,6 +1571,32 @@ export function MarketDataPanel() {
       setResearchTaskSyncMessage(err instanceof Error ? err.message : String(err));
     }
   };
+  const handleLoadResearchTasksFromBigQuery = async () => {
+    setResearchTaskSyncStatus("loading");
+    setResearchTaskSyncMessage("研究任務載入中。");
+
+    try {
+      const result = await fetchLatestResearchTasksFromBigQuery(50);
+      const validStatuses = new Set(["blocked", "active", "ready", "done"]);
+      const nextOverrides: ResearchTaskOverride[] = result.records
+        .filter((record) => validStatuses.has(record.status))
+        .map((record) => ({
+          taskId: record.task_id,
+          status: record.status as ResearchTaskOverride["status"],
+          owner: record.owner || undefined,
+          note: record.manual_note || undefined,
+          updatedAt: record.updated_at,
+        }));
+
+      setResearchTaskOverrides(nextOverrides);
+      writeResearchTaskOverridesToStorage(nextOverrides);
+      setResearchTaskSyncStatus("loaded");
+      setResearchTaskSyncMessage(`已載入 ${nextOverrides.length}/${result.recordCount} 筆 ${result.table}`);
+    } catch (err: unknown) {
+      setResearchTaskSyncStatus("error");
+      setResearchTaskSyncMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
   const handleResearchTaskOverrideChange = (
     taskId: string,
     patch: Partial<Pick<ResearchTaskOverride, "status" | "owner" | "note">>,
@@ -1975,6 +2004,7 @@ export function MarketDataPanel() {
             onTaskOverrideChange={handleResearchTaskOverrideChange}
             onResetTaskOverride={handleResetResearchTaskOverride}
             onSyncResearchTasksToBigQuery={handleSyncResearchTasksToBigQuery}
+            onLoadResearchTasksFromBigQuery={handleLoadResearchTasksFromBigQuery}
             onExportResearchTaskCsv={handleExportResearchTaskCsv}
             onExportResearchTaskLifecycleCsv={handleExportResearchTaskLifecycleCsv}
             onExportResearchTaskSyncJson={handleExportResearchTaskSyncJson}

@@ -9,6 +9,7 @@ import type {
   PortfolioAnalyzeBigQueryPayload,
   PortfolioOptimizationResponse,
   PortfolioOptimizeBigQueryPayload,
+  ResearchTaskWarehouseLatestResponse,
   ResearchTaskWarehouseStatus,
   ResearchTaskWarehouseSyncPayload,
   ResearchTaskWarehouseSyncResponse,
@@ -65,6 +66,23 @@ export async function fetchResearchTaskWarehouseStatus(): Promise<ResearchTaskWa
   if (!response.ok) {
     const errText = await response.text();
     throw new Error(`研究任務倉儲狀態讀取異常 (代碼: ${response.status})\n${errText}`);
+  }
+
+  return response.json();
+}
+
+export async function fetchLatestResearchTasksFromBigQuery(limit = 50): Promise<ResearchTaskWarehouseLatestResponse> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+  });
+  const response = await fetch(`/api/v1/research/tasks/bigquery/latest?${params.toString()}`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`研究任務 BigQuery 載入異常 (代碼: ${response.status})\n${errText}`);
   }
 
   return response.json();

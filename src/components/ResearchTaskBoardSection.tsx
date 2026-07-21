@@ -16,7 +16,7 @@ type ResearchTaskBoardSectionProps = {
   lifecycle: ResearchTaskLifecycle;
   taskOverrides: ResearchTaskOverride[];
   hasBigQueryCredentials: boolean;
-  syncStatus: "idle" | "syncing" | "synced" | "error";
+  syncStatus: "idle" | "syncing" | "loading" | "synced" | "loaded" | "error";
   syncMessage: string;
   onTaskOverrideChange: (
     taskId: string,
@@ -24,6 +24,7 @@ type ResearchTaskBoardSectionProps = {
   ) => void;
   onResetTaskOverride: (taskId: string) => void;
   onSyncResearchTasksToBigQuery: () => void;
+  onLoadResearchTasksFromBigQuery: () => void;
   onExportResearchTaskCsv: () => void;
   onExportResearchTaskLifecycleCsv: () => void;
   onExportResearchTaskSyncJson: () => void;
@@ -62,6 +63,7 @@ export function ResearchTaskBoardSection({
   onTaskOverrideChange,
   onResetTaskOverride,
   onSyncResearchTasksToBigQuery,
+  onLoadResearchTasksFromBigQuery,
   onExportResearchTaskCsv,
   onExportResearchTaskLifecycleCsv,
   onExportResearchTaskSyncJson,
@@ -89,10 +91,17 @@ export function ResearchTaskBoardSection({
         <div className="flex flex-wrap gap-2">
           <button
             onClick={onSyncResearchTasksToBigQuery}
-            disabled={!hasBigQueryCredentials || !tasks.length || syncStatus === "syncing"}
+            disabled={!hasBigQueryCredentials || !tasks.length || syncStatus === "syncing" || syncStatus === "loading"}
             className="px-3 py-2 rounded-md bg-cyan-700 hover:bg-cyan-600 text-white text-xs font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
           >
             {syncStatus === "syncing" ? "同步中" : "同步 BigQuery"}
+          </button>
+          <button
+            onClick={onLoadResearchTasksFromBigQuery}
+            disabled={!hasBigQueryCredentials || syncStatus === "syncing" || syncStatus === "loading"}
+            className="px-3 py-2 rounded-md bg-sky-700 hover:bg-sky-600 text-white text-xs font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+          >
+            {syncStatus === "loading" ? "載入中" : "載入 BigQuery"}
           </button>
           <button
             onClick={onExportResearchTaskSyncJson}

@@ -363,19 +363,19 @@ export type ResearchTaskWarehouseSyncRecord = {
   generated_at: string;
   updated_at: string;
   lane: string;
-  title: string;
+  title: string | null;
   status: string;
   priority: string;
-  owner: string;
+  owner: string | null;
   symbol: string | null;
-  source: string;
-  evidence: string;
-  next_action: string;
+  source: string | null;
+  evidence: string | null;
+  next_action: string | null;
   manual_note: string | null;
   is_manual_override: boolean;
   lifecycle_gate_status: string;
-  lifecycle_decision: string;
-  active_stage: string;
+  lifecycle_decision: string | null;
+  active_stage: string | null;
   blocker_count: number;
   ready_count: number;
 };
@@ -395,4 +395,13 @@ export type ResearchTaskWarehouseSyncResponse = {
   receivedCount: number;
   insertedCount: number;
   errors: unknown[];
+};
+
+export type ResearchTaskWarehouseLatestResponse = {
+  generatedAt: string;
+  status: "loaded" | string;
+  table: string;
+  limit: number;
+  recordCount: number;
+  records: ResearchTaskWarehouseSyncRecord[];
 };

@@ -22,6 +22,7 @@ try:
         optimize_portfolio_weights,
     )
     from .research_task_service import (
+        load_latest_research_task_records,
         research_task_warehouse_status,
         sync_research_task_records,
     )
@@ -41,6 +42,7 @@ except ImportError:
         optimize_portfolio_weights,
     )
     from research_task_service import (
+        load_latest_research_task_records,
         research_task_warehouse_status,
         sync_research_task_records,
     )
@@ -425,6 +427,16 @@ async def research_tasks_bigquery_status():
         return {
             "generatedAt": datetime.now(timezone.utc).isoformat(),
             **research_task_warehouse_status(),
+        }
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+@app.get("/api/v1/research/tasks/bigquery/latest")
+async def latest_research_tasks_from_bigquery(limit: int = 50):
+    try:
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            **load_latest_research_task_records(limit=limit),
         }
     except MarketDataError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc))
