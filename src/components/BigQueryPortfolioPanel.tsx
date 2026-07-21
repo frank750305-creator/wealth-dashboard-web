@@ -6,6 +6,7 @@ import { analyzePortfolioFromBigQuery, fetchBigQueryAssets, optimizePortfolioFro
 import type { BigQueryAsset, PortfolioAnalysisResponse, PortfolioOptimizationResponse } from "@/types/market";
 import { BigQueryPortfolioAllocationSummary } from "./BigQueryPortfolioAllocationSummary";
 import { BigQueryPortfolioAssetSuggestions } from "./BigQueryPortfolioAssetSuggestions";
+import { BigQueryPortfolioAssetStatisticsPanel } from "./BigQueryPortfolioAssetStatisticsPanel";
 import { BigQueryPortfolioAssetTools } from "./BigQueryPortfolioAssetTools";
 import { BigQueryPortfolioDecisionSections } from "./BigQueryPortfolioDecisionSections";
 import { BigQueryPortfolioHeader } from "./BigQueryPortfolioHeader";
@@ -2764,20 +2765,10 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
               </div>
             </div>
 
-            <div className="bg-slate-950 border border-slate-800 rounded-lg p-3">
-              <p className="text-[11px] text-slate-500 mb-3">資產統計</p>
-              <div className="space-y-2">
-                {(displayResult.assetStatistics ?? []).map((asset) => (
-                  <div key={asset.symbol} className="border-b border-slate-900 last:border-0 pb-2 last:pb-0">
-                    <p className="text-xs text-slate-200 truncate">{asset.symbol}</p>
-                    <div className="mt-1 grid grid-cols-2 gap-2 text-[11px] font-mono">
-                      <span className="text-emerald-300">{formatMetric(asset.annualReturn, "percent")}</span>
-                      <span className="text-amber-300">{formatMetric(asset.annualVolatility, "percent")}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <BigQueryPortfolioAssetStatisticsPanel
+              assets={displayResult.assetStatistics ?? []}
+              formatMetric={formatMetric}
+            />
           </div>
 
           <div className="bg-slate-950 border border-slate-800 rounded-lg p-3">
