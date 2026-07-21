@@ -546,6 +546,34 @@ export function apiContractBlueprintJson(rows: ApiContractBlueprintItem[]) {
         description: "Internal API blueprint for market data, portfolio analytics, data products, and trading workflow.",
       },
       paths,
+      components: {
+        securitySchemes: {
+          "public-read": {
+            type: "apiKey",
+            in: "header",
+            name: "x-public-client",
+            description: "Read-only public demo surface. Production data must still be scoped by tenant policy.",
+          },
+          "server-env": {
+            type: "apiKey",
+            in: "header",
+            name: "x-server-runtime",
+            description: "Server-side runtime route backed by Vercel environment configuration.",
+          },
+          "service-account": {
+            type: "apiKey",
+            in: "header",
+            name: "x-workspace-api-key",
+            description: "Workspace-scoped server credential for BigQuery-backed market and research workflows.",
+          },
+          internal: {
+            type: "apiKey",
+            in: "header",
+            name: "x-internal-operator",
+            description: "Internal operator route for platform governance and trading workflow operations.",
+          },
+        },
+      },
     },
     null,
     2,
