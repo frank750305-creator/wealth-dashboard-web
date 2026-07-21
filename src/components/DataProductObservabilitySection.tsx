@@ -4,14 +4,19 @@ import type {
   DataProductObservabilitySummary,
   DataProductReliabilityAction,
   DataProductReliabilityPriority,
+  DataProductSloItem,
+  DataProductSloSummary,
 } from "@/lib/dataProductObservability";
 
 type DataProductObservabilitySectionProps = {
   summary: DataProductObservabilitySummary;
   items: DataProductObservabilityItem[];
   reliabilityActions: DataProductReliabilityAction[];
+  sloSummary: DataProductSloSummary;
+  sloItems: DataProductSloItem[];
   onExportCsv: () => void;
   onExportReliabilityCsv: () => void;
+  onExportSloCsv: () => void;
 };
 
 function statusLabel(status: DataProductObservabilityStatus) {
@@ -48,12 +53,19 @@ function formatPercent(value: number | null) {
   return typeof value === "number" && Number.isFinite(value) ? `${(value * 100).toFixed(1)}%` : "--";
 }
 
+function formatScore(value: number | null) {
+  return typeof value === "number" && Number.isFinite(value) ? value.toFixed(0) : "--";
+}
+
 export function DataProductObservabilitySection({
   summary,
   items,
   reliabilityActions,
+  sloSummary,
+  sloItems,
   onExportCsv: handleExportCsv,
   onExportReliabilityCsv: handleExportReliabilityCsv,
+  onExportSloCsv: handleExportSloCsv,
 }: DataProductObservabilitySectionProps) {
   return (
     <div className="border-t border-slate-800 pt-3 space-y-3">
@@ -97,7 +109,89 @@ export function DataProductObservabilitySection({
           >
             Action CSV
           </button>
+          <button
+            onClick={handleExportSloCsv}
+            disabled={!sloItems.length}
+            className="px-3 py-2 rounded-md bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-100 font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+          >
+            SLO CSV
+          </button>
         </div>
+      </div>
+
+      <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-3 space-y-3">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-2">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h5 className="text-xs font-bold text-slate-100">資料產品 SLO Scorecard</h5>
+              <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${statusBadgeClass(sloSummary.decision)}`}>
+                {statusLabel(sloSummary.decision)}
+              </span>
+            </div>
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              用落庫覆蓋、API readiness、audit readiness 與產品狀態計算服務等級分數
+            </p>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+            {[
+              ["平均分", formatScore(sloSummary.averageScore)],
+              ["通過", `${sloSummary.passingCount}`],
+              ["觀察", `${sloSummary.watchCount}`],
+              ["缺口", `${sloSummary.breachCount}`],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded-md border border-slate-800 bg-slate-950/70 px-3 py-2 text-right">
+                <p className="text-[10px] text-slate-600">{label}</p>
+                <p className="mt-0.5 font-mono font-bold text-slate-100">{value}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {sloItems.length ? (
+          <div className="overflow-x-auto rounded-lg border border-slate-800">
+            <table className="w-full min-w-[1280px] text-xs">
+              <thead className="bg-slate-950/70">
+                <tr className="text-left text-[11px] text-slate-600">
+                  <th className="py-2 px-3 font-medium">資料產品</th>
+                  <th className="py-2 px-3 font-medium text-right">SLO</th>
+                  <th className="py-2 px-3 font-medium text-right">狀態</th>
+                  <th className="py-2 px-3 font-medium text-right">落庫</th>
+                  <th className="py-2 px-3 font-medium">API</th>
+                  <th className="py-2 px-3 font-medium">Audit</th>
+                  <th className="py-2 px-3 font-medium text-right">缺口</th>
+                  <th className="py-2 px-3 font-medium">Owner</th>
+                  <th className="py-2 px-3 font-medium">動作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sloItems.map((item) => (
+                  <tr key={`${item.domain}-${item.product}-slo`} className={`border-t ${statusRowClass(item.status)}`}>
+                    <td className="py-2 px-3">
+                      <p className="font-bold text-slate-100">{item.product}</p>
+                      <p className="mt-0.5 text-[10px] text-slate-600">{item.domain} · {item.target}</p>
+                    </td>
+                    <td className="py-2 px-3 text-right font-mono text-slate-100">{item.score}</td>
+                    <td className="py-2 px-3 text-right">
+                      <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${statusBadgeClass(item.status)}`}>
+                        {statusLabel(item.status)}
+                      </span>
+                    </td>
+                    <td className="py-2 px-3 text-right font-mono text-slate-300">{item.warehouseCoverage}</td>
+                    <td className="py-2 px-3 font-mono text-[11px] text-slate-400">{item.apiReadiness}</td>
+                    <td className="py-2 px-3 text-slate-400">{item.auditReadiness}</td>
+                    <td className="py-2 px-3 text-right font-mono text-slate-300">{item.breachCount}</td>
+                    <td className="py-2 px-3 text-slate-400">{item.owner}</td>
+                    <td className="py-2 px-3 text-slate-500">{item.action}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="rounded-md border border-dashed border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-500">
+            建立資料產品可觀測性後，這裡會顯示 SLO 分數。
+          </div>
+        )}
       </div>
 
       {items.length ? (

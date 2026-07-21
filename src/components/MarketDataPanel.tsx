@@ -94,9 +94,12 @@ import {
 import {
   buildDataProductObservabilityItems,
   buildDataProductReliabilityActions,
+  buildDataProductSloItems,
   dataProductObservabilityCsv,
   dataProductReliabilityActionsCsv,
+  dataProductSloCsv,
   summarizeDataProductObservability,
+  summarizeDataProductSlo,
 } from "@/lib/dataProductObservability";
 import {
   buildCoverageUniverseItems,
@@ -1219,6 +1222,8 @@ export function MarketDataPanel() {
     apiServiceCatalogItems,
   );
   const dataProductReliabilityActions = buildDataProductReliabilityActions(dataProductObservabilityItems);
+  const dataProductSloItems = buildDataProductSloItems(dataProductObservabilityItems);
+  const dataProductSloSummary = summarizeDataProductSlo(dataProductSloItems);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1404,6 +1409,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-data-product-actions-${resultStamp()}.csv`,
       dataProductReliabilityActionsCsv(dataProductReliabilityActions),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportDataProductSloCsv = () => {
+    if (!dataProductSloItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-data-product-slo-${resultStamp()}.csv`,
+      dataProductSloCsv(dataProductSloItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -2883,8 +2897,11 @@ export function MarketDataPanel() {
                 summary={dataProductObservabilitySummary}
                 items={dataProductObservabilityItems}
                 reliabilityActions={dataProductReliabilityActions}
+                sloSummary={dataProductSloSummary}
+                sloItems={dataProductSloItems}
                 onExportCsv={handleExportDataProductObservabilityCsv}
                 onExportReliabilityCsv={handleExportDataProductReliabilityActionsCsv}
+                onExportSloCsv={handleExportDataProductSloCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}

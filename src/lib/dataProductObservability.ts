@@ -46,6 +46,30 @@ export type DataProductReliabilityAction = {
   action: string;
 };
 
+export type DataProductSloItem = {
+  domain: string;
+  product: string;
+  status: DataProductObservabilityStatus;
+  score: number;
+  target: string;
+  warehouseCoverage: string;
+  apiReadiness: string;
+  auditReadiness: string;
+  breachCount: number;
+  owner: string;
+  evidence: string;
+  action: string;
+};
+
+export type DataProductSloSummary = {
+  decision: DataProductObservabilityStatus;
+  averageScore: number | null;
+  passingCount: number;
+  watchCount: number;
+  breachCount: number;
+  productCount: number;
+};
+
 type BuildDataProductObservabilityItemsInput = {
   hasBigQueryCredentials: boolean;
   dataPipelineDecision: DataProductObservabilityStatus;
@@ -376,6 +400,39 @@ function reliabilityTrigger(row: DataProductObservabilityItem) {
   return "例行服務健康追蹤";
 }
 
+function apiReadinessRatio(apiCoverageText: string) {
+  const match = apiCoverageText.match(/^(\d+)\/(\d+)/);
+  if (!match) return apiCoverageText.startsWith("0 endpoints") ? 0 : 1;
+  const ready = Number(match[1]);
+  const total = Number(match[2]);
+  if (!Number.isFinite(ready) || !Number.isFinite(total) || total <= 0) return 0;
+  return Math.min(1, ready / total);
+}
+
+function auditReadinessRatio(auditTrail: string) {
+  if (!auditTrail || auditTrail.startsWith("尚未")) return 0;
+  if (auditTrail.includes("latest endpoint")) return 0.7;
+  return 1;
+}
+
+function observabilityStatusScore(status: DataProductObservabilityStatus) {
+  if (status === "pass") return 40;
+  if (status === "watch") return 24;
+  return 0;
+}
+
+function sloStatusFromScore(score: number, breachCount: number): DataProductObservabilityStatus {
+  if (score >= 90 && breachCount === 0) return "pass";
+  if (score >= 65) return "watch";
+  return "block";
+}
+
+function sloAction(status: DataProductObservabilityStatus, breachCount: number, fallbackAction: string) {
+  if (status === "pass") return "維持每日監控與週報輸出";
+  if (breachCount >= 3) return "建立 incident，優先修補落庫、API 或稽核缺口";
+  return fallbackAction;
+}
+
 export function buildDataProductReliabilityActions(
   rows: DataProductObservabilityItem[],
 ): DataProductReliabilityAction[] {
@@ -413,6 +470,58 @@ export function buildDataProductReliabilityActions(
         left.product.localeCompare(right.product, "zh-Hant"),
     )
     .slice(0, 12);
+}
+
+export function buildDataProductSloItems(rows: DataProductObservabilityItem[]): DataProductSloItem[] {
+  return rows.map((row) => {
+    const warehouseRatio = row.coveragePercent ?? 0;
+    const apiRatio = apiReadinessRatio(row.apiCoverage);
+    const auditRatio = auditReadinessRatio(row.auditTrail);
+    const breachCount = [
+      row.status === "block",
+      row.coveragePercent === null || row.coveragePercent < 1,
+      apiRatio < 1,
+      auditRatio < 1,
+    ].filter(Boolean).length;
+    const score = Math.round(
+      observabilityStatusScore(row.status) +
+        warehouseRatio * 30 +
+        apiRatio * 20 +
+        auditRatio * 10,
+    );
+    const status = sloStatusFromScore(score, breachCount);
+
+    return {
+      domain: row.domain,
+      product: row.product,
+      status,
+      score,
+      target: "90+ 分、100% 落庫、API ready、audit 可追蹤",
+      warehouseCoverage: row.coveragePercent === null ? "--" : `${(row.coveragePercent * 100).toFixed(1)}%`,
+      apiReadiness: row.apiCoverage,
+      auditReadiness: auditRatio >= 1 ? "完整" : auditRatio > 0 ? "端點可查" : "待載入",
+      breachCount,
+      owner: row.owner,
+      evidence: `${row.generatedRecords} generated / ${row.warehouseRecords} warehouse`,
+      action: sloAction(status, breachCount, row.action),
+    };
+  });
+}
+
+export function summarizeDataProductSlo(rows: DataProductSloItem[]): DataProductSloSummary {
+  const averageScore = rows.length ? rows.reduce((sum, row) => sum + row.score, 0) / rows.length : null;
+  const passingCount = rows.filter((row) => row.status === "pass").length;
+  const watchCount = rows.filter((row) => row.status === "watch").length;
+  const breachCount = rows.reduce((sum, row) => sum + row.breachCount, 0);
+
+  return {
+    decision: rows.length ? combinedStatus(rows.map((row) => row.status)) : "watch",
+    averageScore,
+    passingCount,
+    watchCount,
+    breachCount,
+    productCount: rows.length,
+  };
 }
 
 export function dataProductObservabilityCsv(rows: DataProductObservabilityItem[]) {
@@ -456,6 +565,39 @@ export function dataProductReliabilityActionsCsv(rows: DataProductReliabilityAct
     row.owner,
     row.sla,
     row.trigger,
+    row.evidence,
+    row.action,
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+export function dataProductSloCsv(rows: DataProductSloItem[]) {
+  const header = [
+    "domain",
+    "product",
+    "status",
+    "score",
+    "target",
+    "warehouse_coverage",
+    "api_readiness",
+    "audit_readiness",
+    "breach_count",
+    "owner",
+    "evidence",
+    "action",
+  ];
+  const csvRows = rows.map((row) => [
+    row.domain,
+    row.product,
+    statusLabel(row.status),
+    row.score,
+    row.target,
+    row.warehouseCoverage,
+    row.apiReadiness,
+    row.auditReadiness,
+    row.breachCount,
+    row.owner,
     row.evidence,
     row.action,
   ]);
