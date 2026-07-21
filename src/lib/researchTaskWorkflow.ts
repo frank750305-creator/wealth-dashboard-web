@@ -79,6 +79,36 @@ export type ResearchTaskOverride = {
   updatedAt: string;
 };
 
+export type ResearchTaskSyncRecord = {
+  task_id: string;
+  generated_at: string;
+  updated_at: string;
+  lane: ResearchTaskLane;
+  title: string;
+  status: ResearchTaskStatus;
+  priority: ResearchTaskPriority;
+  owner: string;
+  symbol: string | null;
+  source: string;
+  evidence: string;
+  next_action: string;
+  manual_note: string | null;
+  is_manual_override: boolean;
+  lifecycle_gate_status: ResearchTaskStatus;
+  lifecycle_decision: string;
+  active_stage: string;
+  blocker_count: number;
+  ready_count: number;
+};
+
+export type ResearchTaskSyncPayload = {
+  table: string;
+  generated_at: string;
+  record_count: number;
+  records: ResearchTaskSyncRecord[];
+  lifecycle: ResearchTaskLifecycle;
+};
+
 type BuildResearchTaskItemsInput = {
   comparisonRows: AssetComparisonRow[];
   visibleComparisonRows: AssetComparisonRow[];
@@ -91,6 +121,29 @@ type BuildResearchTaskItemsInput = {
 };
 
 const researchTaskOverrideStorageKey = "wealth-dashboard.researchTaskOverrides";
+const researchTaskWarehouseTable = "research_tasks";
+
+const researchTaskBigQueryFields = [
+  { name: "task_id", apiType: "STRING", sqlType: "STRING", mode: "REQUIRED", description: "Stable research task id" },
+  { name: "generated_at", apiType: "TIMESTAMP", sqlType: "TIMESTAMP", mode: "REQUIRED", description: "Dashboard generation timestamp" },
+  { name: "updated_at", apiType: "TIMESTAMP", sqlType: "TIMESTAMP", mode: "REQUIRED", description: "Last task update timestamp" },
+  { name: "lane", apiType: "STRING", sqlType: "STRING", mode: "NULLABLE", description: "Task lane" },
+  { name: "title", apiType: "STRING", sqlType: "STRING", mode: "NULLABLE", description: "Task title" },
+  { name: "status", apiType: "STRING", sqlType: "STRING", mode: "NULLABLE", description: "Task status" },
+  { name: "priority", apiType: "STRING", sqlType: "STRING", mode: "NULLABLE", description: "Task priority" },
+  { name: "owner", apiType: "STRING", sqlType: "STRING", mode: "NULLABLE", description: "Responsible owner" },
+  { name: "symbol", apiType: "STRING", sqlType: "STRING", mode: "NULLABLE", description: "Related market symbol" },
+  { name: "source", apiType: "STRING", sqlType: "STRING", mode: "NULLABLE", description: "Source module" },
+  { name: "evidence", apiType: "STRING", sqlType: "STRING", mode: "NULLABLE", description: "Decision evidence" },
+  { name: "next_action", apiType: "STRING", sqlType: "STRING", mode: "NULLABLE", description: "Next action" },
+  { name: "manual_note", apiType: "STRING", sqlType: "STRING", mode: "NULLABLE", description: "Manual note" },
+  { name: "is_manual_override", apiType: "BOOLEAN", sqlType: "BOOL", mode: "NULLABLE", description: "Whether user changed task state" },
+  { name: "lifecycle_gate_status", apiType: "STRING", sqlType: "STRING", mode: "NULLABLE", description: "Lifecycle gate status" },
+  { name: "lifecycle_decision", apiType: "STRING", sqlType: "STRING", mode: "NULLABLE", description: "Lifecycle decision" },
+  { name: "active_stage", apiType: "STRING", sqlType: "STRING", mode: "NULLABLE", description: "Current active stage" },
+  { name: "blocker_count", apiType: "INTEGER", sqlType: "INT64", mode: "NULLABLE", description: "Blocked task count" },
+  { name: "ready_count", apiType: "INTEGER", sqlType: "INT64", mode: "NULLABLE", description: "Ready task count" },
+];
 
 type BuildResearchTaskLifecycleInput = {
   tasks: ResearchTaskItem[];
@@ -434,6 +487,83 @@ export function researchTaskCsv(rows: ResearchTaskItem[]) {
   ]);
 
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+export function buildResearchTaskSyncPayload({
+  tasks,
+  lifecycle,
+  generatedAt,
+}: {
+  tasks: ResearchTaskItem[];
+  lifecycle: ResearchTaskLifecycle;
+  generatedAt: string;
+}): ResearchTaskSyncPayload {
+  const records = tasks.map((task) => ({
+    task_id: task.id,
+    generated_at: generatedAt,
+    updated_at: task.manuallyUpdatedAt ?? generatedAt,
+    lane: task.lane,
+    title: task.title,
+    status: task.status,
+    priority: task.priority,
+    owner: task.owner,
+    symbol: task.symbol ?? null,
+    source: task.source,
+    evidence: task.evidence,
+    next_action: task.nextAction,
+    manual_note: task.manualNote ?? null,
+    is_manual_override: Boolean(task.isManualOverride),
+    lifecycle_gate_status: lifecycle.gateStatus,
+    lifecycle_decision: lifecycle.decision,
+    active_stage: lifecycle.activeStage,
+    blocker_count: lifecycle.blockerCount,
+    ready_count: lifecycle.readyCount,
+  }));
+
+  return {
+    table: researchTaskWarehouseTable,
+    generated_at: generatedAt,
+    record_count: records.length,
+    records,
+    lifecycle,
+  };
+}
+
+export function researchTaskSyncPayloadJson(payload: ResearchTaskSyncPayload) {
+  return JSON.stringify(payload, null, 2);
+}
+
+export function researchTaskBigQuerySchemaJson() {
+  return JSON.stringify(
+    researchTaskBigQueryFields.map(({ name, apiType, mode, description }) => ({
+      name,
+      type: apiType,
+      mode,
+      description,
+    })),
+    null,
+    2,
+  );
+}
+
+export function researchTaskBigQueryDdl(tableId = "project_id.dataset_name.research_tasks") {
+  const columns = researchTaskBigQueryFields
+    .map((field) => {
+      const required = field.mode === "REQUIRED" ? " NOT NULL" : "";
+      return `  ${field.name} ${field.sqlType}${required} OPTIONS(description="${field.description}")`;
+    })
+    .join(",\n");
+
+  return [
+    "-- Replace project_id.dataset_name before running this in BigQuery.",
+    `CREATE TABLE IF NOT EXISTS \`${tableId}\` (`,
+    columns,
+    ")",
+    "PARTITION BY DATE(updated_at)",
+    "CLUSTER BY status, priority, lane, symbol",
+    'OPTIONS(description="Research task state exported from wealth dashboard");',
+    "",
+  ].join("\n");
 }
 
 export function buildResearchTaskLifecycle({

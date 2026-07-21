@@ -15,10 +15,16 @@ type ResearchTaskBoardSectionProps = {
   summary: ResearchTaskSummary;
   lifecycle: ResearchTaskLifecycle;
   taskOverrides: ResearchTaskOverride[];
-  onTaskOverrideChange: (taskId: string, patch: Partial<Pick<ResearchTaskOverride, "status" | "owner" | "note">>) => void;
+  onTaskOverrideChange: (
+    taskId: string,
+    patch: Partial<Pick<ResearchTaskOverride, "status" | "owner" | "note">>,
+  ) => void;
   onResetTaskOverride: (taskId: string) => void;
   onExportResearchTaskCsv: () => void;
   onExportResearchTaskLifecycleCsv: () => void;
+  onExportResearchTaskSyncJson: () => void;
+  onExportResearchTaskBigQueryDdl: () => void;
+  onExportResearchTaskSchemaJson: () => void;
 };
 
 function statusBadgeClass(status: ResearchTaskStatus) {
@@ -50,6 +56,9 @@ export function ResearchTaskBoardSection({
   onResetTaskOverride,
   onExportResearchTaskCsv,
   onExportResearchTaskLifecycleCsv,
+  onExportResearchTaskSyncJson,
+  onExportResearchTaskBigQueryDdl,
+  onExportResearchTaskSchemaJson,
 }: ResearchTaskBoardSectionProps) {
   return (
     <section className="rounded-lg border border-slate-800 bg-slate-900/50 p-3 space-y-3">
@@ -70,6 +79,25 @@ export function ResearchTaskBoardSection({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <button
+            onClick={onExportResearchTaskSyncJson}
+            disabled={!tasks.length}
+            className="px-3 py-2 rounded-md bg-indigo-700 hover:bg-indigo-600 text-white text-xs font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+          >
+            同步 JSON
+          </button>
+          <button
+            onClick={onExportResearchTaskBigQueryDdl}
+            className="px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-bold"
+          >
+            BigQuery DDL
+          </button>
+          <button
+            onClick={onExportResearchTaskSchemaJson}
+            className="px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-bold"
+          >
+            Schema JSON
+          </button>
           <button
             onClick={onExportResearchTaskLifecycleCsv}
             className="px-3 py-2 rounded-md bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold"

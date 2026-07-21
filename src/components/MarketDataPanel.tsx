@@ -78,12 +78,16 @@ import {
 } from "@/lib/marketAlertEvents";
 import {
   applyResearchTaskOverrides,
+  buildResearchTaskSyncPayload,
   buildResearchTaskLifecycle,
   buildResearchTaskItems,
   buildResearchTaskSummary,
   loadResearchTaskOverridesFromStorage,
+  researchTaskBigQueryDdl,
+  researchTaskBigQuerySchemaJson,
   researchTaskCsv,
   researchTaskLifecycleCsv,
+  researchTaskSyncPayloadJson,
   writeResearchTaskOverridesToStorage,
   type ResearchTaskOverride,
 } from "@/lib/researchTaskWorkflow";
@@ -1504,6 +1508,35 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleExportResearchTaskSyncJson = () => {
+    if (!researchTaskItems.length) return;
+
+    downloadTextFile(
+      `bigquery-research-task-sync-${resultStamp()}.json`,
+      researchTaskSyncPayloadJson(
+        buildResearchTaskSyncPayload({
+          tasks: researchTaskItems,
+          lifecycle: researchTaskLifecycle,
+          generatedAt: decisionGeneratedAt,
+        }),
+      ),
+      "application/json;charset=utf-8",
+    );
+  };
+  const handleExportResearchTaskBigQueryDdl = () => {
+    downloadTextFile(
+      `bigquery-research-task-ddl-${resultStamp()}.sql`,
+      researchTaskBigQueryDdl(),
+      "text/plain;charset=utf-8",
+    );
+  };
+  const handleExportResearchTaskSchemaJson = () => {
+    downloadTextFile(
+      `bigquery-research-task-schema-${resultStamp()}.json`,
+      researchTaskBigQuerySchemaJson(),
+      "application/json;charset=utf-8",
+    );
+  };
   const handleResearchTaskOverrideChange = (
     taskId: string,
     patch: Partial<Pick<ResearchTaskOverride, "status" | "owner" | "note">>,
@@ -1909,6 +1942,9 @@ export function MarketDataPanel() {
             onResetTaskOverride={handleResetResearchTaskOverride}
             onExportResearchTaskCsv={handleExportResearchTaskCsv}
             onExportResearchTaskLifecycleCsv={handleExportResearchTaskLifecycleCsv}
+            onExportResearchTaskSyncJson={handleExportResearchTaskSyncJson}
+            onExportResearchTaskBigQueryDdl={handleExportResearchTaskBigQueryDdl}
+            onExportResearchTaskSchemaJson={handleExportResearchTaskSchemaJson}
           />
 
           {comparisonRows.length ? (
