@@ -29,7 +29,10 @@ except ImportError:
 
 DEFAULT_RESEARCH_TASK_TABLE = "research_tasks"
 RESEARCH_TASK_FIELD_NAMES = [
+    "workspace_id",
+    "actor_id",
     "task_id",
+    "idempotency_key",
     "generated_at",
     "updated_at",
     "lane",
@@ -52,6 +55,8 @@ RESEARCH_TASK_FIELD_NAMES = [
 RESEARCH_TASK_STATUSES = {"blocked", "active", "ready", "done"}
 RESEARCH_TASK_PRIORITIES = {"high", "medium", "low"}
 RESEARCH_TASK_LANES = {"data", "research", "risk", "allocation", "control"}
+DEFAULT_WORKSPACE_ID = "default"
+DEFAULT_ACTOR_ID = "system"
 
 
 def research_task_warehouse_status() -> Dict:
@@ -86,7 +91,7 @@ def sync_research_task_records(records: List[Dict]) -> Dict:
         errors = client.insert_rows_json(
             table_id,
             clean_records,
-            row_ids=[f"{row['task_id']}:{row['updated_at']}" for row in clean_records],
+            row_ids=[row["idempotency_key"] for row in clean_records],
         )
     except Exception as exc:
         raise MarketDataQueryError(f"BigQuery research task insert failed: {exc}") from exc
@@ -109,17 +114,30 @@ def sync_research_task_records(records: List[Dict]) -> Dict:
     }
 
 
-def load_latest_research_task_records(limit: int = 50) -> Dict:
+def load_latest_research_task_records(limit: int = 50, workspace_id: Optional[str] = None) -> Dict:
     bigquery = _bigquery_module()
     client = _bigquery_client(bigquery)
     table_id = _research_task_table_id()
     bounded_limit = max(1, min(int(limit or 50), 200))
+    clean_workspace_id = _normalize_key(workspace_id, DEFAULT_WORKSPACE_ID)
     if not _research_task_table_exists(client, table_id):
         return {
             "status": "missing",
             "table": table_id,
+            "workspaceId": clean_workspace_id,
             "limit": bounded_limit,
             "recordCount": 0,
+            "records": [],
+        }
+    missing_fields = _research_task_missing_fields(client, table_id)
+    if missing_fields:
+        return {
+            "status": "schema_outdated",
+            "table": table_id,
+            "workspaceId": clean_workspace_id,
+            "limit": bounded_limit,
+            "recordCount": 0,
+            "missingFields": missing_fields,
             "records": [],
         }
 
@@ -130,10 +148,11 @@ def load_latest_research_task_records(limit: int = 50) -> Dict:
         SELECT
             {field_list},
             ROW_NUMBER() OVER (
-                PARTITION BY task_id
+                PARTITION BY workspace_id, task_id
                 ORDER BY updated_at DESC, generated_at DESC
             ) AS row_number
         FROM `{table_id}`
+        WHERE workspace_id = @workspace_id
     )
     WHERE row_number = 1
     ORDER BY updated_at DESC, generated_at DESC
@@ -146,6 +165,7 @@ def load_latest_research_task_records(limit: int = 50) -> Dict:
                 query,
                 job_config=bigquery.QueryJobConfig(
                     query_parameters=[
+                        bigquery.ScalarQueryParameter("workspace_id", "STRING", clean_workspace_id),
                         bigquery.ScalarQueryParameter("limit", "INT64", bounded_limit),
                     ]
                 ),
@@ -157,6 +177,7 @@ def load_latest_research_task_records(limit: int = 50) -> Dict:
     return {
         "status": "loaded",
         "table": table_id,
+        "workspaceId": clean_workspace_id,
         "limit": bounded_limit,
         "recordCount": len(rows),
         "records": [_row_to_research_task_record(row) for row in rows],
@@ -166,8 +187,34 @@ def load_latest_research_task_records(limit: int = 50) -> Dict:
 def _ensure_research_task_table(bigquery, client) -> str:
     table_id = _research_task_table_id()
 
-    schema = [
+    schema = _research_task_schema(bigquery)
+    table = bigquery.Table(table_id, schema=schema)
+    table.time_partitioning = bigquery.TimePartitioning(
+        type_=bigquery.TimePartitioningType.DAY,
+        field="updated_at",
+    )
+    table.clustering_fields = ["workspace_id", "status", "priority", "lane"]
+
+    try:
+        client.create_table(table, exists_ok=True)
+        existing_table = client.get_table(table_id)
+        existing_fields = {field.name for field in existing_table.schema}
+        missing_fields = [field for field in schema if field.name not in existing_fields]
+        if missing_fields:
+            existing_table.schema = [*existing_table.schema, *missing_fields]
+            client.update_table(existing_table, ["schema"])
+    except Exception as exc:
+        raise MarketDataConfigError(f"BigQuery research task table could not be created: {exc}") from exc
+
+    return table_id
+
+
+def _research_task_schema(bigquery) -> List:
+    return [
+        bigquery.SchemaField("workspace_id", "STRING", description="Workspace or tenant id"),
+        bigquery.SchemaField("actor_id", "STRING", description="User or process that generated the sync"),
         bigquery.SchemaField("task_id", "STRING", mode="REQUIRED", description="Stable research task id"),
+        bigquery.SchemaField("idempotency_key", "STRING", description="Stable key for retry-safe inserts"),
         bigquery.SchemaField("generated_at", "TIMESTAMP", mode="REQUIRED", description="Dashboard generation timestamp"),
         bigquery.SchemaField("updated_at", "TIMESTAMP", mode="REQUIRED", description="Last task update timestamp"),
         bigquery.SchemaField("lane", "STRING", description="Task lane"),
@@ -187,19 +234,6 @@ def _ensure_research_task_table(bigquery, client) -> str:
         bigquery.SchemaField("blocker_count", "INT64", description="Blocked task count"),
         bigquery.SchemaField("ready_count", "INT64", description="Ready task count"),
     ]
-    table = bigquery.Table(table_id, schema=schema)
-    table.time_partitioning = bigquery.TimePartitioning(
-        type_=bigquery.TimePartitioningType.DAY,
-        field="updated_at",
-    )
-    table.clustering_fields = ["status", "priority", "lane", "symbol"]
-
-    try:
-        client.create_table(table, exists_ok=True)
-    except Exception as exc:
-        raise MarketDataConfigError(f"BigQuery research task table could not be created: {exc}") from exc
-
-    return table_id
 
 
 def _research_task_table_exists(client, table_id: str) -> bool:
@@ -212,7 +246,18 @@ def _research_task_table_exists(client, table_id: str) -> bool:
         raise MarketDataQueryError(f"BigQuery research task table lookup failed: {exc}") from exc
 
 
+def _research_task_missing_fields(client, table_id: str) -> List[str]:
+    try:
+        table = client.get_table(table_id)
+    except Exception as exc:
+        raise MarketDataQueryError(f"BigQuery research task schema lookup failed: {exc}") from exc
+    existing_fields = {field.name for field in table.schema}
+    return [field for field in RESEARCH_TASK_FIELD_NAMES if field not in existing_fields]
+
+
 def _normalize_research_task_record(record: Dict) -> Dict:
+    workspace_id = _normalize_key(record.get("workspace_id"), DEFAULT_WORKSPACE_ID)
+    actor_id = _normalize_key(record.get("actor_id"), DEFAULT_ACTOR_ID)
     task_id = _required_text(record, "task_id")
     generated_at = _required_text(record, "generated_at")
     updated_at = _required_text(record, "updated_at")
@@ -221,7 +266,10 @@ def _normalize_research_task_record(record: Dict) -> Dict:
     priority = _required_choice(record, "priority", RESEARCH_TASK_PRIORITIES)
 
     clean_record = {
+        "workspace_id": workspace_id,
+        "actor_id": actor_id,
         "task_id": task_id,
+        "idempotency_key": _optional_text(record, "idempotency_key") or f"{workspace_id}:{actor_id}:{task_id}:{updated_at}",
         "generated_at": generated_at,
         "updated_at": updated_at,
         "lane": lane,
@@ -266,6 +314,11 @@ def _research_task_table_name() -> str:
 def _research_task_table_id() -> str:
     project_id, dataset, _, _ = _settings()
     return f"{project_id}.{dataset}.{_research_task_table_name()}"
+
+
+def _normalize_key(value, fallback: str) -> str:
+    clean_value = str(value or fallback).strip().replace(" ", "-")[:80]
+    return clean_value or fallback
 
 
 def _required_text(record: Dict, field: str) -> str:

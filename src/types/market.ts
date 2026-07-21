@@ -359,7 +359,10 @@ export type ResearchTaskWarehouseStatus = {
 };
 
 export type ResearchTaskWarehouseSyncRecord = {
+  workspace_id: string;
+  actor_id: string;
   task_id: string;
+  idempotency_key: string;
   generated_at: string;
   updated_at: string;
   lane: string;
@@ -382,6 +385,8 @@ export type ResearchTaskWarehouseSyncRecord = {
 
 export type ResearchTaskWarehouseSyncPayload = {
   table: string;
+  workspace_id: string;
+  actor_id: string;
   generated_at: string;
   record_count: number;
   records: ResearchTaskWarehouseSyncRecord[];
@@ -399,9 +404,11 @@ export type ResearchTaskWarehouseSyncResponse = {
 
 export type ResearchTaskWarehouseLatestResponse = {
   generatedAt: string;
-  status: "loaded" | "missing" | string;
+  status: "loaded" | "missing" | "schema_outdated" | string;
   table: string;
+  workspaceId: string;
   limit: number;
   recordCount: number;
+  missingFields?: string[];
   records: ResearchTaskWarehouseSyncRecord[];
 };

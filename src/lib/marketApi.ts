@@ -71,9 +71,13 @@ export async function fetchResearchTaskWarehouseStatus(): Promise<ResearchTaskWa
   return response.json();
 }
 
-export async function fetchLatestResearchTasksFromBigQuery(limit = 50): Promise<ResearchTaskWarehouseLatestResponse> {
+export async function fetchLatestResearchTasksFromBigQuery(
+  limit = 50,
+  workspaceId = "default",
+): Promise<ResearchTaskWarehouseLatestResponse> {
   const params = new URLSearchParams({
     limit: String(limit),
+    workspace_id: workspaceId.trim() || "default",
   });
   const response = await fetch(`/api/v1/research/tasks/bigquery/latest?${params.toString()}`, {
     method: "GET",

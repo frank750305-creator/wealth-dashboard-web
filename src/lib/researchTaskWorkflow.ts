@@ -80,7 +80,10 @@ export type ResearchTaskOverride = {
 };
 
 export type ResearchTaskSyncRecord = {
+  workspace_id: string;
+  actor_id: string;
   task_id: string;
+  idempotency_key: string;
   generated_at: string;
   updated_at: string;
   lane: ResearchTaskLane;
@@ -103,6 +106,8 @@ export type ResearchTaskSyncRecord = {
 
 export type ResearchTaskSyncPayload = {
   table: string;
+  workspace_id: string;
+  actor_id: string;
   generated_at: string;
   record_count: number;
   records: ResearchTaskSyncRecord[];
@@ -124,7 +129,10 @@ const researchTaskOverrideStorageKey = "wealth-dashboard.researchTaskOverrides";
 const researchTaskWarehouseTable = "research_tasks";
 
 const researchTaskBigQueryFields = [
+  { name: "workspace_id", apiType: "STRING", sqlType: "STRING", mode: "NULLABLE", description: "Workspace or tenant id" },
+  { name: "actor_id", apiType: "STRING", sqlType: "STRING", mode: "NULLABLE", description: "User or process that generated the sync" },
   { name: "task_id", apiType: "STRING", sqlType: "STRING", mode: "REQUIRED", description: "Stable research task id" },
+  { name: "idempotency_key", apiType: "STRING", sqlType: "STRING", mode: "NULLABLE", description: "Stable key for retry-safe inserts" },
   { name: "generated_at", apiType: "TIMESTAMP", sqlType: "TIMESTAMP", mode: "REQUIRED", description: "Dashboard generation timestamp" },
   { name: "updated_at", apiType: "TIMESTAMP", sqlType: "TIMESTAMP", mode: "REQUIRED", description: "Last task update timestamp" },
   { name: "lane", apiType: "STRING", sqlType: "STRING", mode: "NULLABLE", description: "Task lane" },
@@ -162,6 +170,11 @@ function csvCell(value: unknown) {
 
 function isResearchTaskStatus(value: unknown): value is ResearchTaskStatus {
   return value === "blocked" || value === "active" || value === "ready" || value === "done";
+}
+
+function normalizeWarehouseKey(value: string | undefined, fallback: string) {
+  const cleanValue = (value || fallback).trim().replace(/\s+/g, "-").slice(0, 80);
+  return cleanValue || fallback;
 }
 
 function taskPriorityFromAlert(priority: MarketAlertPriority): ResearchTaskPriority {
@@ -493,13 +506,22 @@ export function buildResearchTaskSyncPayload({
   tasks,
   lifecycle,
   generatedAt,
+  workspaceId,
+  actorId,
 }: {
   tasks: ResearchTaskItem[];
   lifecycle: ResearchTaskLifecycle;
   generatedAt: string;
+  workspaceId?: string;
+  actorId?: string;
 }): ResearchTaskSyncPayload {
+  const cleanWorkspaceId = normalizeWarehouseKey(workspaceId, "default");
+  const cleanActorId = normalizeWarehouseKey(actorId, "system");
   const records = tasks.map((task) => ({
+    workspace_id: cleanWorkspaceId,
+    actor_id: cleanActorId,
     task_id: task.id,
+    idempotency_key: `${cleanWorkspaceId}:${cleanActorId}:${task.id}:${task.manuallyUpdatedAt ?? generatedAt}`,
     generated_at: generatedAt,
     updated_at: task.manuallyUpdatedAt ?? generatedAt,
     lane: task.lane,
@@ -522,6 +544,8 @@ export function buildResearchTaskSyncPayload({
 
   return {
     table: researchTaskWarehouseTable,
+    workspace_id: cleanWorkspaceId,
+    actor_id: cleanActorId,
     generated_at: generatedAt,
     record_count: records.length,
     records,
@@ -560,7 +584,7 @@ export function researchTaskBigQueryDdl(tableId = "project_id.dataset_name.resea
     columns,
     ")",
     "PARTITION BY DATE(updated_at)",
-    "CLUSTER BY status, priority, lane, symbol",
+    "CLUSTER BY workspace_id, status, priority, lane",
     'OPTIONS(description="Research task state exported from wealth dashboard");',
     "",
   ].join("\n");

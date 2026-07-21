@@ -16,8 +16,10 @@ type ResearchTaskBoardSectionProps = {
   lifecycle: ResearchTaskLifecycle;
   taskOverrides: ResearchTaskOverride[];
   hasBigQueryCredentials: boolean;
+  workspaceId: string;
   syncStatus: "idle" | "syncing" | "loading" | "synced" | "loaded" | "error";
   syncMessage: string;
+  onWorkspaceIdChange: (value: string) => void;
   onTaskOverrideChange: (
     taskId: string,
     patch: Partial<Pick<ResearchTaskOverride, "status" | "owner" | "note">>,
@@ -58,8 +60,10 @@ export function ResearchTaskBoardSection({
   lifecycle,
   taskOverrides,
   hasBigQueryCredentials,
+  workspaceId,
   syncStatus,
   syncMessage,
+  onWorkspaceIdChange,
   onTaskOverrideChange,
   onResetTaskOverride,
   onSyncResearchTasksToBigQuery,
@@ -89,6 +93,12 @@ export function ResearchTaskBoardSection({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <input
+            value={workspaceId}
+            onChange={(event) => onWorkspaceIdChange(event.target.value)}
+            placeholder="workspace"
+            className="min-w-[150px] rounded-md border border-slate-800 bg-slate-950 px-3 py-2 text-xs font-mono text-slate-100 outline-none placeholder:text-slate-700 focus:border-cyan-600"
+          />
           <button
             onClick={onSyncResearchTasksToBigQuery}
             disabled={!hasBigQueryCredentials || !tasks.length || syncStatus === "syncing" || syncStatus === "loading"}

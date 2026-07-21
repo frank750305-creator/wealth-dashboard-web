@@ -369,7 +369,10 @@ class PortfolioOptimizeBigQueryPayload(BaseModel):
     random_seed: int = 7
 
 class ResearchTaskSyncRecordPayload(BaseModel):
+    workspace_id: Optional[str] = None
+    actor_id: Optional[str] = None
     task_id: str
+    idempotency_key: Optional[str] = None
     generated_at: str
     updated_at: str
     lane: str
@@ -390,6 +393,8 @@ class ResearchTaskSyncRecordPayload(BaseModel):
     ready_count: int = 0
 
 class ResearchTaskSyncPayload(BaseModel):
+    workspace_id: Optional[str] = None
+    actor_id: Optional[str] = None
     generated_at: Optional[str] = None
     records: List[ResearchTaskSyncRecordPayload]
     lifecycle: Optional[Dict] = None
@@ -432,11 +437,11 @@ async def research_tasks_bigquery_status():
         raise HTTPException(status_code=exc.status_code, detail=str(exc))
 
 @app.get("/api/v1/research/tasks/bigquery/latest")
-async def latest_research_tasks_from_bigquery(limit: int = 50):
+async def latest_research_tasks_from_bigquery(limit: int = 50, workspace_id: Optional[str] = None):
     try:
         return {
             "generatedAt": datetime.now(timezone.utc).isoformat(),
-            **load_latest_research_task_records(limit=limit),
+            **load_latest_research_task_records(limit=limit, workspace_id=workspace_id),
         }
     except MarketDataError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc))
@@ -444,9 +449,15 @@ async def latest_research_tasks_from_bigquery(limit: int = 50):
 @app.post("/api/v1/research/tasks/bigquery/sync")
 async def sync_research_tasks_to_bigquery(payload: ResearchTaskSyncPayload):
     try:
+        records = []
+        for record in payload.records:
+            item = record.model_dump()
+            item["workspace_id"] = item.get("workspace_id") or payload.workspace_id
+            item["actor_id"] = item.get("actor_id") or payload.actor_id
+            records.append(item)
         return {
             "generatedAt": datetime.now(timezone.utc).isoformat(),
-            **sync_research_task_records([record.model_dump() for record in payload.records]),
+            **sync_research_task_records(records),
         }
     except MarketDataError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc))
