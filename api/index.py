@@ -49,6 +49,10 @@ try:
         load_latest_platform_exception_records,
         sync_platform_exception_records,
     )
+    from .sla_escalation_service import (
+        load_latest_sla_escalation_records,
+        sync_sla_escalation_records,
+    )
 except ImportError:
     from market_data_service import (
         MarketDataError,
@@ -91,6 +95,10 @@ except ImportError:
     from platform_exception_service import (
         load_latest_platform_exception_records,
         sync_platform_exception_records,
+    )
+    from sla_escalation_service import (
+        load_latest_sla_escalation_records,
+        sync_sla_escalation_records,
     )
 
 app = FastAPI(title="高資產傳承與所得稅擇優核算大腦", version="4.0_Ultimate")
@@ -257,6 +265,7 @@ async def platform_data_products():
                     "/api/v1/trading/fills",
                     "/api/v1/trading/post-trade-attribution",
                     "/api/v1/trading/platform-exceptions",
+                    "/api/v1/trading/sla-escalations",
                 ],
             },
         ],
@@ -713,6 +722,34 @@ class PlatformExceptionSyncPayload(BaseModel):
     generated_at: Optional[str] = None
     records: List[PlatformExceptionSyncRecordPayload]
 
+class SlaEscalationSyncRecordPayload(BaseModel):
+    workspace_id: Optional[str] = None
+    actor_id: Optional[str] = None
+    escalation_id: str
+    idempotency_key: Optional[str] = None
+    generated_at: str
+    updated_at: str
+    portfolio_id: Optional[str] = None
+    batch_id: Optional[str] = None
+    sla_critical_hours: int = 0
+    sla_review_hours: int = 0
+    tier: str
+    owner: str
+    trigger: str
+    status: str
+    priority: str
+    due: Optional[str] = None
+    escalation_path: Optional[str] = None
+    action: Optional[str] = None
+
+class SlaEscalationSyncPayload(BaseModel):
+    workspace_id: Optional[str] = None
+    actor_id: Optional[str] = None
+    portfolio_id: Optional[str] = None
+    batch_id: Optional[str] = None
+    generated_at: Optional[str] = None
+    records: List[SlaEscalationSyncRecordPayload]
+
 def calc_tw_tax(net_inc: float) -> float:
     if net_inc <= 56: return net_inc * 0.05
     elif net_inc <= 126: return net_inc * 0.12 - 3.92
@@ -1012,6 +1049,44 @@ async def sync_trading_platform_exceptions(payload: PlatformExceptionSyncPayload
         return {
             "generatedAt": datetime.now(timezone.utc).isoformat(),
             **sync_platform_exception_records(records),
+        }
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+@app.get("/api/v1/trading/sla-escalations")
+async def trading_sla_escalations(
+    workspace_id: Optional[str] = None,
+    portfolio_id: Optional[str] = None,
+    batch_id: Optional[str] = None,
+    limit: int = 100,
+):
+    try:
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            **load_latest_sla_escalation_records(
+                limit=limit,
+                workspace_id=workspace_id,
+                portfolio_id=portfolio_id,
+                batch_id=batch_id,
+            ),
+        }
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+@app.post("/api/v1/trading/sla-escalations")
+async def sync_trading_sla_escalations(payload: SlaEscalationSyncPayload):
+    try:
+        records = []
+        for record in payload.records:
+            item = record.model_dump()
+            item["workspace_id"] = item.get("workspace_id") or payload.workspace_id
+            item["actor_id"] = item.get("actor_id") or payload.actor_id
+            item["portfolio_id"] = item.get("portfolio_id") or payload.portfolio_id
+            item["batch_id"] = item.get("batch_id") or payload.batch_id
+            records.append(item)
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            **sync_sla_escalation_records(records),
         }
     except MarketDataError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc))

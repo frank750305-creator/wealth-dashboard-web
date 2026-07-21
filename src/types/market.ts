@@ -787,3 +787,57 @@ export type PlatformExceptionWarehouseLatestResponse = {
   missingFields?: string[];
   exceptions: PlatformExceptionWarehouseRecord[];
 };
+
+export type SlaEscalationWarehouseRecord = {
+  workspace_id: string;
+  actor_id: string;
+  escalation_id: string;
+  idempotency_key: string;
+  generated_at: string;
+  updated_at: string;
+  portfolio_id: string | null;
+  batch_id: string | null;
+  sla_critical_hours: number;
+  sla_review_hours: number;
+  tier: string;
+  owner: string;
+  trigger: string;
+  status: string;
+  priority: string;
+  due: string | null;
+  escalation_path: string | null;
+  action: string | null;
+};
+
+export type SlaEscalationWarehouseSyncPayload = {
+  table: string;
+  workspace_id: string;
+  actor_id: string;
+  portfolio_id: string;
+  batch_id: string;
+  generated_at: string;
+  record_count: number;
+  records: SlaEscalationWarehouseRecord[];
+};
+
+export type SlaEscalationWarehouseSyncResponse = {
+  generatedAt: string;
+  status: "synced" | "partial_error" | string;
+  table: string;
+  receivedCount: number;
+  insertedCount: number;
+  errors: unknown[];
+};
+
+export type SlaEscalationWarehouseLatestResponse = {
+  generatedAt: string;
+  status: "loaded" | "missing" | "schema_outdated" | string;
+  table: string;
+  workspaceId: string;
+  portfolioId?: string | null;
+  batchId?: string | null;
+  limit: number;
+  escalationCount: number;
+  missingFields?: string[];
+  escalations: SlaEscalationWarehouseRecord[];
+};

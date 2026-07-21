@@ -42,6 +42,7 @@ import {
   fetchLatestExecutionRoutesFromBigQuery,
   fetchLatestPlatformExceptionsFromBigQuery,
   fetchLatestPostTradeAttributionsFromBigQuery,
+  fetchLatestSlaEscalationsFromBigQuery,
   fetchLatestTradeTicketsFromBigQuery,
   fetchLatestResearchTasksFromBigQuery,
   fetchResearchTaskSyncAudit,
@@ -51,6 +52,7 @@ import {
   syncExecutionRoutesToBigQuery,
   syncPlatformExceptionsToBigQuery,
   syncPostTradeAttributionsToBigQuery,
+  syncSlaEscalationsToBigQuery,
   syncTradeTicketsToBigQuery,
   syncResearchTasksToBigQuery,
 } from "@/lib/marketApi";
@@ -132,6 +134,7 @@ import {
   buildCioOperatingBriefItems,
   buildDecisionFunnelStages,
   buildOperatingKriItems,
+  buildSlaEscalationSyncPayload,
   buildSlaEscalationItems,
   decisionFunnelCsv,
   operatingKriCsv,
@@ -378,6 +381,11 @@ export function MarketDataPanel() {
   >("idle");
   const [platformExceptionSyncMessage, setPlatformExceptionSyncMessage] = useState("");
   const [platformExceptionWarehouseCount, setPlatformExceptionWarehouseCount] = useState(0);
+  const [slaEscalationSyncStatus, setSlaEscalationSyncStatus] = useState<
+    "idle" | "syncing" | "loading" | "synced" | "loaded" | "error"
+  >("idle");
+  const [slaEscalationSyncMessage, setSlaEscalationSyncMessage] = useState("");
+  const [slaEscalationWarehouseCount, setSlaEscalationWarehouseCount] = useState(0);
   const [watchlistMemoCopyStatus, setWatchlistMemoCopyStatus] = useState<"idle" | "copied">("idle");
   const sources = data?.sources ?? [];
   const securedCount = sources.filter((source) => source.status !== "needs_secret").length;
@@ -1934,6 +1942,57 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleSyncSlaEscalationsToBigQuery = async () => {
+    if (!slaEscalationItems.length) return;
+
+    setSlaEscalationSyncStatus("syncing");
+    setSlaEscalationSyncMessage("SLA 升級同步中。");
+
+    try {
+      const result = await syncSlaEscalationsToBigQuery(
+        buildSlaEscalationSyncPayload({
+          items: slaEscalationItems,
+          generatedAt: decisionGeneratedAt,
+          workspaceId: researchTaskWorkspaceId,
+          actorId: riskOwner,
+          portfolioId: tradeTicketPortfolioId,
+          batchId: tradeTicketBatchId,
+          slaCriticalHours,
+          slaReviewHours,
+        }),
+      );
+      const isSynced = result.status === "synced";
+      setSlaEscalationSyncStatus(isSynced ? "synced" : "error");
+      setSlaEscalationWarehouseCount(result.insertedCount);
+      setSlaEscalationSyncMessage(`${result.insertedCount}/${result.receivedCount} 項 SLA 升級寫入 ${result.table}`);
+    } catch (err: unknown) {
+      setSlaEscalationSyncStatus("error");
+      setSlaEscalationSyncMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
+  const handleLoadSlaEscalationsFromBigQuery = async () => {
+    setSlaEscalationSyncStatus("loading");
+    setSlaEscalationSyncMessage("SLA 升級載入中。");
+
+    try {
+      const result = await fetchLatestSlaEscalationsFromBigQuery({
+        limit: 100,
+        workspaceId: researchTaskWorkspaceId,
+        portfolioId: tradeTicketPortfolioId,
+      });
+      if (result.status === "schema_outdated") {
+        setSlaEscalationSyncStatus("error");
+        setSlaEscalationSyncMessage(`SLA 升級表需先同步升級欄位：${result.missingFields?.join(", ") || "--"}`);
+        return;
+      }
+      setSlaEscalationWarehouseCount(result.escalationCount);
+      setSlaEscalationSyncStatus("loaded");
+      setSlaEscalationSyncMessage(`已讀取 ${result.escalationCount} 項 SLA 升級 ${result.workspaceId}`);
+    } catch (err: unknown) {
+      setSlaEscalationSyncStatus("error");
+      setSlaEscalationSyncMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
   const handleExportCioOperatingBriefCsv = () => {
     if (!cioOperatingBriefItems.length) return;
 
@@ -2853,6 +2912,12 @@ export function MarketDataPanel() {
                             onSlaCriticalHoursChange={setSlaCriticalHours}
                             slaReviewHours={slaReviewHours}
                             onSlaReviewHoursChange={setSlaReviewHours}
+                            hasBigQueryCredentials={hasBigQueryCredentials}
+                            syncStatus={slaEscalationSyncStatus}
+                            syncMessage={slaEscalationSyncMessage}
+                            warehouseEscalationCount={slaEscalationWarehouseCount}
+                            onSyncSlaEscalationsToBigQuery={handleSyncSlaEscalationsToBigQuery}
+                            onLoadSlaEscalationsFromBigQuery={handleLoadSlaEscalationsFromBigQuery}
                             onExportSlaEscalationCsv={handleExportSlaEscalationCsv}
                             slaEscalationItems={slaEscalationItems}
                             slaCriticalCount={slaCriticalCount}

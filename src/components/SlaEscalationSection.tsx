@@ -14,6 +14,12 @@ type SlaEscalationSectionProps = {
   onSlaCriticalHoursChange: (value: number) => void;
   slaReviewHours: number;
   onSlaReviewHoursChange: (value: number) => void;
+  hasBigQueryCredentials: boolean;
+  syncStatus: "idle" | "syncing" | "loading" | "synced" | "loaded" | "error";
+  syncMessage: string;
+  warehouseEscalationCount: number;
+  onSyncSlaEscalationsToBigQuery: () => void;
+  onLoadSlaEscalationsFromBigQuery: () => void;
   onExportSlaEscalationCsv: () => void;
   slaEscalationItems: SlaEscalationItem[];
   slaCriticalCount: number;
@@ -44,6 +50,12 @@ export function SlaEscalationSection({
   onSlaCriticalHoursChange,
   slaReviewHours,
   onSlaReviewHoursChange,
+  hasBigQueryCredentials,
+  syncStatus,
+  syncMessage,
+  warehouseEscalationCount,
+  onSyncSlaEscalationsToBigQuery,
+  onLoadSlaEscalationsFromBigQuery,
   onExportSlaEscalationCsv,
   slaEscalationItems,
   slaCriticalCount,
@@ -63,7 +75,7 @@ export function SlaEscalationSection({
             將例外事項與 CIO 狀態轉成處理時限、升級路徑與責任人
           </p>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-[100px_100px_auto] gap-2 text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-[100px_100px_repeat(3,auto)] gap-2 text-xs">
           <label className="space-y-1">
             <span className="text-slate-500">L1 小時</span>
             <input
@@ -89,6 +101,20 @@ export function SlaEscalationSection({
             />
           </label>
           <button
+            onClick={onSyncSlaEscalationsToBigQuery}
+            disabled={!hasBigQueryCredentials || !slaEscalationItems.length || syncStatus === "syncing" || syncStatus === "loading"}
+            className="sm:col-span-2 xl:col-span-1 xl:self-end px-3 py-2 rounded-md bg-cyan-700 hover:bg-cyan-600 text-white font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+          >
+            {syncStatus === "syncing" ? "同步中" : "同步 BigQuery"}
+          </button>
+          <button
+            onClick={onLoadSlaEscalationsFromBigQuery}
+            disabled={!hasBigQueryCredentials || syncStatus === "syncing" || syncStatus === "loading"}
+            className="sm:col-span-2 xl:col-span-1 xl:self-end px-3 py-2 rounded-md bg-sky-700 hover:bg-sky-600 text-white font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+          >
+            {syncStatus === "loading" ? "載入中" : "載入 BigQuery"}
+          </button>
+          <button
             onClick={onExportSlaEscalationCsv}
             disabled={!slaEscalationItems.length}
             className="sm:self-end px-3 py-2 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
@@ -97,13 +123,19 @@ export function SlaEscalationSection({
           </button>
         </div>
       </div>
+      {syncMessage ? (
+        <p className={`text-[11px] ${syncStatus === "error" ? "text-rose-300" : "text-slate-500"}`}>
+          {syncMessage}
+        </p>
+      ) : null}
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
         {[
           ["升級項目", `${slaEscalationItems.length} 項`],
           ["L1 立即", `${slaCriticalCount} 項`],
           ["L2 覆核", `${slaReviewCount} 項`],
           ["升級狀態", executionReviewLabel(slaEscalationDecision)],
+          ["倉儲 SLA", `${warehouseEscalationCount} 項`],
         ].map(([label, value]) => (
           <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 p-3 min-w-0">
             <p className="text-[11px] text-slate-600 truncate">{label}</p>

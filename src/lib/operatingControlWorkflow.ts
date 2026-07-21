@@ -11,6 +11,7 @@ import type {
   ExecutionReviewStatus,
   TradeTicketRow,
 } from "@/lib/tradeExecutionWorkflow";
+import type { SlaEscalationWarehouseSyncPayload } from "@/types/market";
 
 export type SlaEscalationTier = "critical" | "review" | "routine";
 
@@ -52,6 +53,11 @@ function csvCell(value: unknown) {
   const stringValue = String(value ?? "");
   if (/[",\n]/.test(stringValue)) return `"${stringValue.replaceAll('"', '""')}"`;
   return stringValue;
+}
+
+function normalizeWarehouseKey(value: string | undefined, fallback: string) {
+  const cleanValue = value?.trim();
+  return cleanValue || fallback;
 }
 
 function formatPercent(value: number | null | undefined) {
@@ -264,6 +270,66 @@ export function slaEscalationCsv(rows: SlaEscalationItem[]) {
   ]);
 
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+export function buildSlaEscalationSyncPayload({
+  items,
+  generatedAt,
+  workspaceId,
+  actorId,
+  portfolioId,
+  batchId,
+  slaCriticalHours,
+  slaReviewHours,
+}: {
+  items: SlaEscalationItem[];
+  generatedAt: string;
+  workspaceId?: string;
+  actorId?: string;
+  portfolioId?: string;
+  batchId?: string;
+  slaCriticalHours: number;
+  slaReviewHours: number;
+}): SlaEscalationWarehouseSyncPayload {
+  const cleanWorkspaceId = normalizeWarehouseKey(workspaceId, "default");
+  const cleanActorId = normalizeWarehouseKey(actorId, "system");
+  const cleanPortfolioId = normalizeWarehouseKey(portfolioId, "default-portfolio");
+  const cleanBatchId = normalizeWarehouseKey(batchId, generatedAt);
+  const records = items.map((item, index) => {
+    const escalationId = `${cleanPortfolioId}:${cleanBatchId}:SLA:${index + 1}`;
+
+    return {
+      workspace_id: cleanWorkspaceId,
+      actor_id: cleanActorId,
+      escalation_id: escalationId,
+      idempotency_key: `${cleanWorkspaceId}:${cleanActorId}:${escalationId}:${generatedAt}`,
+      generated_at: generatedAt,
+      updated_at: generatedAt,
+      portfolio_id: cleanPortfolioId,
+      batch_id: cleanBatchId,
+      sla_critical_hours: Math.max(1, Math.floor(slaCriticalHours)),
+      sla_review_hours: Math.max(1, Math.floor(slaReviewHours)),
+      tier: item.tier,
+      owner: item.owner,
+      trigger: item.trigger,
+      status: item.status,
+      priority: item.priority,
+      due: item.due,
+      escalation_path: item.escalationPath,
+      action: item.action,
+    };
+  });
+
+  return {
+    table: "sla_escalations",
+    workspace_id: cleanWorkspaceId,
+    actor_id: cleanActorId,
+    portfolio_id: cleanPortfolioId,
+    batch_id: cleanBatchId,
+    generated_at: generatedAt,
+    record_count: records.length,
+    records,
+  };
 }
 
 export function buildOperatingKriItems({
