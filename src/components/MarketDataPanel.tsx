@@ -37,11 +37,13 @@ import {
   fetchBigQueryAssetHistory,
   fetchBigQueryAssetProfile,
   fetchBigQueryAssets,
+  fetchLatestExecutionRouteEventsFromBigQuery,
   fetchLatestExecutionRoutesFromBigQuery,
   fetchLatestTradeTicketsFromBigQuery,
   fetchLatestResearchTasksFromBigQuery,
   fetchResearchTaskSyncAudit,
   fetchResearchTaskWarehouseStatus,
+  syncExecutionRouteEventsToBigQuery,
   syncExecutionRoutesToBigQuery,
   syncTradeTicketsToBigQuery,
   syncResearchTasksToBigQuery,
@@ -164,17 +166,21 @@ import {
 } from "@/lib/investmentCommitteeWorkflow";
 import {
   buildExecutionFillRows,
+  buildExecutionRouteEventRows,
+  buildExecutionRouteEventSyncPayload,
   buildExecutionRouteRows,
   buildExecutionRouteSyncPayload,
   buildTradeTicketApprovalGateItems,
   buildTradeTicketSyncPayload,
   executionFillCsv,
+  executionRouteEventCsv,
   executionRouteCsv,
   tradeBatchCsv,
   tradeBatchRows,
   tradeTicketApprovalGateCsv,
   tradeTicketCsv,
   tradeTicketRows,
+  type BrokerBoundaryMode,
   type ExecutionReviewStatus,
 } from "@/lib/tradeExecutionWorkflow";
 import type {
@@ -204,6 +210,7 @@ import { DecisionAuditSection } from "./DecisionAuditSection";
 import { EnterpriseReadinessSection } from "./EnterpriseReadinessSection";
 import { ExecutionFillSection } from "./ExecutionFillSection";
 import { ExecutionHandoffSection } from "./ExecutionHandoffSection";
+import { ExecutionRouteEventSection } from "./ExecutionRouteEventSection";
 import { ExecutionReviewSection } from "./ExecutionReviewSection";
 import { ExecutionRoutingSection } from "./ExecutionRoutingSection";
 import { MonitoringRulesSection } from "./MonitoringRulesSection";
@@ -310,6 +317,7 @@ export function MarketDataPanel() {
   const [venueCapacityAmount, setVenueCapacityAmount] = useState(500_000);
   const [routeSlippageBps, setRouteSlippageBps] = useState(6);
   const [routeCommissionBps, setRouteCommissionBps] = useState(2);
+  const [brokerBoundaryMode, setBrokerBoundaryMode] = useState<BrokerBoundaryMode>("paper");
   const [fillCompletionPercent, setFillCompletionPercent] = useState(100);
   const [fillSlippageBps, setFillSlippageBps] = useState(8);
   const [fillCommissionBps, setFillCommissionBps] = useState(3);
@@ -341,6 +349,11 @@ export function MarketDataPanel() {
   >("idle");
   const [executionRouteSyncMessage, setExecutionRouteSyncMessage] = useState("");
   const [executionRouteWarehouseCount, setExecutionRouteWarehouseCount] = useState(0);
+  const [executionRouteEventSyncStatus, setExecutionRouteEventSyncStatus] = useState<
+    "idle" | "syncing" | "loading" | "synced" | "loaded" | "error"
+  >("idle");
+  const [executionRouteEventSyncMessage, setExecutionRouteEventSyncMessage] = useState("");
+  const [executionRouteEventWarehouseCount, setExecutionRouteEventWarehouseCount] = useState(0);
   const [watchlistMemoCopyStatus, setWatchlistMemoCopyStatus] = useState<"idle" | "copied">("idle");
   const sources = data?.sources ?? [];
   const securedCount = sources.filter((source) => source.status !== "needs_secret").length;
@@ -837,7 +850,25 @@ export function MarketDataPanel() {
   const executionRouteRoutedCount = executionRouteRows.filter((row) => row.routeState === "routed").length;
   const estimatedRouteCost = executionRouteRows.reduce((sum, row) => sum + row.estimatedRouteCost, 0);
   const executionRouteDecision: ExecutionReviewStatus =
-    executionRouteBlockedCount > 0 ? "block" : executionRouteStagedCount > 0 ? "watch" : "pass";
+    !executionRouteRows.length ? "watch" : executionRouteBlockedCount > 0 ? "block" : executionRouteStagedCount > 0 ? "watch" : "pass";
+  const executionRouteEventRows = buildExecutionRouteEventRows({
+    routes: executionRouteRows,
+    generatedAt: decisionGeneratedAt,
+    actor: executionOwner,
+    brokerMode: brokerBoundaryMode,
+    approvalDecision: tradeTicketApprovalDecision,
+  });
+  const executionRouteEventBlockCount = executionRouteEventRows.filter((row) => row.eventStatus === "block").length;
+  const executionRouteEventWatchCount = executionRouteEventRows.filter((row) => row.eventStatus === "watch").length;
+  const executionRouteEventPassCount = executionRouteEventRows.filter((row) => row.eventStatus === "pass").length;
+  const executionRouteEventDecision: ExecutionReviewStatus =
+    !executionRouteEventRows.length
+      ? "watch"
+      : executionRouteEventBlockCount > 0
+        ? "block"
+        : executionRouteEventWatchCount > 0
+          ? "watch"
+          : "pass";
   const dataProductCatalogItems = buildDataProductCatalogItems({
     dataReadinessDecision,
     coverageUniverseDecision,
@@ -1591,6 +1622,15 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleExportExecutionRouteEventCsv = () => {
+    if (!executionRouteEventRows.length) return;
+
+    downloadTextFile(
+      `bigquery-execution-route-events-${resultStamp()}.csv`,
+      executionRouteEventCsv(executionRouteEventRows),
+      "text/csv;charset=utf-8",
+    );
+  };
   const handleSyncExecutionRoutesToBigQuery = async () => {
     if (!executionRouteRows.length) return;
 
@@ -1618,6 +1658,32 @@ export function MarketDataPanel() {
       setExecutionRouteSyncMessage(err instanceof Error ? err.message : String(err));
     }
   };
+  const handleSyncExecutionRouteEventsToBigQuery = async () => {
+    if (!executionRouteEventRows.length) return;
+
+    setExecutionRouteEventSyncStatus("syncing");
+    setExecutionRouteEventSyncMessage("路由事件同步中。");
+
+    try {
+      const result = await syncExecutionRouteEventsToBigQuery(
+        buildExecutionRouteEventSyncPayload({
+          events: executionRouteEventRows,
+          generatedAt: decisionGeneratedAt,
+          workspaceId: researchTaskWorkspaceId,
+          actorId: executionOwner,
+          portfolioId: tradeTicketPortfolioId,
+          batchId: tradeTicketBatchId,
+        }),
+      );
+      const isSynced = result.status === "synced";
+      setExecutionRouteEventSyncStatus(isSynced ? "synced" : "error");
+      setExecutionRouteEventWarehouseCount(result.insertedCount);
+      setExecutionRouteEventSyncMessage(`${result.insertedCount}/${result.receivedCount} 筆路由事件寫入 ${result.table}`);
+    } catch (err: unknown) {
+      setExecutionRouteEventSyncStatus("error");
+      setExecutionRouteEventSyncMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
   const handleLoadExecutionRoutesFromBigQuery = async () => {
     setExecutionRouteSyncStatus("loading");
     setExecutionRouteSyncMessage("執行路由載入中。");
@@ -1639,6 +1705,29 @@ export function MarketDataPanel() {
     } catch (err: unknown) {
       setExecutionRouteSyncStatus("error");
       setExecutionRouteSyncMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
+  const handleLoadExecutionRouteEventsFromBigQuery = async () => {
+    setExecutionRouteEventSyncStatus("loading");
+    setExecutionRouteEventSyncMessage("路由事件載入中。");
+
+    try {
+      const result = await fetchLatestExecutionRouteEventsFromBigQuery({
+        limit: 200,
+        workspaceId: researchTaskWorkspaceId,
+        portfolioId: tradeTicketPortfolioId,
+      });
+      if (result.status === "schema_outdated") {
+        setExecutionRouteEventSyncStatus("error");
+        setExecutionRouteEventSyncMessage(`路由事件表需先同步升級欄位：${result.missingFields?.join(", ") || "--"}`);
+        return;
+      }
+      setExecutionRouteEventWarehouseCount(result.eventCount);
+      setExecutionRouteEventSyncStatus("loaded");
+      setExecutionRouteEventSyncMessage(`已讀取 ${result.eventCount} 筆路由事件 ${result.workspaceId}`);
+    } catch (err: unknown) {
+      setExecutionRouteEventSyncStatus("error");
+      setExecutionRouteEventSyncMessage(err instanceof Error ? err.message : String(err));
     }
   };
   const handleExportExecutionFillCsv = () => {
@@ -2495,6 +2584,23 @@ export function MarketDataPanel() {
                             syncStatus={executionRouteSyncStatus}
                             syncMessage={executionRouteSyncMessage}
                             warehouseRouteCount={executionRouteWarehouseCount}
+                          />
+
+                          <ExecutionRouteEventSection
+                            brokerBoundaryMode={brokerBoundaryMode}
+                            onBrokerBoundaryModeChange={setBrokerBoundaryMode}
+                            eventRows={executionRouteEventRows}
+                            eventDecision={executionRouteEventDecision}
+                            eventPassCount={executionRouteEventPassCount}
+                            eventWatchCount={executionRouteEventWatchCount}
+                            eventBlockCount={executionRouteEventBlockCount}
+                            hasBigQueryCredentials={hasBigQueryCredentials}
+                            syncStatus={executionRouteEventSyncStatus}
+                            syncMessage={executionRouteEventSyncMessage}
+                            warehouseEventCount={executionRouteEventWarehouseCount}
+                            onSyncExecutionRouteEventsToBigQuery={handleSyncExecutionRouteEventsToBigQuery}
+                            onLoadExecutionRouteEventsFromBigQuery={handleLoadExecutionRouteEventsFromBigQuery}
+                            onExportExecutionRouteEventCsv={handleExportExecutionRouteEventCsv}
                           />
 
                           <ExecutionFillSection

@@ -44,8 +44,17 @@ except ImportError:
 
 
 DEFAULT_EXECUTION_ROUTE_TABLE = "execution_routes"
+DEFAULT_EXECUTION_ROUTE_EVENT_TABLE = "execution_route_events"
 EXECUTION_ROUTE_STATES = {"blocked", "staged", "routed"}
 EXECUTION_ROUTE_STATUSES = {"pass", "watch", "block"}
+EXECUTION_ROUTE_EVENT_TYPES = {
+    "route_created",
+    "approval_gate_checked",
+    "venue_assigned",
+    "broker_boundary_checked",
+    "paper_acknowledged",
+}
+BROKER_BOUNDARY_MODES = {"disabled", "paper", "manual_review"}
 EXECUTION_ROUTE_FIELD_NAMES = [
     "workspace_id",
     "actor_id",
@@ -74,6 +83,32 @@ EXECUTION_ROUTE_FIELD_NAMES = [
     "estimated_route_cost",
     "approval_decision",
     "route_note",
+]
+EXECUTION_ROUTE_EVENT_FIELD_NAMES = [
+    "workspace_id",
+    "actor_id",
+    "event_id",
+    "route_id",
+    "ticket_id",
+    "idempotency_key",
+    "generated_at",
+    "updated_at",
+    "event_time",
+    "portfolio_id",
+    "batch_id",
+    "route_sequence",
+    "event_sequence",
+    "symbol",
+    "direction",
+    "venue",
+    "route_state",
+    "route_status",
+    "event_type",
+    "event_status",
+    "broker_mode",
+    "source",
+    "evidence",
+    "next_action",
 ]
 
 
@@ -200,6 +235,126 @@ def load_latest_execution_route_records(
     }
 
 
+def sync_execution_route_event_records(records: List[Dict]) -> Dict:
+    if not records:
+        raise MarketDataError("Execution route event records are required.")
+    if len(records) > 2000:
+        raise MarketDataError("Execution route event sync supports at most 2000 records per request.")
+
+    bigquery = _bigquery_module()
+    client = _bigquery_client(bigquery)
+    table_id = _ensure_execution_route_event_table(bigquery, client)
+    clean_records = [_normalize_execution_route_event_record(record) for record in records]
+
+    try:
+        errors = client.insert_rows_json(
+            table_id,
+            clean_records,
+            row_ids=[row["idempotency_key"] for row in clean_records],
+        )
+    except Exception as exc:
+        raise MarketDataQueryError(f"BigQuery execution route event insert failed: {exc}") from exc
+
+    if errors:
+        return {
+            "status": "partial_error",
+            "table": table_id,
+            "receivedCount": len(records),
+            "insertedCount": 0,
+            "errors": errors[:5],
+        }
+
+    return {
+        "status": "synced",
+        "table": table_id,
+        "receivedCount": len(records),
+        "insertedCount": len(clean_records),
+        "errors": [],
+    }
+
+
+def load_latest_execution_route_event_records(
+    limit: int = 200,
+    workspace_id: Optional[str] = None,
+    portfolio_id: Optional[str] = None,
+    batch_id: Optional[str] = None,
+    route_id: Optional[str] = None,
+) -> Dict:
+    bigquery = _bigquery_module()
+    client = _bigquery_client(bigquery)
+    table_id = _execution_route_event_table_id()
+    bounded_limit = max(1, min(int(limit or 200), 2000))
+    clean_workspace_id = _normalize_key(workspace_id, DEFAULT_WORKSPACE_ID)
+    clean_portfolio_id = _optional_text({"portfolio_id": portfolio_id}, "portfolio_id")
+    clean_batch_id = _optional_text({"batch_id": batch_id}, "batch_id")
+    clean_route_id = _optional_text({"route_id": route_id}, "route_id")
+
+    if not _execution_route_event_table_exists(client, table_id):
+        return {
+            "status": "missing",
+            "table": table_id,
+            "workspaceId": clean_workspace_id,
+            "limit": bounded_limit,
+            "eventCount": 0,
+            "events": [],
+        }
+    missing_fields = _execution_route_event_missing_fields(client, table_id)
+    if missing_fields:
+        return {
+            "status": "schema_outdated",
+            "table": table_id,
+            "workspaceId": clean_workspace_id,
+            "limit": bounded_limit,
+            "eventCount": 0,
+            "missingFields": missing_fields,
+            "events": [],
+        }
+
+    conditions = ["workspace_id = @workspace_id"]
+    parameters = [bigquery.ScalarQueryParameter("workspace_id", "STRING", clean_workspace_id)]
+    if clean_portfolio_id:
+        conditions.append("portfolio_id = @portfolio_id")
+        parameters.append(bigquery.ScalarQueryParameter("portfolio_id", "STRING", clean_portfolio_id))
+    if clean_batch_id:
+        conditions.append("batch_id = @batch_id")
+        parameters.append(bigquery.ScalarQueryParameter("batch_id", "STRING", clean_batch_id))
+    if clean_route_id:
+        conditions.append("route_id = @route_id")
+        parameters.append(bigquery.ScalarQueryParameter("route_id", "STRING", clean_route_id))
+    parameters.append(bigquery.ScalarQueryParameter("limit", "INT64", bounded_limit))
+
+    field_list = ", ".join(EXECUTION_ROUTE_EVENT_FIELD_NAMES)
+    query = f"""
+    SELECT {field_list}
+    FROM `{table_id}`
+    WHERE {" AND ".join(conditions)}
+    ORDER BY event_time DESC, event_sequence DESC, route_sequence DESC
+    LIMIT @limit
+    """
+
+    try:
+        rows = list(
+            client.query(
+                query,
+                job_config=bigquery.QueryJobConfig(query_parameters=parameters),
+            ).result()
+        )
+    except Exception as exc:
+        raise MarketDataQueryError(f"BigQuery latest execution route event query failed: {exc}") from exc
+
+    return {
+        "status": "loaded",
+        "table": table_id,
+        "workspaceId": clean_workspace_id,
+        "portfolioId": clean_portfolio_id,
+        "batchId": clean_batch_id,
+        "routeId": clean_route_id,
+        "limit": bounded_limit,
+        "eventCount": len(rows),
+        "events": [_row_to_execution_route_event_record(row) for row in rows],
+    }
+
+
 def _ensure_execution_route_table(bigquery, client) -> str:
     table_id = _execution_route_table_id()
     schema = _execution_route_schema(bigquery)
@@ -220,6 +375,30 @@ def _ensure_execution_route_table(bigquery, client) -> str:
             client.update_table(existing_table, ["schema"])
     except Exception as exc:
         raise MarketDataConfigError(f"BigQuery execution route table could not be created: {exc}") from exc
+
+    return table_id
+
+
+def _ensure_execution_route_event_table(bigquery, client) -> str:
+    table_id = _execution_route_event_table_id()
+    schema = _execution_route_event_schema(bigquery)
+    table = bigquery.Table(table_id, schema=schema)
+    table.time_partitioning = bigquery.TimePartitioning(
+        type_=bigquery.TimePartitioningType.DAY,
+        field="event_time",
+    )
+    table.clustering_fields = ["workspace_id", "portfolio_id", "batch_id", "event_type"]
+
+    try:
+        client.create_table(table, exists_ok=True)
+        existing_table = client.get_table(table_id)
+        existing_fields = {field.name for field in existing_table.schema}
+        missing_fields = [field for field in schema if field.name not in existing_fields]
+        if missing_fields:
+            existing_table.schema = [*existing_table.schema, *missing_fields]
+            client.update_table(existing_table, ["schema"])
+    except Exception as exc:
+        raise MarketDataConfigError(f"BigQuery execution route event table could not be created: {exc}") from exc
 
     return table_id
 
@@ -256,6 +435,35 @@ def _execution_route_schema(bigquery) -> List:
     ]
 
 
+def _execution_route_event_schema(bigquery) -> List:
+    return [
+        bigquery.SchemaField("workspace_id", "STRING", description="Workspace or tenant id"),
+        bigquery.SchemaField("actor_id", "STRING", description="User or process that generated the event"),
+        bigquery.SchemaField("event_id", "STRING", mode="REQUIRED", description="Stable execution route event id"),
+        bigquery.SchemaField("route_id", "STRING", mode="REQUIRED", description="Linked execution route id"),
+        bigquery.SchemaField("ticket_id", "STRING", description="Linked trade ticket id"),
+        bigquery.SchemaField("idempotency_key", "STRING", description="Stable key for retry-safe inserts"),
+        bigquery.SchemaField("generated_at", "TIMESTAMP", mode="REQUIRED", description="Event batch generation timestamp"),
+        bigquery.SchemaField("updated_at", "TIMESTAMP", mode="REQUIRED", description="Last event update timestamp"),
+        bigquery.SchemaField("event_time", "TIMESTAMP", mode="REQUIRED", description="Event timestamp"),
+        bigquery.SchemaField("portfolio_id", "STRING", description="Portfolio or watchlist id"),
+        bigquery.SchemaField("batch_id", "STRING", description="Execution batch id"),
+        bigquery.SchemaField("route_sequence", "INT64", description="Route sequence across all batches"),
+        bigquery.SchemaField("event_sequence", "INT64", description="Event sequence for the route"),
+        bigquery.SchemaField("symbol", "STRING", description="Trade symbol"),
+        bigquery.SchemaField("direction", "STRING", description="Trade direction"),
+        bigquery.SchemaField("venue", "STRING", description="Execution venue or manual queue"),
+        bigquery.SchemaField("route_state", "STRING", description="Route lifecycle state"),
+        bigquery.SchemaField("route_status", "STRING", description="Route control status"),
+        bigquery.SchemaField("event_type", "STRING", description="Route event type"),
+        bigquery.SchemaField("event_status", "STRING", description="Event control status"),
+        bigquery.SchemaField("broker_mode", "STRING", description="Broker boundary mode"),
+        bigquery.SchemaField("source", "STRING", description="System source that generated the event"),
+        bigquery.SchemaField("evidence", "STRING", description="Event evidence"),
+        bigquery.SchemaField("next_action", "STRING", description="Next operational action"),
+    ]
+
+
 def _execution_route_table_exists(client, table_id: str) -> bool:
     try:
         client.get_table(table_id)
@@ -273,6 +481,25 @@ def _execution_route_missing_fields(client, table_id: str) -> List[str]:
         raise MarketDataQueryError(f"BigQuery execution route schema lookup failed: {exc}") from exc
     existing_fields = {field.name for field in table.schema}
     return [field for field in EXECUTION_ROUTE_FIELD_NAMES if field not in existing_fields]
+
+
+def _execution_route_event_table_exists(client, table_id: str) -> bool:
+    try:
+        client.get_table(table_id)
+        return True
+    except Exception as exc:
+        if exc.__class__.__name__ == "NotFound":
+            return False
+        raise MarketDataQueryError(f"BigQuery execution route event table lookup failed: {exc}") from exc
+
+
+def _execution_route_event_missing_fields(client, table_id: str) -> List[str]:
+    try:
+        table = client.get_table(table_id)
+    except Exception as exc:
+        raise MarketDataQueryError(f"BigQuery execution route event schema lookup failed: {exc}") from exc
+    existing_fields = {field.name for field in table.schema}
+    return [field for field in EXECUTION_ROUTE_EVENT_FIELD_NAMES if field not in existing_fields]
 
 
 def _normalize_execution_route_record(record: Dict) -> Dict:
@@ -314,10 +541,55 @@ def _normalize_execution_route_record(record: Dict) -> Dict:
     return {field: clean_record.get(field) for field in EXECUTION_ROUTE_FIELD_NAMES}
 
 
+def _normalize_execution_route_event_record(record: Dict) -> Dict:
+    workspace_id = _normalize_key(record.get("workspace_id"), DEFAULT_WORKSPACE_ID)
+    actor_id = _normalize_key(record.get("actor_id"), DEFAULT_ACTOR_ID)
+    event_id = _required_text(record, "event_id")
+    route_id = _required_text(record, "route_id")
+    generated_at = _required_text(record, "generated_at")
+    updated_at = _required_text(record, "updated_at")
+    event_time = _required_text(record, "event_time")
+
+    clean_record = {
+        "workspace_id": workspace_id,
+        "actor_id": actor_id,
+        "event_id": event_id,
+        "route_id": route_id,
+        "ticket_id": _optional_text(record, "ticket_id"),
+        "idempotency_key": _optional_text(record, "idempotency_key") or f"{workspace_id}:{actor_id}:{event_id}:{updated_at}",
+        "generated_at": generated_at,
+        "updated_at": updated_at,
+        "event_time": event_time,
+        "portfolio_id": _optional_text(record, "portfolio_id"),
+        "batch_id": _optional_text(record, "batch_id"),
+        "route_sequence": _int_value(record.get("route_sequence")),
+        "event_sequence": _int_value(record.get("event_sequence")),
+        "symbol": _required_text(record, "symbol"),
+        "direction": _required_choice(record, "direction", TRADE_TICKET_DIRECTIONS),
+        "venue": _required_text(record, "venue"),
+        "route_state": _required_choice(record, "route_state", EXECUTION_ROUTE_STATES),
+        "route_status": _required_choice(record, "route_status", EXECUTION_ROUTE_STATUSES),
+        "event_type": _required_choice(record, "event_type", EXECUTION_ROUTE_EVENT_TYPES),
+        "event_status": _required_choice(record, "event_status", EXECUTION_ROUTE_STATUSES),
+        "broker_mode": _required_choice(record, "broker_mode", BROKER_BOUNDARY_MODES),
+        "source": _required_text(record, "source"),
+        "evidence": _optional_text(record, "evidence"),
+        "next_action": _optional_text(record, "next_action"),
+    }
+    return {field: clean_record.get(field) for field in EXECUTION_ROUTE_EVENT_FIELD_NAMES}
+
+
 def _row_to_execution_route_record(row) -> Dict:
     return {
         field: _serializable_value(row.get(field))
         for field in EXECUTION_ROUTE_FIELD_NAMES
+    }
+
+
+def _row_to_execution_route_event_record(row) -> Dict:
+    return {
+        field: _serializable_value(row.get(field))
+        for field in EXECUTION_ROUTE_EVENT_FIELD_NAMES
     }
 
 
@@ -330,6 +602,17 @@ def _execution_route_table_name() -> str:
 def _execution_route_table_id() -> str:
     project_id, dataset, _, _ = _settings()
     return f"{project_id}.{dataset}.{_execution_route_table_name()}"
+
+
+def _execution_route_event_table_name() -> str:
+    table_name = os.getenv("BIGQUERY_EXECUTION_ROUTE_EVENT_TABLE", DEFAULT_EXECUTION_ROUTE_EVENT_TABLE)
+    _validate_identifier("BIGQUERY_EXECUTION_ROUTE_EVENT_TABLE", table_name)
+    return table_name
+
+
+def _execution_route_event_table_id() -> str:
+    project_id, dataset, _, _ = _settings()
+    return f"{project_id}.{dataset}.{_execution_route_event_table_name()}"
 
 
 def _int_value(value) -> int:

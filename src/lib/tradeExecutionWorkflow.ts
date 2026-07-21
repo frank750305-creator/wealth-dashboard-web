@@ -1,4 +1,5 @@
 import type {
+  ExecutionRouteEventWarehouseSyncPayload,
   ExecutionRouteWarehouseSyncPayload,
   TradeTicketWarehouseSyncPayload,
 } from "@/types/market";
@@ -60,6 +61,13 @@ export type TradeTicketApprovalGateItem = {
 };
 
 export type ExecutionRouteState = "blocked" | "staged" | "routed";
+export type BrokerBoundaryMode = "disabled" | "paper" | "manual_review";
+export type ExecutionRouteEventType =
+  | "route_created"
+  | "approval_gate_checked"
+  | "venue_assigned"
+  | "broker_boundary_checked"
+  | "paper_acknowledged";
 
 export type ExecutionRouteRow = TradeBatchRow & {
   routeId: string;
@@ -72,6 +80,27 @@ export type ExecutionRouteRow = TradeBatchRow & {
   estimatedCommissionBps: number;
   estimatedRouteCost: number;
   routeNote: string;
+};
+
+export type ExecutionRouteEventRow = {
+  eventId: string;
+  routeId: string;
+  ticketId: string;
+  routeSequence: number;
+  eventSequence: number;
+  symbol: string;
+  direction: RebalanceDirection;
+  venue: string;
+  routeState: ExecutionRouteState;
+  routeStatus: ExecutionReviewStatus;
+  eventType: ExecutionRouteEventType;
+  eventStatus: ExecutionReviewStatus;
+  brokerMode: BrokerBoundaryMode;
+  eventTime: string;
+  actor: string;
+  source: string;
+  evidence: string;
+  nextAction: string;
 };
 
 function normalizeWarehouseKey(value: string | undefined, fallback: string) {
@@ -99,6 +128,20 @@ export function executionRouteStateLabel(state: ExecutionRouteState) {
   if (state === "routed") return "已模擬路由";
   if (state === "staged") return "待人工確認";
   return "暫停路由";
+}
+
+export function brokerBoundaryModeLabel(mode: BrokerBoundaryMode) {
+  if (mode === "paper") return "Paper broker";
+  if (mode === "manual_review") return "Manual review";
+  return "Broker disabled";
+}
+
+export function executionRouteEventTypeLabel(type: ExecutionRouteEventType) {
+  if (type === "route_created") return "建立路由";
+  if (type === "approval_gate_checked") return "核准檢查";
+  if (type === "venue_assigned") return "Venue 指派";
+  if (type === "broker_boundary_checked") return "Broker 邊界檢查";
+  return "Paper ACK";
 }
 
 export function tradeTicketRows(rows: RebalanceDraftRow[], minimumTradeAmount: number): TradeTicketRow[] {
@@ -590,6 +633,212 @@ export function buildExecutionRouteSyncPayload({
 
   return {
     table: "execution_routes",
+    workspace_id: cleanWorkspaceId,
+    actor_id: cleanActorId,
+    portfolio_id: cleanPortfolioId,
+    batch_id: cleanBatchId,
+    generated_at: generatedAt,
+    record_count: records.length,
+    records,
+  };
+}
+
+function routeEventStatus({
+  routeStatus,
+  approvalDecision,
+  brokerMode,
+  eventType,
+}: {
+  routeStatus: ExecutionReviewStatus;
+  approvalDecision: ExecutionReviewStatus;
+  brokerMode: BrokerBoundaryMode;
+  eventType: ExecutionRouteEventType;
+}): ExecutionReviewStatus {
+  if (routeStatus === "block" || approvalDecision === "block") return "block";
+  if ((eventType === "broker_boundary_checked" || eventType === "paper_acknowledged") && brokerMode === "disabled") {
+    return "block";
+  }
+  if (routeStatus === "watch" || approvalDecision === "watch" || brokerMode === "manual_review") return "watch";
+  return "pass";
+}
+
+function routeEventNextAction(status: ExecutionReviewStatus, eventType: ExecutionRouteEventType, brokerMode: BrokerBoundaryMode) {
+  if (status === "block") {
+    return (eventType === "broker_boundary_checked" || eventType === "paper_acknowledged") && brokerMode === "disabled"
+      ? "先維持 broker adapter 關閉，不得送出真實委託"
+      : "先處理阻擋項目，再重新產生路由事件";
+  }
+  if (status === "watch") return "需人工覆核後才能進入下一步";
+  if (eventType === "paper_acknowledged") return "可保留 paper ack 作為稽核軌跡";
+  return "可進入下一個事件";
+}
+
+export function buildExecutionRouteEventRows({
+  routes,
+  generatedAt,
+  actor,
+  brokerMode,
+  approvalDecision,
+}: {
+  routes: ExecutionRouteRow[];
+  generatedAt: string;
+  actor: string;
+  brokerMode: BrokerBoundaryMode;
+  approvalDecision: ExecutionReviewStatus;
+}): ExecutionRouteEventRow[] {
+  const cleanActor = actor.trim() || "Execution operator";
+  const eventTypes: ExecutionRouteEventType[] = [
+    "route_created",
+    "approval_gate_checked",
+    "venue_assigned",
+    "broker_boundary_checked",
+    "paper_acknowledged",
+  ];
+
+  return routes.flatMap((route) => {
+    const ticketId = `${route.symbol}:${route.direction}`;
+    return eventTypes.map((eventType, eventIndex) => {
+      const eventStatus = routeEventStatus({
+        routeStatus: route.routeStatus,
+        approvalDecision,
+        brokerMode,
+        eventType,
+      });
+      const evidence =
+        eventType === "route_created"
+          ? `${route.routeState} / ${route.routeNotional.toLocaleString("zh-TW", { maximumFractionDigits: 0 })}`
+          : eventType === "approval_gate_checked"
+            ? `approval gate: ${executionReviewLabel(approvalDecision)}`
+            : eventType === "venue_assigned"
+              ? `${route.venue} / cost ${route.estimatedRouteCost.toLocaleString("zh-TW", { maximumFractionDigits: 0 })}`
+              : eventType === "broker_boundary_checked"
+                ? `${brokerBoundaryModeLabel(brokerMode)} / no live broker order`
+                : route.routeState === "routed"
+                  ? "paper ack only, no live broker submission"
+                  : "paper ack waiting for manual review";
+
+      return {
+        eventId: `${route.routeId}-EV-${eventIndex + 1}`,
+        routeId: route.routeId,
+        ticketId,
+        routeSequence: route.routeSequence,
+        eventSequence: eventIndex + 1,
+        symbol: route.symbol,
+        direction: route.direction,
+        venue: route.venue,
+        routeState: route.routeState,
+        routeStatus: route.routeStatus,
+        eventType,
+        eventStatus,
+        brokerMode,
+        eventTime: generatedAt,
+        actor: cleanActor,
+        source: "wealth-dashboard-route-boundary",
+        evidence,
+        nextAction: routeEventNextAction(eventStatus, eventType, brokerMode),
+      };
+    });
+  });
+}
+
+export function executionRouteEventCsv(rows: ExecutionRouteEventRow[]) {
+  const header = [
+    "event_id",
+    "route_id",
+    "ticket_id",
+    "route_sequence",
+    "event_sequence",
+    "symbol",
+    "direction",
+    "venue",
+    "route_state",
+    "route_status",
+    "event_type",
+    "event_status",
+    "broker_mode",
+    "event_time",
+    "actor",
+    "source",
+    "evidence",
+    "next_action",
+  ];
+  const csvRows = rows.map((row) => [
+    row.eventId,
+    row.routeId,
+    row.ticketId,
+    row.routeSequence,
+    row.eventSequence,
+    row.symbol,
+    row.direction,
+    row.venue,
+    executionRouteStateLabel(row.routeState),
+    executionReviewLabel(row.routeStatus),
+    executionRouteEventTypeLabel(row.eventType),
+    executionReviewLabel(row.eventStatus),
+    brokerBoundaryModeLabel(row.brokerMode),
+    row.eventTime,
+    row.actor,
+    row.source,
+    row.evidence,
+    row.nextAction,
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+export function buildExecutionRouteEventSyncPayload({
+  events,
+  generatedAt,
+  workspaceId,
+  actorId,
+  portfolioId,
+  batchId,
+}: {
+  events: ExecutionRouteEventRow[];
+  generatedAt: string;
+  workspaceId?: string;
+  actorId?: string;
+  portfolioId?: string;
+  batchId?: string;
+}): ExecutionRouteEventWarehouseSyncPayload {
+  const cleanWorkspaceId = normalizeWarehouseKey(workspaceId, "default");
+  const cleanActorId = normalizeWarehouseKey(actorId, "system");
+  const cleanPortfolioId = normalizeWarehouseKey(portfolioId, "default-portfolio");
+  const cleanBatchId = normalizeWarehouseKey(batchId, generatedAt);
+  const records = events.map((event) => {
+    const routeId = `${cleanPortfolioId}:${cleanBatchId}:${event.routeId}`;
+    const ticketId = `${cleanPortfolioId}:${cleanBatchId}:${event.ticketId}`;
+    const eventId = `${routeId}:${event.eventSequence}:${event.eventType}`;
+    return {
+      workspace_id: cleanWorkspaceId,
+      actor_id: cleanActorId,
+      event_id: eventId,
+      route_id: routeId,
+      ticket_id: ticketId,
+      idempotency_key: `${cleanWorkspaceId}:${cleanActorId}:${eventId}:${generatedAt}`,
+      generated_at: generatedAt,
+      updated_at: generatedAt,
+      event_time: event.eventTime,
+      portfolio_id: cleanPortfolioId,
+      batch_id: cleanBatchId,
+      route_sequence: event.routeSequence,
+      event_sequence: event.eventSequence,
+      symbol: event.symbol,
+      direction: event.direction,
+      venue: event.venue,
+      route_state: event.routeState,
+      route_status: event.routeStatus,
+      event_type: event.eventType,
+      event_status: event.eventStatus,
+      broker_mode: event.brokerMode,
+      source: event.source,
+      evidence: event.evidence,
+      next_action: event.nextAction,
+    };
+  });
+
+  return {
+    table: "execution_route_events",
     workspace_id: cleanWorkspaceId,
     actor_id: cleanActorId,
     portfolio_id: cleanPortfolioId,

@@ -7,6 +7,9 @@ import type {
   ExecutionRouteWarehouseLatestResponse,
   ExecutionRouteWarehouseSyncPayload,
   ExecutionRouteWarehouseSyncResponse,
+  ExecutionRouteEventWarehouseLatestResponse,
+  ExecutionRouteEventWarehouseSyncPayload,
+  ExecutionRouteEventWarehouseSyncResponse,
   MarketSourcesResponse,
   PortfolioAnalysisResponse,
   PortfolioAnalyzeBigQueryPayload,
@@ -228,6 +231,57 @@ export async function syncExecutionRoutesToBigQuery(
   if (!response.ok) {
     const errText = await response.text();
     throw new Error(`執行路由 BigQuery 同步異常 (代碼: ${response.status})\n${errText}`);
+  }
+
+  return response.json();
+}
+
+export async function fetchLatestExecutionRouteEventsFromBigQuery({
+  limit = 200,
+  workspaceId = "default",
+  portfolioId = "",
+  batchId = "",
+  routeId = "",
+}: {
+  limit?: number;
+  workspaceId?: string;
+  portfolioId?: string;
+  batchId?: string;
+  routeId?: string;
+}): Promise<ExecutionRouteEventWarehouseLatestResponse> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    workspace_id: workspaceId.trim() || "default",
+  });
+  if (portfolioId.trim()) params.set("portfolio_id", portfolioId.trim());
+  if (batchId.trim()) params.set("batch_id", batchId.trim());
+  if (routeId.trim()) params.set("route_id", routeId.trim());
+
+  const response = await fetch(`/api/v1/trading/route-events?${params.toString()}`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`路由事件 BigQuery 載入異常 (代碼: ${response.status})\n${errText}`);
+  }
+
+  return response.json();
+}
+
+export async function syncExecutionRouteEventsToBigQuery(
+  payload: ExecutionRouteEventWarehouseSyncPayload,
+): Promise<ExecutionRouteEventWarehouseSyncResponse> {
+  const response = await fetch("/api/v1/trading/route-events", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`路由事件 BigQuery 同步異常 (代碼: ${response.status})\n${errText}`);
   }
 
   return response.json();
