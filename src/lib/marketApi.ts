@@ -14,6 +14,9 @@ import type {
   ExecutionRouteEventWarehouseSyncPayload,
   ExecutionRouteEventWarehouseSyncResponse,
   MarketSourcesResponse,
+  OperatingKriWarehouseLatestResponse,
+  OperatingKriWarehouseSyncPayload,
+  OperatingKriWarehouseSyncResponse,
   PortfolioAnalysisResponse,
   PortfolioAnalyzeBigQueryPayload,
   PortfolioOptimizationResponse,
@@ -486,6 +489,54 @@ export async function syncSlaEscalationsToBigQuery(
   if (!response.ok) {
     const errText = await response.text();
     throw new Error(`SLA 升級 BigQuery 同步異常 (代碼: ${response.status})\n${errText}`);
+  }
+
+  return response.json();
+}
+
+export async function fetchLatestOperatingKriFromBigQuery({
+  limit = 100,
+  workspaceId = "default",
+  portfolioId = "",
+  batchId = "",
+}: {
+  limit?: number;
+  workspaceId?: string;
+  portfolioId?: string;
+  batchId?: string;
+}): Promise<OperatingKriWarehouseLatestResponse> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    workspace_id: workspaceId.trim() || "default",
+  });
+  if (portfolioId.trim()) params.set("portfolio_id", portfolioId.trim());
+  if (batchId.trim()) params.set("batch_id", batchId.trim());
+
+  const response = await fetch(`/api/v1/trading/operating-kri?${params.toString()}`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`營運 KRI BigQuery 載入異常 (代碼: ${response.status})\n${errText}`);
+  }
+
+  return response.json();
+}
+
+export async function syncOperatingKriToBigQuery(
+  payload: OperatingKriWarehouseSyncPayload,
+): Promise<OperatingKriWarehouseSyncResponse> {
+  const response = await fetch("/api/v1/trading/operating-kri", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`營運 KRI BigQuery 同步異常 (代碼: ${response.status})\n${errText}`);
   }
 
   return response.json();

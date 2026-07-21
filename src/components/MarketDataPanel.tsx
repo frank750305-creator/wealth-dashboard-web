@@ -40,6 +40,7 @@ import {
   fetchLatestExecutionFillsFromBigQuery,
   fetchLatestExecutionRouteEventsFromBigQuery,
   fetchLatestExecutionRoutesFromBigQuery,
+  fetchLatestOperatingKriFromBigQuery,
   fetchLatestPlatformExceptionsFromBigQuery,
   fetchLatestPostTradeAttributionsFromBigQuery,
   fetchLatestSlaEscalationsFromBigQuery,
@@ -50,6 +51,7 @@ import {
   syncExecutionFillsToBigQuery,
   syncExecutionRouteEventsToBigQuery,
   syncExecutionRoutesToBigQuery,
+  syncOperatingKriToBigQuery,
   syncPlatformExceptionsToBigQuery,
   syncPostTradeAttributionsToBigQuery,
   syncSlaEscalationsToBigQuery,
@@ -134,6 +136,7 @@ import {
   buildCioOperatingBriefItems,
   buildDecisionFunnelStages,
   buildOperatingKriItems,
+  buildOperatingKriSyncPayload,
   buildSlaEscalationSyncPayload,
   buildSlaEscalationItems,
   decisionFunnelCsv,
@@ -386,6 +389,11 @@ export function MarketDataPanel() {
   >("idle");
   const [slaEscalationSyncMessage, setSlaEscalationSyncMessage] = useState("");
   const [slaEscalationWarehouseCount, setSlaEscalationWarehouseCount] = useState(0);
+  const [operatingKriSyncStatus, setOperatingKriSyncStatus] = useState<
+    "idle" | "syncing" | "loading" | "synced" | "loaded" | "error"
+  >("idle");
+  const [operatingKriSyncMessage, setOperatingKriSyncMessage] = useState("");
+  const [operatingKriWarehouseCount, setOperatingKriWarehouseCount] = useState(0);
   const [watchlistMemoCopyStatus, setWatchlistMemoCopyStatus] = useState<"idle" | "copied">("idle");
   const sources = data?.sources ?? [];
   const securedCount = sources.filter((source) => source.status !== "needs_secret").length;
@@ -1993,6 +2001,59 @@ export function MarketDataPanel() {
       setSlaEscalationSyncMessage(err instanceof Error ? err.message : String(err));
     }
   };
+  const handleSyncOperatingKriToBigQuery = async () => {
+    if (!operatingKriItems.length) return;
+
+    setOperatingKriSyncStatus("syncing");
+    setOperatingKriSyncMessage("營運 KRI 同步中。");
+
+    try {
+      const result = await syncOperatingKriToBigQuery(
+        buildOperatingKriSyncPayload({
+          items: operatingKriItems,
+          generatedAt: decisionGeneratedAt,
+          workspaceId: researchTaskWorkspaceId,
+          actorId: riskOwner,
+          portfolioId: tradeTicketPortfolioId,
+          batchId: tradeTicketBatchId,
+          totalExecutionCost,
+          totalUnfilledNotional,
+          blockCount: operatingKriBlockCount,
+          watchCount: operatingKriWatchCount,
+        }),
+      );
+      const isSynced = result.status === "synced";
+      setOperatingKriSyncStatus(isSynced ? "synced" : "error");
+      setOperatingKriWarehouseCount(result.insertedCount);
+      setOperatingKriSyncMessage(`${result.insertedCount}/${result.receivedCount} 項營運 KRI 寫入 ${result.table}`);
+    } catch (err: unknown) {
+      setOperatingKriSyncStatus("error");
+      setOperatingKriSyncMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
+  const handleLoadOperatingKriFromBigQuery = async () => {
+    setOperatingKriSyncStatus("loading");
+    setOperatingKriSyncMessage("營運 KRI 載入中。");
+
+    try {
+      const result = await fetchLatestOperatingKriFromBigQuery({
+        limit: 100,
+        workspaceId: researchTaskWorkspaceId,
+        portfolioId: tradeTicketPortfolioId,
+      });
+      if (result.status === "schema_outdated") {
+        setOperatingKriSyncStatus("error");
+        setOperatingKriSyncMessage(`營運 KRI 表需先同步升級欄位：${result.missingFields?.join(", ") || "--"}`);
+        return;
+      }
+      setOperatingKriWarehouseCount(result.kriCount);
+      setOperatingKriSyncStatus("loaded");
+      setOperatingKriSyncMessage(`已讀取 ${result.kriCount} 項營運 KRI ${result.workspaceId}`);
+    } catch (err: unknown) {
+      setOperatingKriSyncStatus("error");
+      setOperatingKriSyncMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
   const handleExportCioOperatingBriefCsv = () => {
     if (!cioOperatingBriefItems.length) return;
 
@@ -2926,6 +2987,12 @@ export function MarketDataPanel() {
 
                           <OperatingKriSection
                             operatingKriDecision={operatingKriDecision}
+                            hasBigQueryCredentials={hasBigQueryCredentials}
+                            syncStatus={operatingKriSyncStatus}
+                            syncMessage={operatingKriSyncMessage}
+                            warehouseKriCount={operatingKriWarehouseCount}
+                            onSyncOperatingKriToBigQuery={handleSyncOperatingKriToBigQuery}
+                            onLoadOperatingKriFromBigQuery={handleLoadOperatingKriFromBigQuery}
                             onExportOperatingKriCsv={handleExportOperatingKriCsv}
                             operatingKriItems={operatingKriItems}
                             operatingKriBlockCount={operatingKriBlockCount}

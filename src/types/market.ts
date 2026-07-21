@@ -841,3 +841,59 @@ export type SlaEscalationWarehouseLatestResponse = {
   missingFields?: string[];
   escalations: SlaEscalationWarehouseRecord[];
 };
+
+export type OperatingKriWarehouseRecord = {
+  workspace_id: string;
+  actor_id: string;
+  kri_id: string;
+  idempotency_key: string;
+  generated_at: string;
+  updated_at: string;
+  portfolio_id: string | null;
+  batch_id: string | null;
+  metric_key: string;
+  label: string;
+  status: string;
+  value: string | null;
+  limit_text: string | null;
+  owner: string | null;
+  note: string | null;
+  total_execution_cost: number;
+  total_unfilled_notional: number;
+  block_count: number;
+  watch_count: number;
+  source: string;
+};
+
+export type OperatingKriWarehouseSyncPayload = {
+  table: string;
+  workspace_id: string;
+  actor_id: string;
+  portfolio_id: string;
+  batch_id: string;
+  generated_at: string;
+  record_count: number;
+  records: OperatingKriWarehouseRecord[];
+};
+
+export type OperatingKriWarehouseSyncResponse = {
+  generatedAt: string;
+  status: "synced" | "partial_error" | string;
+  table: string;
+  receivedCount: number;
+  insertedCount: number;
+  errors: unknown[];
+};
+
+export type OperatingKriWarehouseLatestResponse = {
+  generatedAt: string;
+  status: "loaded" | "missing" | "schema_outdated" | string;
+  table: string;
+  workspaceId: string;
+  portfolioId?: string | null;
+  batchId?: string | null;
+  limit: number;
+  kriCount: number;
+  missingFields?: string[];
+  kri: OperatingKriWarehouseRecord[];
+};

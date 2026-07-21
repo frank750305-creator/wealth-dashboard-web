@@ -11,7 +11,10 @@ import type {
   ExecutionReviewStatus,
   TradeTicketRow,
 } from "@/lib/tradeExecutionWorkflow";
-import type { SlaEscalationWarehouseSyncPayload } from "@/types/market";
+import type {
+  OperatingKriWarehouseSyncPayload,
+  SlaEscalationWarehouseSyncPayload,
+} from "@/types/market";
 
 export type SlaEscalationTier = "critical" | "review" | "routine";
 
@@ -456,6 +459,87 @@ export function operatingKriCsv(rows: OperatingKriItem[]) {
   ]);
 
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+const OPERATING_KRI_METRIC_KEYS: Record<string, string> = {
+  資料新鮮度: "data_freshness",
+  壓力損失: "stress_loss",
+  未成交殘單: "unfilled_residual",
+  交易成本: "execution_cost",
+  例外事項: "platform_exceptions",
+  "SLA 升級": "sla_escalation",
+  投後復盤: "post_trade_review",
+};
+
+function operatingKriMetricKey(label: string, index: number) {
+  return OPERATING_KRI_METRIC_KEYS[label] ?? `kri_${index + 1}`;
+}
+
+export function buildOperatingKriSyncPayload({
+  items,
+  generatedAt,
+  workspaceId,
+  actorId,
+  portfolioId,
+  batchId,
+  totalExecutionCost,
+  totalUnfilledNotional,
+  blockCount,
+  watchCount,
+}: {
+  items: OperatingKriItem[];
+  generatedAt: string;
+  workspaceId?: string;
+  actorId?: string;
+  portfolioId?: string;
+  batchId?: string;
+  totalExecutionCost: number;
+  totalUnfilledNotional: number;
+  blockCount: number;
+  watchCount: number;
+}): OperatingKriWarehouseSyncPayload {
+  const cleanWorkspaceId = normalizeWarehouseKey(workspaceId, "default");
+  const cleanActorId = normalizeWarehouseKey(actorId, "system");
+  const cleanPortfolioId = normalizeWarehouseKey(portfolioId, "default-portfolio");
+  const cleanBatchId = normalizeWarehouseKey(batchId, generatedAt);
+  const records = items.map((item, index) => {
+    const metricKey = operatingKriMetricKey(item.label, index);
+    const kriId = `${cleanPortfolioId}:${cleanBatchId}:KRI:${metricKey}`;
+
+    return {
+      workspace_id: cleanWorkspaceId,
+      actor_id: cleanActorId,
+      kri_id: kriId,
+      idempotency_key: `${cleanWorkspaceId}:${cleanActorId}:${kriId}:${generatedAt}`,
+      generated_at: generatedAt,
+      updated_at: generatedAt,
+      portfolio_id: cleanPortfolioId,
+      batch_id: cleanBatchId,
+      metric_key: metricKey,
+      label: item.label,
+      status: item.status,
+      value: item.value,
+      limit_text: item.limit,
+      owner: item.owner,
+      note: item.note,
+      total_execution_cost: totalExecutionCost,
+      total_unfilled_notional: totalUnfilledNotional,
+      block_count: blockCount,
+      watch_count: watchCount,
+      source: "operating_kri",
+    };
+  });
+
+  return {
+    table: "operating_kri",
+    workspace_id: cleanWorkspaceId,
+    actor_id: cleanActorId,
+    portfolio_id: cleanPortfolioId,
+    batch_id: cleanBatchId,
+    generated_at: generatedAt,
+    record_count: records.length,
+    records,
+  };
 }
 
 function funnelConversionText(count: number, total: number) {
