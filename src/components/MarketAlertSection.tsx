@@ -14,8 +14,18 @@ type MarketAlertSectionProps = {
   syncStatus: "idle" | "syncing" | "loading" | "synced" | "loaded" | "error";
   syncMessage: string;
   warehouseAlertCount: number;
+  ownerQueueSyncStatus: "idle" | "syncing" | "loading" | "synced" | "loaded" | "error";
+  ownerQueueSyncMessage: string;
+  warehouseOwnerQueueCount: number;
+  runbookSyncStatus: "idle" | "syncing" | "loading" | "synced" | "loaded" | "error";
+  runbookSyncMessage: string;
+  warehouseRunbookCount: number;
   onSyncMarketAlertsToBigQuery: () => void;
   onLoadMarketAlertsFromBigQuery: () => void;
+  onSyncMarketAlertOwnerQueuesToBigQuery: () => void;
+  onLoadMarketAlertOwnerQueuesFromBigQuery: () => void;
+  onSyncMarketAlertRunbooksToBigQuery: () => void;
+  onLoadMarketAlertRunbooksFromBigQuery: () => void;
   onExportMarketAlertCsv: () => void;
   onExportMarketAlertCommandSummaryCsv: () => void;
   onExportMarketAlertOwnerQueueCsv: () => void;
@@ -65,8 +75,18 @@ export function MarketAlertSection({
   syncStatus,
   syncMessage,
   warehouseAlertCount,
+  ownerQueueSyncStatus,
+  ownerQueueSyncMessage,
+  warehouseOwnerQueueCount,
+  runbookSyncStatus,
+  runbookSyncMessage,
+  warehouseRunbookCount,
   onSyncMarketAlertsToBigQuery,
   onLoadMarketAlertsFromBigQuery,
+  onSyncMarketAlertOwnerQueuesToBigQuery,
+  onLoadMarketAlertOwnerQueuesFromBigQuery,
+  onSyncMarketAlertRunbooksToBigQuery,
+  onLoadMarketAlertRunbooksFromBigQuery,
   onExportMarketAlertCsv,
   onExportMarketAlertCommandSummaryCsv,
   onExportMarketAlertOwnerQueueCsv,
@@ -141,6 +161,50 @@ export function MarketAlertSection({
           {syncMessage}
         </p>
       ) : null}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 text-xs">
+        <button
+          onClick={onSyncMarketAlertOwnerQueuesToBigQuery}
+          disabled={!hasBigQueryCredentials || !marketAlertOwnerQueues.length || ownerQueueSyncStatus === "syncing" || ownerQueueSyncStatus === "loading"}
+          className="px-3 py-2 rounded-md bg-cyan-700 hover:bg-cyan-600 text-white font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+        >
+          {ownerQueueSyncStatus === "syncing" ? "分派同步中" : "同步分派"}
+        </button>
+        <button
+          onClick={onLoadMarketAlertOwnerQueuesFromBigQuery}
+          disabled={!hasBigQueryCredentials || ownerQueueSyncStatus === "syncing" || ownerQueueSyncStatus === "loading"}
+          className="px-3 py-2 rounded-md bg-sky-700 hover:bg-sky-600 text-white font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+        >
+          {ownerQueueSyncStatus === "loading" ? "分派載入中" : "載入分派"}
+        </button>
+        <button
+          onClick={onSyncMarketAlertRunbooksToBigQuery}
+          disabled={!hasBigQueryCredentials || !marketAlertRunbookItems.length || runbookSyncStatus === "syncing" || runbookSyncStatus === "loading"}
+          className="px-3 py-2 rounded-md bg-cyan-700 hover:bg-cyan-600 text-white font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+        >
+          {runbookSyncStatus === "syncing" ? "Runbook 同步中" : "同步 Runbook"}
+        </button>
+        <button
+          onClick={onLoadMarketAlertRunbooksFromBigQuery}
+          disabled={!hasBigQueryCredentials || runbookSyncStatus === "syncing" || runbookSyncStatus === "loading"}
+          className="px-3 py-2 rounded-md bg-sky-700 hover:bg-sky-600 text-white font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+        >
+          {runbookSyncStatus === "loading" ? "Runbook 載入中" : "載入 Runbook"}
+        </button>
+      </div>
+      {ownerQueueSyncMessage || runbookSyncMessage ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px]">
+          {ownerQueueSyncMessage ? (
+            <p className={ownerQueueSyncStatus === "error" ? "text-rose-300" : "text-slate-500"}>
+              {ownerQueueSyncMessage}
+            </p>
+          ) : null}
+          {runbookSyncMessage ? (
+            <p className={runbookSyncStatus === "error" ? "text-rose-300" : "text-slate-500"}>
+              {runbookSyncMessage}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className={`rounded-md border p-3 ${executionReviewRowClass(marketAlertCommandSummary.status)}`}>
         <div className="flex flex-col xl:flex-row xl:items-start justify-between gap-3">
@@ -187,7 +251,7 @@ export function MarketAlertSection({
           ["事件數", `${marketAlertEvents.length} 筆`],
           ["高 / 中優先", `${marketHighAlertCount} / ${marketMediumAlertCount}`],
           ["待處理例外", `${platformExceptionCount} 項`],
-          ["倉儲警示", `${warehouseAlertCount} 筆`],
+          ["倉儲 警示/分派/Runbook", `${warehouseAlertCount} / ${warehouseOwnerQueueCount} / ${warehouseRunbookCount}`],
         ].map(([label, value]) => (
           <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 p-3 min-w-0">
             <p className="text-[11px] text-slate-600 truncate">{label}</p>

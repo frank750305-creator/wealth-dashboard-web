@@ -1027,3 +1027,122 @@ export type MarketAlertWarehouseLatestResponse = {
   missingFields?: string[];
   alerts: MarketAlertWarehouseRecord[];
 };
+
+export type MarketAlertOwnerQueueWarehouseRecord = {
+  workspace_id: string;
+  actor_id: string;
+  queue_id: string;
+  idempotency_key: string;
+  generated_at: string;
+  updated_at: string;
+  portfolio_id: string | null;
+  batch_id: string | null;
+  owner: string;
+  status: string;
+  priority: string;
+  total: number;
+  high: number;
+  medium: number;
+  low: number;
+  block: number;
+  watch: number;
+  pass_count: number;
+  top_source: string | null;
+  next_action: string | null;
+  command_status: string;
+  command_priority: string;
+  total_alerts: number;
+  source_system: string;
+};
+
+export type MarketAlertOwnerQueueWarehouseSyncPayload = {
+  table: string;
+  workspace_id: string;
+  actor_id: string;
+  portfolio_id: string;
+  batch_id: string;
+  generated_at: string;
+  record_count: number;
+  records: MarketAlertOwnerQueueWarehouseRecord[];
+};
+
+export type MarketAlertOwnerQueueWarehouseSyncResponse = {
+  generatedAt: string;
+  status: "synced" | "partial_error" | string;
+  table: string;
+  receivedCount: number;
+  insertedCount: number;
+  errors: unknown[];
+};
+
+export type MarketAlertOwnerQueueWarehouseLatestResponse = {
+  generatedAt: string;
+  status: "loaded" | "missing" | "schema_outdated" | string;
+  table: string;
+  workspaceId: string;
+  portfolioId?: string | null;
+  batchId?: string | null;
+  limit: number;
+  queueCount: number;
+  missingFields?: string[];
+  queues: MarketAlertOwnerQueueWarehouseRecord[];
+};
+
+export type MarketAlertRunbookWarehouseRecord = {
+  workspace_id: string;
+  actor_id: string;
+  runbook_id: string;
+  idempotency_key: string;
+  generated_at: string;
+  updated_at: string;
+  portfolio_id: string | null;
+  batch_id: string | null;
+  source: string;
+  title: string;
+  status: string;
+  priority: string;
+  owner: string | null;
+  deadline: string | null;
+  trigger: string | null;
+  diagnose: string | null;
+  resolve: string | null;
+  verify: string | null;
+  escalation: string | null;
+  command_status: string;
+  command_priority: string;
+  total_alerts: number;
+  source_system: string;
+};
+
+export type MarketAlertRunbookWarehouseSyncPayload = {
+  table: string;
+  workspace_id: string;
+  actor_id: string;
+  portfolio_id: string;
+  batch_id: string;
+  generated_at: string;
+  record_count: number;
+  records: MarketAlertRunbookWarehouseRecord[];
+};
+
+export type MarketAlertRunbookWarehouseSyncResponse = {
+  generatedAt: string;
+  status: "synced" | "partial_error" | string;
+  table: string;
+  receivedCount: number;
+  insertedCount: number;
+  errors: unknown[];
+};
+
+export type MarketAlertRunbookWarehouseLatestResponse = {
+  generatedAt: string;
+  status: "loaded" | "missing" | "schema_outdated" | string;
+  table: string;
+  workspaceId: string;
+  portfolioId?: string | null;
+  batchId?: string | null;
+  limit: number;
+  runbookCount: number;
+  missingFields?: string[];
+  runbooks: MarketAlertRunbookWarehouseRecord[];
+};

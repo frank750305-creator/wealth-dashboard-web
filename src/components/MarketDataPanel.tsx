@@ -39,6 +39,8 @@ import {
   fetchBigQueryAssets,
   fetchLatestDecisionFunnelFromBigQuery,
   fetchLatestExecutionFillsFromBigQuery,
+  fetchLatestMarketAlertOwnerQueuesFromBigQuery,
+  fetchLatestMarketAlertRunbooksFromBigQuery,
   fetchLatestMarketAlertsFromBigQuery,
   fetchLatestExecutionRouteEventsFromBigQuery,
   fetchLatestExecutionRoutesFromBigQuery,
@@ -54,6 +56,8 @@ import {
   syncExecutionFillsToBigQuery,
   syncExecutionRouteEventsToBigQuery,
   syncExecutionRoutesToBigQuery,
+  syncMarketAlertOwnerQueuesToBigQuery,
+  syncMarketAlertRunbooksToBigQuery,
   syncMarketAlertsToBigQuery,
   syncOperatingKriToBigQuery,
   syncPlatformExceptionsToBigQuery,
@@ -101,8 +105,10 @@ import {
   marketAlertCsv,
   buildMarketAlertOwnerQueues,
   marketAlertOwnerQueueCsv,
+  buildMarketAlertOwnerQueueSyncPayload,
   buildMarketAlertRunbookItems,
   marketAlertRunbookCsv,
+  buildMarketAlertRunbookSyncPayload,
   buildMarketAlertCommandSummary,
   buildMarketAlertSyncPayload,
   marketAlertCommandSummaryCsv,
@@ -410,6 +416,16 @@ export function MarketDataPanel() {
   >("idle");
   const [marketAlertSyncMessage, setMarketAlertSyncMessage] = useState("");
   const [marketAlertWarehouseCount, setMarketAlertWarehouseCount] = useState(0);
+  const [marketAlertOwnerQueueSyncStatus, setMarketAlertOwnerQueueSyncStatus] = useState<
+    "idle" | "syncing" | "loading" | "synced" | "loaded" | "error"
+  >("idle");
+  const [marketAlertOwnerQueueSyncMessage, setMarketAlertOwnerQueueSyncMessage] = useState("");
+  const [marketAlertOwnerQueueWarehouseCount, setMarketAlertOwnerQueueWarehouseCount] = useState(0);
+  const [marketAlertRunbookSyncStatus, setMarketAlertRunbookSyncStatus] = useState<
+    "idle" | "syncing" | "loading" | "synced" | "loaded" | "error"
+  >("idle");
+  const [marketAlertRunbookSyncMessage, setMarketAlertRunbookSyncMessage] = useState("");
+  const [marketAlertRunbookWarehouseCount, setMarketAlertRunbookWarehouseCount] = useState(0);
   const [watchlistMemoCopyStatus, setWatchlistMemoCopyStatus] = useState<"idle" | "copied">("idle");
   const sources = data?.sources ?? [];
   const securedCount = sources.filter((source) => source.status !== "needs_secret").length;
@@ -2223,6 +2239,106 @@ export function MarketDataPanel() {
       setMarketAlertSyncMessage(err instanceof Error ? err.message : String(err));
     }
   };
+  const handleSyncMarketAlertOwnerQueuesToBigQuery = async () => {
+    if (!marketAlertOwnerQueues.length) return;
+
+    setMarketAlertOwnerQueueSyncStatus("syncing");
+    setMarketAlertOwnerQueueSyncMessage("市場警示分派同步中。");
+
+    try {
+      const result = await syncMarketAlertOwnerQueuesToBigQuery(
+        buildMarketAlertOwnerQueueSyncPayload({
+          ownerQueues: marketAlertOwnerQueues,
+          commandSummary: marketAlertCommandSummary,
+          generatedAt: decisionGeneratedAt,
+          workspaceId: researchTaskWorkspaceId,
+          actorId: riskOwner,
+          portfolioId: tradeTicketPortfolioId,
+          batchId: tradeTicketBatchId,
+        }),
+      );
+      const isSynced = result.status === "synced";
+      setMarketAlertOwnerQueueSyncStatus(isSynced ? "synced" : "error");
+      setMarketAlertOwnerQueueWarehouseCount(result.insertedCount);
+      setMarketAlertOwnerQueueSyncMessage(`${result.insertedCount}/${result.receivedCount} 筆分派佇列寫入 ${result.table}`);
+    } catch (err: unknown) {
+      setMarketAlertOwnerQueueSyncStatus("error");
+      setMarketAlertOwnerQueueSyncMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
+  const handleLoadMarketAlertOwnerQueuesFromBigQuery = async () => {
+    setMarketAlertOwnerQueueSyncStatus("loading");
+    setMarketAlertOwnerQueueSyncMessage("市場警示分派載入中。");
+
+    try {
+      const result = await fetchLatestMarketAlertOwnerQueuesFromBigQuery({
+        limit: 100,
+        workspaceId: researchTaskWorkspaceId,
+        portfolioId: tradeTicketPortfolioId,
+      });
+      if (result.status === "schema_outdated") {
+        setMarketAlertOwnerQueueSyncStatus("error");
+        setMarketAlertOwnerQueueSyncMessage(`市場警示分派表需先同步升級欄位：${result.missingFields?.join(", ") || "--"}`);
+        return;
+      }
+      setMarketAlertOwnerQueueWarehouseCount(result.queueCount);
+      setMarketAlertOwnerQueueSyncStatus("loaded");
+      setMarketAlertOwnerQueueSyncMessage(`已讀取 ${result.queueCount} 筆分派佇列 ${result.workspaceId}`);
+    } catch (err: unknown) {
+      setMarketAlertOwnerQueueSyncStatus("error");
+      setMarketAlertOwnerQueueSyncMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
+  const handleSyncMarketAlertRunbooksToBigQuery = async () => {
+    if (!marketAlertRunbookItems.length) return;
+
+    setMarketAlertRunbookSyncStatus("syncing");
+    setMarketAlertRunbookSyncMessage("市場警示 Runbook 同步中。");
+
+    try {
+      const result = await syncMarketAlertRunbooksToBigQuery(
+        buildMarketAlertRunbookSyncPayload({
+          runbookItems: marketAlertRunbookItems,
+          commandSummary: marketAlertCommandSummary,
+          generatedAt: decisionGeneratedAt,
+          workspaceId: researchTaskWorkspaceId,
+          actorId: riskOwner,
+          portfolioId: tradeTicketPortfolioId,
+          batchId: tradeTicketBatchId,
+        }),
+      );
+      const isSynced = result.status === "synced";
+      setMarketAlertRunbookSyncStatus(isSynced ? "synced" : "error");
+      setMarketAlertRunbookWarehouseCount(result.insertedCount);
+      setMarketAlertRunbookSyncMessage(`${result.insertedCount}/${result.receivedCount} 筆 Runbook 寫入 ${result.table}`);
+    } catch (err: unknown) {
+      setMarketAlertRunbookSyncStatus("error");
+      setMarketAlertRunbookSyncMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
+  const handleLoadMarketAlertRunbooksFromBigQuery = async () => {
+    setMarketAlertRunbookSyncStatus("loading");
+    setMarketAlertRunbookSyncMessage("市場警示 Runbook 載入中。");
+
+    try {
+      const result = await fetchLatestMarketAlertRunbooksFromBigQuery({
+        limit: 100,
+        workspaceId: researchTaskWorkspaceId,
+        portfolioId: tradeTicketPortfolioId,
+      });
+      if (result.status === "schema_outdated") {
+        setMarketAlertRunbookSyncStatus("error");
+        setMarketAlertRunbookSyncMessage(`市場警示 Runbook 表需先同步升級欄位：${result.missingFields?.join(", ") || "--"}`);
+        return;
+      }
+      setMarketAlertRunbookWarehouseCount(result.runbookCount);
+      setMarketAlertRunbookSyncStatus("loaded");
+      setMarketAlertRunbookSyncMessage(`已讀取 ${result.runbookCount} 筆 Runbook ${result.workspaceId}`);
+    } catch (err: unknown) {
+      setMarketAlertRunbookSyncStatus("error");
+      setMarketAlertRunbookSyncMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
   const handleExportMarketAlertCommandSummaryCsv = () => {
     downloadTextFile(
       `bigquery-market-alert-command-summary-${resultStamp()}.csv`,
@@ -3151,8 +3267,18 @@ export function MarketDataPanel() {
                             syncStatus={marketAlertSyncStatus}
                             syncMessage={marketAlertSyncMessage}
                             warehouseAlertCount={marketAlertWarehouseCount}
+                            ownerQueueSyncStatus={marketAlertOwnerQueueSyncStatus}
+                            ownerQueueSyncMessage={marketAlertOwnerQueueSyncMessage}
+                            warehouseOwnerQueueCount={marketAlertOwnerQueueWarehouseCount}
+                            runbookSyncStatus={marketAlertRunbookSyncStatus}
+                            runbookSyncMessage={marketAlertRunbookSyncMessage}
+                            warehouseRunbookCount={marketAlertRunbookWarehouseCount}
                             onSyncMarketAlertsToBigQuery={handleSyncMarketAlertsToBigQuery}
                             onLoadMarketAlertsFromBigQuery={handleLoadMarketAlertsFromBigQuery}
+                            onSyncMarketAlertOwnerQueuesToBigQuery={handleSyncMarketAlertOwnerQueuesToBigQuery}
+                            onLoadMarketAlertOwnerQueuesFromBigQuery={handleLoadMarketAlertOwnerQueuesFromBigQuery}
+                            onSyncMarketAlertRunbooksToBigQuery={handleSyncMarketAlertRunbooksToBigQuery}
+                            onLoadMarketAlertRunbooksFromBigQuery={handleLoadMarketAlertRunbooksFromBigQuery}
                             onExportMarketAlertCsv={handleExportMarketAlertCsv}
                             onExportMarketAlertCommandSummaryCsv={handleExportMarketAlertCommandSummaryCsv}
                             onExportMarketAlertOwnerQueueCsv={handleExportMarketAlertOwnerQueueCsv}

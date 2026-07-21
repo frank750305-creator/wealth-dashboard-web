@@ -65,6 +65,12 @@ try:
         load_latest_market_alert_records,
         sync_market_alert_records,
     )
+    from .market_alert_operations_service import (
+        load_latest_market_alert_owner_queue_records,
+        load_latest_market_alert_runbook_records,
+        sync_market_alert_owner_queue_records,
+        sync_market_alert_runbook_records,
+    )
 except ImportError:
     from market_data_service import (
         MarketDataError,
@@ -123,6 +129,12 @@ except ImportError:
     from market_alert_service import (
         load_latest_market_alert_records,
         sync_market_alert_records,
+    )
+    from market_alert_operations_service import (
+        load_latest_market_alert_owner_queue_records,
+        load_latest_market_alert_runbook_records,
+        sync_market_alert_owner_queue_records,
+        sync_market_alert_runbook_records,
     )
 
 app = FastAPI(title="高資產傳承與所得稅擇優核算大腦", version="4.0_Ultimate")
@@ -293,6 +305,8 @@ async def platform_data_products():
                     "/api/v1/trading/operating-kri",
                     "/api/v1/trading/decision-funnel",
                     "/api/v1/trading/market-alerts",
+                    "/api/v1/trading/market-alert-owner-queues",
+                    "/api/v1/trading/market-alert-runbooks",
                 ],
             },
         ],
@@ -885,6 +899,73 @@ class MarketAlertSyncPayload(BaseModel):
     generated_at: Optional[str] = None
     records: List[MarketAlertSyncRecordPayload]
 
+class MarketAlertOwnerQueueSyncRecordPayload(BaseModel):
+    workspace_id: Optional[str] = None
+    actor_id: Optional[str] = None
+    queue_id: str
+    idempotency_key: Optional[str] = None
+    generated_at: str
+    updated_at: str
+    portfolio_id: Optional[str] = None
+    batch_id: Optional[str] = None
+    owner: str
+    status: str
+    priority: str
+    total: int = 0
+    high: int = 0
+    medium: int = 0
+    low: int = 0
+    block: int = 0
+    watch: int = 0
+    pass_count: int = 0
+    top_source: Optional[str] = None
+    next_action: Optional[str] = None
+    command_status: str
+    command_priority: str
+    total_alerts: int = 0
+    source_system: str = "market_alert_owner_queue"
+
+class MarketAlertOwnerQueueSyncPayload(BaseModel):
+    workspace_id: Optional[str] = None
+    actor_id: Optional[str] = None
+    portfolio_id: Optional[str] = None
+    batch_id: Optional[str] = None
+    generated_at: Optional[str] = None
+    records: List[MarketAlertOwnerQueueSyncRecordPayload]
+
+class MarketAlertRunbookSyncRecordPayload(BaseModel):
+    workspace_id: Optional[str] = None
+    actor_id: Optional[str] = None
+    runbook_id: str
+    idempotency_key: Optional[str] = None
+    generated_at: str
+    updated_at: str
+    portfolio_id: Optional[str] = None
+    batch_id: Optional[str] = None
+    source: str
+    title: str
+    status: str
+    priority: str
+    owner: Optional[str] = None
+    deadline: Optional[str] = None
+    trigger: Optional[str] = None
+    diagnose: Optional[str] = None
+    resolve: Optional[str] = None
+    verify: Optional[str] = None
+    escalation: Optional[str] = None
+    command_status: str
+    command_priority: str
+    total_alerts: int = 0
+    source_system: str = "market_alert_runbook"
+
+class MarketAlertRunbookSyncPayload(BaseModel):
+    workspace_id: Optional[str] = None
+    actor_id: Optional[str] = None
+    portfolio_id: Optional[str] = None
+    batch_id: Optional[str] = None
+    generated_at: Optional[str] = None
+    records: List[MarketAlertRunbookSyncRecordPayload]
+
 def calc_tw_tax(net_inc: float) -> float:
     if net_inc <= 56: return net_inc * 0.05
     elif net_inc <= 126: return net_inc * 0.12 - 3.92
@@ -1336,6 +1417,82 @@ async def sync_trading_market_alerts(payload: MarketAlertSyncPayload):
         return {
             "generatedAt": datetime.now(timezone.utc).isoformat(),
             **sync_market_alert_records(records),
+        }
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+@app.get("/api/v1/trading/market-alert-owner-queues")
+async def trading_market_alert_owner_queues(
+    workspace_id: Optional[str] = None,
+    portfolio_id: Optional[str] = None,
+    batch_id: Optional[str] = None,
+    limit: int = 100,
+):
+    try:
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            **load_latest_market_alert_owner_queue_records(
+                limit=limit,
+                workspace_id=workspace_id,
+                portfolio_id=portfolio_id,
+                batch_id=batch_id,
+            ),
+        }
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+@app.post("/api/v1/trading/market-alert-owner-queues")
+async def sync_trading_market_alert_owner_queues(payload: MarketAlertOwnerQueueSyncPayload):
+    try:
+        records = []
+        for record in payload.records:
+            item = record.model_dump()
+            item["workspace_id"] = item.get("workspace_id") or payload.workspace_id
+            item["actor_id"] = item.get("actor_id") or payload.actor_id
+            item["portfolio_id"] = item.get("portfolio_id") or payload.portfolio_id
+            item["batch_id"] = item.get("batch_id") or payload.batch_id
+            records.append(item)
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            **sync_market_alert_owner_queue_records(records),
+        }
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+@app.get("/api/v1/trading/market-alert-runbooks")
+async def trading_market_alert_runbooks(
+    workspace_id: Optional[str] = None,
+    portfolio_id: Optional[str] = None,
+    batch_id: Optional[str] = None,
+    limit: int = 100,
+):
+    try:
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            **load_latest_market_alert_runbook_records(
+                limit=limit,
+                workspace_id=workspace_id,
+                portfolio_id=portfolio_id,
+                batch_id=batch_id,
+            ),
+        }
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+@app.post("/api/v1/trading/market-alert-runbooks")
+async def sync_trading_market_alert_runbooks(payload: MarketAlertRunbookSyncPayload):
+    try:
+        records = []
+        for record in payload.records:
+            item = record.model_dump()
+            item["workspace_id"] = item.get("workspace_id") or payload.workspace_id
+            item["actor_id"] = item.get("actor_id") or payload.actor_id
+            item["portfolio_id"] = item.get("portfolio_id") or payload.portfolio_id
+            item["batch_id"] = item.get("batch_id") or payload.batch_id
+            records.append(item)
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            **sync_market_alert_runbook_records(records),
         }
     except MarketDataError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc))

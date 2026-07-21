@@ -20,6 +20,12 @@ import type {
   MarketAlertWarehouseLatestResponse,
   MarketAlertWarehouseSyncPayload,
   MarketAlertWarehouseSyncResponse,
+  MarketAlertOwnerQueueWarehouseLatestResponse,
+  MarketAlertOwnerQueueWarehouseSyncPayload,
+  MarketAlertOwnerQueueWarehouseSyncResponse,
+  MarketAlertRunbookWarehouseLatestResponse,
+  MarketAlertRunbookWarehouseSyncPayload,
+  MarketAlertRunbookWarehouseSyncResponse,
   OperatingKriWarehouseLatestResponse,
   OperatingKriWarehouseSyncPayload,
   OperatingKriWarehouseSyncResponse,
@@ -639,6 +645,102 @@ export async function syncMarketAlertsToBigQuery(
   if (!response.ok) {
     const errText = await response.text();
     throw new Error(`市場警示 BigQuery 同步異常 (代碼: ${response.status})\n${errText}`);
+  }
+
+  return response.json();
+}
+
+export async function fetchLatestMarketAlertOwnerQueuesFromBigQuery({
+  limit = 100,
+  workspaceId = "default",
+  portfolioId = "",
+  batchId = "",
+}: {
+  limit?: number;
+  workspaceId?: string;
+  portfolioId?: string;
+  batchId?: string;
+}): Promise<MarketAlertOwnerQueueWarehouseLatestResponse> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    workspace_id: workspaceId.trim() || "default",
+  });
+  if (portfolioId.trim()) params.set("portfolio_id", portfolioId.trim());
+  if (batchId.trim()) params.set("batch_id", batchId.trim());
+
+  const response = await fetch(`/api/v1/trading/market-alert-owner-queues?${params.toString()}`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`市場警示分派 BigQuery 載入異常 (代碼: ${response.status})\n${errText}`);
+  }
+
+  return response.json();
+}
+
+export async function syncMarketAlertOwnerQueuesToBigQuery(
+  payload: MarketAlertOwnerQueueWarehouseSyncPayload,
+): Promise<MarketAlertOwnerQueueWarehouseSyncResponse> {
+  const response = await fetch("/api/v1/trading/market-alert-owner-queues", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`市場警示分派 BigQuery 同步異常 (代碼: ${response.status})\n${errText}`);
+  }
+
+  return response.json();
+}
+
+export async function fetchLatestMarketAlertRunbooksFromBigQuery({
+  limit = 100,
+  workspaceId = "default",
+  portfolioId = "",
+  batchId = "",
+}: {
+  limit?: number;
+  workspaceId?: string;
+  portfolioId?: string;
+  batchId?: string;
+}): Promise<MarketAlertRunbookWarehouseLatestResponse> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    workspace_id: workspaceId.trim() || "default",
+  });
+  if (portfolioId.trim()) params.set("portfolio_id", portfolioId.trim());
+  if (batchId.trim()) params.set("batch_id", batchId.trim());
+
+  const response = await fetch(`/api/v1/trading/market-alert-runbooks?${params.toString()}`, {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`市場警示 Runbook BigQuery 載入異常 (代碼: ${response.status})\n${errText}`);
+  }
+
+  return response.json();
+}
+
+export async function syncMarketAlertRunbooksToBigQuery(
+  payload: MarketAlertRunbookWarehouseSyncPayload,
+): Promise<MarketAlertRunbookWarehouseSyncResponse> {
+  const response = await fetch("/api/v1/trading/market-alert-runbooks", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`市場警示 Runbook BigQuery 同步異常 (代碼: ${response.status})\n${errText}`);
   }
 
   return response.json();
