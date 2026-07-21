@@ -347,3 +347,52 @@ export type PortfolioOptimizationResponse = {
   dataWindow: PortfolioAnalysisDataWindow;
   marketData?: PortfolioAnalysisResponse["marketData"];
 };
+
+export type ResearchTaskWarehouseStatus = {
+  generatedAt: string;
+  projectId: string;
+  dataset: string;
+  taskTable: string;
+  hasServiceAccountEnv: boolean;
+  hasGoogleApplicationCredentials: boolean;
+  requiredEnvVars: string[];
+};
+
+export type ResearchTaskWarehouseSyncRecord = {
+  task_id: string;
+  generated_at: string;
+  updated_at: string;
+  lane: string;
+  title: string;
+  status: string;
+  priority: string;
+  owner: string;
+  symbol: string | null;
+  source: string;
+  evidence: string;
+  next_action: string;
+  manual_note: string | null;
+  is_manual_override: boolean;
+  lifecycle_gate_status: string;
+  lifecycle_decision: string;
+  active_stage: string;
+  blocker_count: number;
+  ready_count: number;
+};
+
+export type ResearchTaskWarehouseSyncPayload = {
+  table: string;
+  generated_at: string;
+  record_count: number;
+  records: ResearchTaskWarehouseSyncRecord[];
+  lifecycle?: unknown;
+};
+
+export type ResearchTaskWarehouseSyncResponse = {
+  generatedAt: string;
+  status: "synced" | "partial_error" | string;
+  table: string;
+  receivedCount: number;
+  insertedCount: number;
+  errors: unknown[];
+};

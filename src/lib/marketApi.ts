@@ -9,6 +9,9 @@ import type {
   PortfolioAnalyzeBigQueryPayload,
   PortfolioOptimizationResponse,
   PortfolioOptimizeBigQueryPayload,
+  ResearchTaskWarehouseStatus,
+  ResearchTaskWarehouseSyncPayload,
+  ResearchTaskWarehouseSyncResponse,
 } from "@/types/market";
 
 export async function fetchMarketSources(): Promise<MarketSourcesResponse> {
@@ -48,6 +51,37 @@ export async function fetchBigQueryMarketDiagnostics(): Promise<BigQueryMarketDi
   if (!response.ok) {
     const errText = await response.text();
     throw new Error(`BigQuery 診斷讀取異常 (代碼: ${response.status})\n${errText}`);
+  }
+
+  return response.json();
+}
+
+export async function fetchResearchTaskWarehouseStatus(): Promise<ResearchTaskWarehouseStatus> {
+  const response = await fetch("/api/v1/research/tasks/bigquery/status", {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`研究任務倉儲狀態讀取異常 (代碼: ${response.status})\n${errText}`);
+  }
+
+  return response.json();
+}
+
+export async function syncResearchTasksToBigQuery(
+  payload: ResearchTaskWarehouseSyncPayload,
+): Promise<ResearchTaskWarehouseSyncResponse> {
+  const response = await fetch("/api/v1/research/tasks/bigquery/sync", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`研究任務 BigQuery 同步異常 (代碼: ${response.status})\n${errText}`);
   }
 
   return response.json();

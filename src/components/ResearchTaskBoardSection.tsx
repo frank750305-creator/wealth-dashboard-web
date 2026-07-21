@@ -15,11 +15,15 @@ type ResearchTaskBoardSectionProps = {
   summary: ResearchTaskSummary;
   lifecycle: ResearchTaskLifecycle;
   taskOverrides: ResearchTaskOverride[];
+  hasBigQueryCredentials: boolean;
+  syncStatus: "idle" | "syncing" | "synced" | "error";
+  syncMessage: string;
   onTaskOverrideChange: (
     taskId: string,
     patch: Partial<Pick<ResearchTaskOverride, "status" | "owner" | "note">>,
   ) => void;
   onResetTaskOverride: (taskId: string) => void;
+  onSyncResearchTasksToBigQuery: () => void;
   onExportResearchTaskCsv: () => void;
   onExportResearchTaskLifecycleCsv: () => void;
   onExportResearchTaskSyncJson: () => void;
@@ -52,8 +56,12 @@ export function ResearchTaskBoardSection({
   summary,
   lifecycle,
   taskOverrides,
+  hasBigQueryCredentials,
+  syncStatus,
+  syncMessage,
   onTaskOverrideChange,
   onResetTaskOverride,
+  onSyncResearchTasksToBigQuery,
   onExportResearchTaskCsv,
   onExportResearchTaskLifecycleCsv,
   onExportResearchTaskSyncJson,
@@ -79,6 +87,13 @@ export function ResearchTaskBoardSection({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <button
+            onClick={onSyncResearchTasksToBigQuery}
+            disabled={!hasBigQueryCredentials || !tasks.length || syncStatus === "syncing"}
+            className="px-3 py-2 rounded-md bg-cyan-700 hover:bg-cyan-600 text-white text-xs font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+          >
+            {syncStatus === "syncing" ? "同步中" : "同步 BigQuery"}
+          </button>
           <button
             onClick={onExportResearchTaskSyncJson}
             disabled={!tasks.length}
@@ -113,6 +128,11 @@ export function ResearchTaskBoardSection({
           </button>
         </div>
       </div>
+      {syncMessage ? (
+        <p className={`text-[11px] ${syncStatus === "error" ? "text-rose-300" : "text-slate-500"}`}>
+          {syncMessage}
+        </p>
+      ) : null}
 
       <div className={`rounded-md border p-3 ${statusPanelClass(lifecycle.gateStatus)}`}>
         <div className="flex flex-col xl:flex-row xl:items-start justify-between gap-3">

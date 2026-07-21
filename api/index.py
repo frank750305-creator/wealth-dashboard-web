@@ -21,6 +21,10 @@ try:
         analyze_portfolio_returns,
         optimize_portfolio_weights,
     )
+    from .research_task_service import (
+        research_task_warehouse_status,
+        sync_research_task_records,
+    )
 except ImportError:
     from market_data_service import (
         MarketDataError,
@@ -35,6 +39,10 @@ except ImportError:
         PortfolioEngineError,
         analyze_portfolio_returns,
         optimize_portfolio_weights,
+    )
+    from research_task_service import (
+        research_task_warehouse_status,
+        sync_research_task_records,
     )
 
 app = FastAPI(title="高資產傳承與所得稅擇優核算大腦", version="4.0_Ultimate")
@@ -358,6 +366,32 @@ class PortfolioOptimizeBigQueryPayload(BaseModel):
     sample_count: int = 5000
     random_seed: int = 7
 
+class ResearchTaskSyncRecordPayload(BaseModel):
+    task_id: str
+    generated_at: str
+    updated_at: str
+    lane: str
+    title: Optional[str] = None
+    status: str
+    priority: str
+    owner: Optional[str] = None
+    symbol: Optional[str] = None
+    source: Optional[str] = None
+    evidence: Optional[str] = None
+    next_action: Optional[str] = None
+    manual_note: Optional[str] = None
+    is_manual_override: bool = False
+    lifecycle_gate_status: str
+    lifecycle_decision: Optional[str] = None
+    active_stage: Optional[str] = None
+    blocker_count: int = 0
+    ready_count: int = 0
+
+class ResearchTaskSyncPayload(BaseModel):
+    generated_at: Optional[str] = None
+    records: List[ResearchTaskSyncRecordPayload]
+    lifecycle: Optional[Dict] = None
+
 def calc_tw_tax(net_inc: float) -> float:
     if net_inc <= 56: return net_inc * 0.05
     elif net_inc <= 126: return net_inc * 0.12 - 3.92
@@ -381,6 +415,26 @@ async def market_bigquery_diagnostics():
         return {
             "generatedAt": datetime.now(timezone.utc).isoformat(),
             **load_bigquery_market_diagnostics(),
+        }
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+@app.get("/api/v1/research/tasks/bigquery/status")
+async def research_tasks_bigquery_status():
+    try:
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            **research_task_warehouse_status(),
+        }
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+@app.post("/api/v1/research/tasks/bigquery/sync")
+async def sync_research_tasks_to_bigquery(payload: ResearchTaskSyncPayload):
+    try:
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            **sync_research_task_records([record.model_dump() for record in payload.records]),
         }
     except MarketDataError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc))

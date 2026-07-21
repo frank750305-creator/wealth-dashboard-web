@@ -33,7 +33,12 @@ import {
   rebalanceDraftCsv,
   rebalanceDraftRows,
 } from "@/lib/rebalanceWorkflow";
-import { fetchBigQueryAssetHistory, fetchBigQueryAssetProfile, fetchBigQueryAssets } from "@/lib/marketApi";
+import {
+  fetchBigQueryAssetHistory,
+  fetchBigQueryAssetProfile,
+  fetchBigQueryAssets,
+  syncResearchTasksToBigQuery,
+} from "@/lib/marketApi";
 import {
   buildClientWorkspaceProvisioningItems,
   buildPlatformEntitlementItems,
@@ -291,6 +296,8 @@ export function MarketDataPanel() {
   const [selectedWatchlistPresetId, setSelectedWatchlistPresetId] = useState("");
   const [savedWatchlistPresets, setSavedWatchlistPresets] = useState<SavedWatchlistPreset[]>([]);
   const [researchTaskOverrides, setResearchTaskOverrides] = useState<ResearchTaskOverride[]>([]);
+  const [researchTaskSyncStatus, setResearchTaskSyncStatus] = useState<"idle" | "syncing" | "synced" | "error">("idle");
+  const [researchTaskSyncMessage, setResearchTaskSyncMessage] = useState("");
   const [watchlistMemoCopyStatus, setWatchlistMemoCopyStatus] = useState<"idle" | "copied">("idle");
   const sources = data?.sources ?? [];
   const securedCount = sources.filter((source) => source.status !== "needs_secret").length;
@@ -1537,6 +1544,30 @@ export function MarketDataPanel() {
       "application/json;charset=utf-8",
     );
   };
+  const handleSyncResearchTasksToBigQuery = async () => {
+    if (!researchTaskItems.length) return;
+
+    setResearchTaskSyncStatus("syncing");
+    setResearchTaskSyncMessage("研究任務同步中。");
+
+    try {
+      const result = await syncResearchTasksToBigQuery(
+        buildResearchTaskSyncPayload({
+          tasks: researchTaskItems,
+          lifecycle: researchTaskLifecycle,
+          generatedAt: decisionGeneratedAt,
+        }),
+      );
+      const isSynced = result.status === "synced";
+      setResearchTaskSyncStatus(isSynced ? "synced" : "error");
+      setResearchTaskSyncMessage(
+        `${result.insertedCount}/${result.receivedCount} 筆寫入 ${result.table}`,
+      );
+    } catch (err: unknown) {
+      setResearchTaskSyncStatus("error");
+      setResearchTaskSyncMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
   const handleResearchTaskOverrideChange = (
     taskId: string,
     patch: Partial<Pick<ResearchTaskOverride, "status" | "owner" | "note">>,
@@ -1938,8 +1969,12 @@ export function MarketDataPanel() {
             summary={researchTaskSummary}
             lifecycle={researchTaskLifecycle}
             taskOverrides={researchTaskOverrides}
+            hasBigQueryCredentials={hasBigQueryCredentials}
+            syncStatus={researchTaskSyncStatus}
+            syncMessage={researchTaskSyncMessage}
             onTaskOverrideChange={handleResearchTaskOverrideChange}
             onResetTaskOverride={handleResetResearchTaskOverride}
+            onSyncResearchTasksToBigQuery={handleSyncResearchTasksToBigQuery}
             onExportResearchTaskCsv={handleExportResearchTaskCsv}
             onExportResearchTaskLifecycleCsv={handleExportResearchTaskLifecycleCsv}
             onExportResearchTaskSyncJson={handleExportResearchTaskSyncJson}
