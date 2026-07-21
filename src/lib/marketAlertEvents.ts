@@ -42,6 +42,25 @@ export type MarketAlertRunbookItem = {
   escalation: string;
 };
 
+export type MarketAlertCommandSummary = {
+  status: MarketAlertStatus;
+  priority: MarketAlertPriority;
+  operatingMode: string;
+  releaseGate: string;
+  headline: string;
+  blockedFlow: string;
+  focusOwner: string;
+  focusSource: string;
+  immediateAction: string;
+  nextReview: string;
+  totalAlerts: number;
+  highPriorityCount: number;
+  blockCount: number;
+  watchCount: number;
+  ownerCount: number;
+  runbookCount: number;
+};
+
 type CoverageUniverseAlertInput = {
   label: string;
   status: MarketAlertStatus;
@@ -515,4 +534,73 @@ export function marketAlertRunbookCsv(rows: MarketAlertRunbookItem[]) {
   ]);
 
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+export function buildMarketAlertCommandSummary({
+  events,
+  ownerQueues,
+  runbookItems,
+}: {
+  events: MarketAlertEvent[];
+  ownerQueues: MarketAlertOwnerQueue[];
+  runbookItems: MarketAlertRunbookItem[];
+}): MarketAlertCommandSummary {
+  const status = events.length ? marketAlertStatusFromEvents(events) : "pass";
+  const priority = events.length ? marketAlertPriorityFromEvents(events) : "low";
+  const blockCount = events.filter((event) => event.status === "block").length;
+  const watchCount = events.filter((event) => event.status === "watch").length;
+  const highPriorityCount = events.filter((event) => event.priority === "high").length;
+  const focusQueue = ownerQueues[0];
+  const focusRunbook = runbookItems[0];
+  const focusEvent = events[0];
+  const releaseGate = blockCount ? "暫停放行" : watchCount ? "人工覆核" : "可放行";
+  const operatingMode = blockCount ? "Incident" : watchCount ? "Supervision" : "Normal";
+  const headline = blockCount
+    ? `${blockCount} 個阻塞項，先處理 ${focusQueue?.owner ?? focusEvent?.owner ?? "未分派"}`
+    : watchCount
+      ? `${watchCount} 個觀察項，今日需人工覆核`
+      : "目前沒有阻塞投資流程的市場警示";
+
+  return {
+    status,
+    priority,
+    operatingMode,
+    releaseGate,
+    headline,
+    blockedFlow: blockCount ? focusEvent?.source ?? "未定位" : "未阻塞",
+    focusOwner: focusQueue?.owner ?? focusEvent?.owner ?? "未分派",
+    focusSource: focusQueue?.topSource ?? focusEvent?.source ?? "--",
+    immediateAction: focusRunbook?.resolve ?? focusEvent?.action ?? "維持例行監控",
+    nextReview: blockCount ? "今日盤中復核" : watchCount ? "T+1 收盤前復核" : "週檢查",
+    totalAlerts: events.length,
+    highPriorityCount,
+    blockCount,
+    watchCount,
+    ownerCount: ownerQueues.length,
+    runbookCount: runbookItems.length,
+  };
+}
+
+export function marketAlertCommandSummaryCsv(summary: MarketAlertCommandSummary) {
+  const rows = [
+    ["field", "value"],
+    ["status", executionReviewLabel(summary.status)],
+    ["priority", executionHandoffPriorityLabel(summary.priority)],
+    ["operating_mode", summary.operatingMode],
+    ["release_gate", summary.releaseGate],
+    ["headline", summary.headline],
+    ["blocked_flow", summary.blockedFlow],
+    ["focus_owner", summary.focusOwner],
+    ["focus_source", summary.focusSource],
+    ["immediate_action", summary.immediateAction],
+    ["next_review", summary.nextReview],
+    ["total_alerts", summary.totalAlerts],
+    ["high_priority_count", summary.highPriorityCount],
+    ["block_count", summary.blockCount],
+    ["watch_count", summary.watchCount],
+    ["owner_count", summary.ownerCount],
+    ["runbook_count", summary.runbookCount],
+  ];
+
+  return rows.map((row) => row.map(csvCell).join(",")).join("\n");
 }

@@ -73,6 +73,8 @@ import {
   marketAlertOwnerQueueCsv,
   buildMarketAlertRunbookItems,
   marketAlertRunbookCsv,
+  buildMarketAlertCommandSummary,
+  marketAlertCommandSummaryCsv,
 } from "@/lib/marketAlertEvents";
 import {
   buildDataLicenseComplianceItems,
@@ -700,6 +702,11 @@ export function MarketDataPanel() {
   });
   const marketAlertOwnerQueues = buildMarketAlertOwnerQueues(marketAlertEvents);
   const marketAlertRunbookItems = buildMarketAlertRunbookItems(marketAlertEvents);
+  const marketAlertCommandSummary = buildMarketAlertCommandSummary({
+    events: marketAlertEvents,
+    ownerQueues: marketAlertOwnerQueues,
+    runbookItems: marketAlertRunbookItems,
+  });
   const marketHighAlertCount = marketAlertEvents.filter((event) => event.priority === "high").length;
   const marketMediumAlertCount = marketAlertEvents.filter((event) => event.priority === "medium").length;
   const marketAlertDecision = marketAlertEvents.length
@@ -1421,6 +1428,13 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleExportMarketAlertCommandSummaryCsv = () => {
+    downloadTextFile(
+      `bigquery-market-alert-command-summary-${resultStamp()}.csv`,
+      marketAlertCommandSummaryCsv(marketAlertCommandSummary),
+      "text/csv;charset=utf-8",
+    );
+  };
   const handleExportMarketAlertOwnerQueueCsv = () => {
     if (!marketAlertOwnerQueues.length) return;
 
@@ -2027,7 +2041,9 @@ export function MarketDataPanel() {
 
                           <MarketAlertSection
                             marketAlertDecision={marketAlertDecision}
+                            marketAlertCommandSummary={marketAlertCommandSummary}
                             onExportMarketAlertCsv={handleExportMarketAlertCsv}
+                            onExportMarketAlertCommandSummaryCsv={handleExportMarketAlertCommandSummaryCsv}
                             onExportMarketAlertOwnerQueueCsv={handleExportMarketAlertOwnerQueueCsv}
                             onExportMarketAlertRunbookCsv={handleExportMarketAlertRunbookCsv}
                             marketAlertEvents={marketAlertEvents}

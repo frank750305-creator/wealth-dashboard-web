@@ -1,4 +1,5 @@
 import type {
+  MarketAlertCommandSummary,
   MarketAlertEvent,
   MarketAlertOwnerQueue,
   MarketAlertPriority,
@@ -8,7 +9,9 @@ import type {
 
 type MarketAlertSectionProps = {
   marketAlertDecision: MarketAlertStatus;
+  marketAlertCommandSummary: MarketAlertCommandSummary;
   onExportMarketAlertCsv: () => void;
+  onExportMarketAlertCommandSummaryCsv: () => void;
   onExportMarketAlertOwnerQueueCsv: () => void;
   onExportMarketAlertRunbookCsv: () => void;
   marketAlertEvents: MarketAlertEvent[];
@@ -51,7 +54,9 @@ function marketAlertPriorityClass(priority: MarketAlertPriority) {
 
 export function MarketAlertSection({
   marketAlertDecision,
+  marketAlertCommandSummary,
   onExportMarketAlertCsv,
+  onExportMarketAlertCommandSummaryCsv,
   onExportMarketAlertOwnerQueueCsv,
   onExportMarketAlertRunbookCsv,
   marketAlertEvents,
@@ -77,6 +82,12 @@ export function MarketAlertSection({
         </div>
         <div className="flex flex-wrap gap-2">
           <button
+            onClick={onExportMarketAlertCommandSummaryCsv}
+            className="px-3 py-2 rounded-md bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold"
+          >
+            摘要 CSV
+          </button>
+          <button
             onClick={onExportMarketAlertOwnerQueueCsv}
             disabled={!marketAlertOwnerQueues.length}
             className="px-3 py-2 rounded-md bg-cyan-700 hover:bg-cyan-600 text-white text-xs font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
@@ -97,6 +108,45 @@ export function MarketAlertSection({
           >
             警示 CSV
           </button>
+        </div>
+      </div>
+
+      <div className={`rounded-md border p-3 ${executionReviewRowClass(marketAlertCommandSummary.status)}`}>
+        <div className="flex flex-col xl:flex-row xl:items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-xs font-bold text-slate-100">指揮官摘要</p>
+              <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${executionReviewBadgeClass(marketAlertCommandSummary.status)}`}>
+                {marketAlertCommandSummary.releaseGate}
+              </span>
+              <span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${marketAlertPriorityClass(marketAlertCommandSummary.priority)}`}>
+                {marketAlertPriorityLabel(marketAlertCommandSummary.priority)}
+              </span>
+            </div>
+            <p className="mt-2 text-sm font-bold text-slate-100">{marketAlertCommandSummary.headline}</p>
+            <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+              先處理：{marketAlertCommandSummary.focusOwner} · {marketAlertCommandSummary.focusSource} · {marketAlertCommandSummary.nextReview}
+            </p>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs xl:min-w-[520px]">
+            {[
+              ["模式", marketAlertCommandSummary.operatingMode],
+              ["阻塞流程", marketAlertCommandSummary.blockedFlow],
+              ["高優先", `${marketAlertCommandSummary.highPriorityCount}`],
+              ["Runbook", `${marketAlertCommandSummary.runbookCount}`],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded bg-slate-950/70 px-2 py-2 min-w-0">
+                <p className="text-[10px] text-slate-600 truncate">{label}</p>
+                <p className="mt-1 font-mono font-bold text-slate-100 truncate" title={value}>
+                  {value}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="mt-3 rounded bg-slate-950/70 p-2">
+          <p className="text-[10px] font-bold text-slate-500">第一個動作</p>
+          <p className="mt-1 text-[11px] leading-relaxed text-slate-400">{marketAlertCommandSummary.immediateAction}</p>
         </div>
       </div>
 
