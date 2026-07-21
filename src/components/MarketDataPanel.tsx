@@ -77,11 +77,15 @@ import {
   marketAlertCommandSummaryCsv,
 } from "@/lib/marketAlertEvents";
 import {
+  applyResearchTaskOverrides,
   buildResearchTaskLifecycle,
   buildResearchTaskItems,
   buildResearchTaskSummary,
+  loadResearchTaskOverridesFromStorage,
   researchTaskCsv,
   researchTaskLifecycleCsv,
+  writeResearchTaskOverridesToStorage,
+  type ResearchTaskOverride,
 } from "@/lib/researchTaskWorkflow";
 import {
   buildDataLicenseComplianceItems,
@@ -282,6 +286,7 @@ export function MarketDataPanel() {
   const [watchlistPresetName, setWatchlistPresetName] = useState("核心 ETF");
   const [selectedWatchlistPresetId, setSelectedWatchlistPresetId] = useState("");
   const [savedWatchlistPresets, setSavedWatchlistPresets] = useState<SavedWatchlistPreset[]>([]);
+  const [researchTaskOverrides, setResearchTaskOverrides] = useState<ResearchTaskOverride[]>([]);
   const [watchlistMemoCopyStatus, setWatchlistMemoCopyStatus] = useState<"idle" | "copied">("idle");
   const sources = data?.sources ?? [];
   const securedCount = sources.filter((source) => source.status !== "needs_secret").length;
@@ -715,7 +720,7 @@ export function MarketDataPanel() {
     ownerQueues: marketAlertOwnerQueues,
     runbookItems: marketAlertRunbookItems,
   });
-  const researchTaskItems = buildResearchTaskItems({
+  const generatedResearchTaskItems = buildResearchTaskItems({
     comparisonRows,
     visibleComparisonRows,
     assetProfileSymbol: assetProfile?.symbol,
@@ -725,6 +730,7 @@ export function MarketDataPanel() {
     researchOwner: decisionOwner,
     riskOwner,
   });
+  const researchTaskItems = applyResearchTaskOverrides(generatedResearchTaskItems, researchTaskOverrides);
   const researchTaskSummary = buildResearchTaskSummary(researchTaskItems);
   const researchTaskLifecycle = buildResearchTaskLifecycle({
     tasks: researchTaskItems,
@@ -959,7 +965,9 @@ export function MarketDataPanel() {
   useEffect(() => {
     const timer = window.setTimeout(() => {
       const presets = loadWatchlistPresetsFromStorage();
+      const taskOverrides = loadResearchTaskOverridesFromStorage();
       setSavedWatchlistPresets(presets);
+      setResearchTaskOverrides(taskOverrides);
       setSelectedWatchlistPresetId((currentId) => currentId || presets[0]?.id || "");
       setWatchlistPresetName((currentName) => currentName || presets[0]?.name || "核心 ETF");
     }, 0);
@@ -1496,6 +1504,39 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleResearchTaskOverrideChange = (
+    taskId: string,
+    patch: Partial<Pick<ResearchTaskOverride, "status" | "owner" | "note">>,
+  ) => {
+    setResearchTaskOverrides((currentOverrides) => {
+      const existing = currentOverrides.find((item) => item.taskId === taskId);
+      const now = new Date().toISOString();
+      const status = patch.status ?? existing?.status;
+      const owner = patch.owner !== undefined ? patch.owner : existing?.owner;
+      const note = patch.note !== undefined ? patch.note : existing?.note;
+      const nextOverride: ResearchTaskOverride = {
+        taskId,
+        updatedAt: now,
+        ...(status ? { status } : {}),
+        ...(owner?.trim() ? { owner } : {}),
+        ...(note?.trim() ? { note } : {}),
+      };
+      const hasOverride = Boolean(nextOverride.status || nextOverride.owner || nextOverride.note);
+      const nextOverrides = hasOverride
+        ? [nextOverride, ...currentOverrides.filter((item) => item.taskId !== taskId)]
+        : currentOverrides.filter((item) => item.taskId !== taskId);
+
+      writeResearchTaskOverridesToStorage(nextOverrides);
+      return nextOverrides;
+    });
+  };
+  const handleResetResearchTaskOverride = (taskId: string) => {
+    setResearchTaskOverrides((currentOverrides) => {
+      const nextOverrides = currentOverrides.filter((item) => item.taskId !== taskId);
+      writeResearchTaskOverridesToStorage(nextOverrides);
+      return nextOverrides;
+    });
+  };
   const buildAssetComparisonMemo = () =>
     assetComparisonMemo(visibleComparisonRows, {
       name: watchlistPresetName.trim() || "未命名 Watchlist",
@@ -1863,6 +1904,9 @@ export function MarketDataPanel() {
             tasks={researchTaskItems}
             summary={researchTaskSummary}
             lifecycle={researchTaskLifecycle}
+            taskOverrides={researchTaskOverrides}
+            onTaskOverrideChange={handleResearchTaskOverrideChange}
+            onResetTaskOverride={handleResetResearchTaskOverride}
             onExportResearchTaskCsv={handleExportResearchTaskCsv}
             onExportResearchTaskLifecycleCsv={handleExportResearchTaskLifecycleCsv}
           />

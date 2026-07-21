@@ -4,6 +4,7 @@ import {
   researchTaskStatusLabel,
   type ResearchTaskLifecycle,
   type ResearchTaskItem,
+  type ResearchTaskOverride,
   type ResearchTaskPriority,
   type ResearchTaskStatus,
   type ResearchTaskSummary,
@@ -13,6 +14,9 @@ type ResearchTaskBoardSectionProps = {
   tasks: ResearchTaskItem[];
   summary: ResearchTaskSummary;
   lifecycle: ResearchTaskLifecycle;
+  taskOverrides: ResearchTaskOverride[];
+  onTaskOverrideChange: (taskId: string, patch: Partial<Pick<ResearchTaskOverride, "status" | "owner" | "note">>) => void;
+  onResetTaskOverride: (taskId: string) => void;
   onExportResearchTaskCsv: () => void;
   onExportResearchTaskLifecycleCsv: () => void;
 };
@@ -41,6 +45,9 @@ export function ResearchTaskBoardSection({
   tasks,
   summary,
   lifecycle,
+  taskOverrides,
+  onTaskOverrideChange,
+  onResetTaskOverride,
   onExportResearchTaskCsv,
   onExportResearchTaskLifecycleCsv,
 }: ResearchTaskBoardSectionProps) {
@@ -144,36 +151,81 @@ export function ResearchTaskBoardSection({
 
       {tasks.length ? (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-2 text-xs">
-          {tasks.slice(0, 6).map((task) => (
-            <div key={task.id} className={`rounded-md border p-3 min-w-0 ${statusPanelClass(task.status)}`}>
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="font-bold text-slate-100 truncate">{task.title}</p>
-                  <p className="mt-1 text-[11px] text-slate-500 truncate">
-                    {researchTaskLaneLabel(task.lane)} · {task.owner} · {task.source}
-                  </p>
+          {tasks.slice(0, 6).map((task) => {
+            const override = taskOverrides.find((item) => item.taskId === task.id);
+
+            return (
+              <div key={task.id} className={`rounded-md border p-3 min-w-0 ${statusPanelClass(task.status)}`}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-bold text-slate-100 truncate">{task.title}</p>
+                      {task.isManualOverride ? (
+                        <span className="rounded bg-cyan-500/15 px-2 py-0.5 text-[10px] font-bold text-cyan-200">
+                          手動
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="mt-1 text-[11px] text-slate-500 truncate">
+                      {researchTaskLaneLabel(task.lane)} · {task.owner} · {task.source}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 flex-col items-end gap-1">
+                    <span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${priorityBadgeClass(task.priority)}`}>
+                      {researchTaskPriorityLabel(task.priority)}
+                    </span>
+                    <span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${statusBadgeClass(task.status)}`}>
+                      {researchTaskStatusLabel(task.status)}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex shrink-0 flex-col items-end gap-1">
-                  <span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${priorityBadgeClass(task.priority)}`}>
-                    {researchTaskPriorityLabel(task.priority)}
-                  </span>
-                  <span className={`rounded border px-2 py-0.5 text-[10px] font-bold ${statusBadgeClass(task.status)}`}>
-                    {researchTaskStatusLabel(task.status)}
-                  </span>
+                <div className="mt-3 grid grid-cols-1 md:grid-cols-[0.8fr_1.2fr] gap-2">
+                  <div className="rounded bg-slate-950/70 p-2">
+                    <p className="text-[10px] font-bold text-slate-500">依據</p>
+                    <p className="mt-1 font-mono text-[11px] leading-relaxed text-slate-400">{task.evidence}</p>
+                  </div>
+                  <div className="rounded bg-slate-950/70 p-2">
+                    <p className="text-[10px] font-bold text-slate-500">下一步</p>
+                    <p className="mt-1 text-[11px] leading-relaxed text-slate-400">{task.nextAction}</p>
+                  </div>
                 </div>
+                <div className="mt-3 grid grid-cols-1 md:grid-cols-[130px_1fr_auto] gap-2">
+                  <select
+                    value={task.status}
+                    onChange={(event) => onTaskOverrideChange(task.id, { status: event.target.value as ResearchTaskStatus })}
+                    className="rounded-md border border-slate-800 bg-slate-950 px-2 py-2 text-slate-100"
+                  >
+                    <option value="blocked">阻塞</option>
+                    <option value="active">進行中</option>
+                    <option value="ready">待覆核</option>
+                    <option value="done">完成</option>
+                  </select>
+                  <input
+                    value={task.owner}
+                    onChange={(event) => onTaskOverrideChange(task.id, { owner: event.target.value })}
+                    placeholder="負責人"
+                    className="rounded-md border border-slate-800 bg-slate-950 px-2 py-2 text-slate-100 outline-none focus:border-cyan-600"
+                  />
+                  <button
+                    onClick={() => onResetTaskOverride(task.id)}
+                    disabled={!override}
+                    className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 font-bold text-slate-300 hover:border-cyan-600 disabled:cursor-not-allowed disabled:text-slate-700"
+                  >
+                    重設
+                  </button>
+                </div>
+                <input
+                  value={task.manualNote ?? ""}
+                  onChange={(event) => onTaskOverrideChange(task.id, { note: event.target.value })}
+                  placeholder="人工備註"
+                  className="mt-2 w-full rounded-md border border-slate-800 bg-slate-950 px-2 py-2 text-slate-100 outline-none placeholder:text-slate-700 focus:border-cyan-600"
+                />
+                {task.manuallyUpdatedAt ? (
+                  <p className="mt-2 text-[10px] text-slate-600">更新：{task.manuallyUpdatedAt.slice(0, 19)}</p>
+                ) : null}
               </div>
-              <div className="mt-3 grid grid-cols-1 md:grid-cols-[0.8fr_1.2fr] gap-2">
-                <div className="rounded bg-slate-950/70 p-2">
-                  <p className="text-[10px] font-bold text-slate-500">依據</p>
-                  <p className="mt-1 font-mono text-[11px] leading-relaxed text-slate-400">{task.evidence}</p>
-                </div>
-                <div className="rounded bg-slate-950/70 p-2">
-                  <p className="text-[10px] font-bold text-slate-500">下一步</p>
-                  <p className="mt-1 text-[11px] leading-relaxed text-slate-400">{task.nextAction}</p>
-                </div>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
         <div className="rounded-md border border-dashed border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-500">

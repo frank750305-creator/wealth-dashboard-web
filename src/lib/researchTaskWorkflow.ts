@@ -24,6 +24,9 @@ export type ResearchTaskItem = {
   source: string;
   evidence: string;
   nextAction: string;
+  manualNote?: string;
+  manuallyUpdatedAt?: string;
+  isManualOverride?: boolean;
 };
 
 export type ResearchTaskSummary = {
@@ -68,6 +71,14 @@ export type ResearchTaskLifecycle = {
   auditRecords: ResearchLifecycleAuditRecord[];
 };
 
+export type ResearchTaskOverride = {
+  taskId: string;
+  status?: ResearchTaskStatus;
+  owner?: string;
+  note?: string;
+  updatedAt: string;
+};
+
 type BuildResearchTaskItemsInput = {
   comparisonRows: AssetComparisonRow[];
   visibleComparisonRows: AssetComparisonRow[];
@@ -78,6 +89,8 @@ type BuildResearchTaskItemsInput = {
   researchOwner: string;
   riskOwner: string;
 };
+
+const researchTaskOverrideStorageKey = "wealth-dashboard.researchTaskOverrides";
 
 type BuildResearchTaskLifecycleInput = {
   tasks: ResearchTaskItem[];
@@ -92,6 +105,10 @@ function csvCell(value: unknown) {
   if (value === null || value === undefined) return "";
   const text = String(value);
   return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function isResearchTaskStatus(value: unknown): value is ResearchTaskStatus {
+  return value === "blocked" || value === "active" || value === "ready" || value === "done";
 }
 
 function taskPriorityFromAlert(priority: MarketAlertPriority): ResearchTaskPriority {
@@ -199,6 +216,53 @@ export function researchTaskLaneLabel(lane: ResearchTaskLane) {
   if (lane === "risk") return "風控";
   if (lane === "allocation") return "配置";
   return "管控";
+}
+
+export function loadResearchTaskOverridesFromStorage(): ResearchTaskOverride[] {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(researchTaskOverrideStorageKey) || "[]");
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed.filter((item): item is ResearchTaskOverride => {
+      if (!item || typeof item !== "object") return false;
+      const override = item as Partial<ResearchTaskOverride>;
+      return (
+        typeof override.taskId === "string" &&
+        typeof override.updatedAt === "string" &&
+        (override.status === undefined || isResearchTaskStatus(override.status)) &&
+        (override.owner === undefined || typeof override.owner === "string") &&
+        (override.note === undefined || typeof override.note === "string")
+      );
+    });
+  } catch {
+    return [];
+  }
+}
+
+export function writeResearchTaskOverridesToStorage(overrides: ResearchTaskOverride[]) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(researchTaskOverrideStorageKey, JSON.stringify(overrides));
+}
+
+export function applyResearchTaskOverrides(tasks: ResearchTaskItem[], overrides: ResearchTaskOverride[]) {
+  const overrideByTaskId = new Map(overrides.map((override) => [override.taskId, override]));
+
+  return tasks.map((task) => {
+    const override = overrideByTaskId.get(task.id);
+    if (!override) return task;
+
+    const manualNote = override.note?.trim();
+    return {
+      ...task,
+      status: override.status ?? task.status,
+      owner: override.owner?.trim() || task.owner,
+      manualNote: manualNote || undefined,
+      manuallyUpdatedAt: override.updatedAt,
+      isManualOverride: true,
+    };
+  });
 }
 
 export function buildResearchTaskItems({
@@ -352,6 +416,8 @@ export function researchTaskCsv(rows: ResearchTaskItem[]) {
     "source",
     "evidence",
     "next_action",
+    "manual_note",
+    "manual_updated_at",
   ];
   const csvRows = rows.map((row) => [
     researchTaskLaneLabel(row.lane),
@@ -363,6 +429,8 @@ export function researchTaskCsv(rows: ResearchTaskItem[]) {
     row.source,
     row.evidence,
     row.nextAction,
+    row.manualNote ?? "",
+    row.manuallyUpdatedAt ?? "",
   ]);
 
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
