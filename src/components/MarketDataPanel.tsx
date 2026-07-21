@@ -162,9 +162,11 @@ import {
 } from "@/lib/investmentCommitteeWorkflow";
 import {
   buildExecutionFillRows,
+  buildExecutionRouteRows,
   buildTradeTicketApprovalGateItems,
   buildTradeTicketSyncPayload,
   executionFillCsv,
+  executionRouteCsv,
   tradeBatchCsv,
   tradeBatchRows,
   tradeTicketApprovalGateCsv,
@@ -200,6 +202,7 @@ import { EnterpriseReadinessSection } from "./EnterpriseReadinessSection";
 import { ExecutionFillSection } from "./ExecutionFillSection";
 import { ExecutionHandoffSection } from "./ExecutionHandoffSection";
 import { ExecutionReviewSection } from "./ExecutionReviewSection";
+import { ExecutionRoutingSection } from "./ExecutionRoutingSection";
 import { MonitoringRulesSection } from "./MonitoringRulesSection";
 import { MarketAlertSection } from "./MarketAlertSection";
 import { MarketSourceInventorySection } from "./MarketSourceInventorySection";
@@ -299,6 +302,11 @@ export function MarketDataPanel() {
   const [riskOwner, setRiskOwner] = useState("風控");
   const [settlementOwner, setSettlementOwner] = useState("中台");
   const [handoffDueDays, setHandoffDueDays] = useState(3);
+  const [primaryExecutionVenue, setPrimaryExecutionVenue] = useState("Paper Broker");
+  const [backupExecutionVenue, setBackupExecutionVenue] = useState("Manual Review Queue");
+  const [venueCapacityAmount, setVenueCapacityAmount] = useState(500_000);
+  const [routeSlippageBps, setRouteSlippageBps] = useState(6);
+  const [routeCommissionBps, setRouteCommissionBps] = useState(2);
   const [fillCompletionPercent, setFillCompletionPercent] = useState(100);
   const [fillSlippageBps, setFillSlippageBps] = useState(8);
   const [fillCommissionBps, setFillCommissionBps] = useState(3);
@@ -807,6 +815,21 @@ export function MarketDataPanel() {
   const tradeTicketApprovalWatchCount = tradeTicketApprovalGateItems.filter((item) => item.status === "watch").length;
   const tradeTicketApprovalDecision: ExecutionReviewStatus =
     tradeTicketApprovalBlockCount > 0 ? "block" : tradeTicketApprovalWatchCount > 0 ? "watch" : "pass";
+  const executionRouteRows = buildExecutionRouteRows({
+    tradeBatches,
+    approvalDecision: tradeTicketApprovalDecision,
+    primaryVenue: primaryExecutionVenue,
+    backupVenue: backupExecutionVenue,
+    venueCapacityAmount,
+    routeSlippageBps,
+    routeCommissionBps,
+  });
+  const executionRouteBlockedCount = executionRouteRows.filter((row) => row.routeState === "blocked").length;
+  const executionRouteStagedCount = executionRouteRows.filter((row) => row.routeState === "staged").length;
+  const executionRouteRoutedCount = executionRouteRows.filter((row) => row.routeState === "routed").length;
+  const estimatedRouteCost = executionRouteRows.reduce((sum, row) => sum + row.estimatedRouteCost, 0);
+  const executionRouteDecision: ExecutionReviewStatus =
+    executionRouteBlockedCount > 0 ? "block" : executionRouteStagedCount > 0 ? "watch" : "pass";
   const dataProductCatalogItems = buildDataProductCatalogItems({
     dataReadinessDecision,
     coverageUniverseDecision,
@@ -1548,6 +1571,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `bigquery-execution-handoff-${resultStamp()}.csv`,
       executionHandoffCsv(executionHandoffItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportExecutionRouteCsv = () => {
+    if (!executionRouteRows.length) return;
+
+    downloadTextFile(
+      `bigquery-execution-routes-${resultStamp()}.csv`,
+      executionRouteCsv(executionRouteRows),
       "text/csv;charset=utf-8",
     );
   };
@@ -2379,6 +2411,26 @@ export function MarketDataPanel() {
                             handoffWatchCount={handoffWatchCount}
                             handoffHighPriorityCount={handoffHighPriorityCount}
                             executionHandoffItems={executionHandoffItems}
+                          />
+
+                          <ExecutionRoutingSection
+                            executionRouteDecision={executionRouteDecision}
+                            primaryVenue={primaryExecutionVenue}
+                            onPrimaryVenueChange={setPrimaryExecutionVenue}
+                            backupVenue={backupExecutionVenue}
+                            onBackupVenueChange={setBackupExecutionVenue}
+                            venueCapacityAmount={venueCapacityAmount}
+                            onVenueCapacityAmountChange={setVenueCapacityAmount}
+                            routeSlippageBps={routeSlippageBps}
+                            onRouteSlippageBpsChange={setRouteSlippageBps}
+                            routeCommissionBps={routeCommissionBps}
+                            onRouteCommissionBpsChange={setRouteCommissionBps}
+                            onExportExecutionRouteCsv={handleExportExecutionRouteCsv}
+                            executionRouteRows={executionRouteRows}
+                            routedCount={executionRouteRoutedCount}
+                            stagedCount={executionRouteStagedCount}
+                            blockedCount={executionRouteBlockedCount}
+                            estimatedRouteCost={estimatedRouteCost}
                           />
 
                           <ExecutionFillSection

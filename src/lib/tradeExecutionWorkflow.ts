@@ -56,6 +56,21 @@ export type TradeTicketApprovalGateItem = {
   action: string;
 };
 
+export type ExecutionRouteState = "blocked" | "staged" | "routed";
+
+export type ExecutionRouteRow = TradeBatchRow & {
+  routeId: string;
+  venue: string;
+  routeState: ExecutionRouteState;
+  routeStatus: ExecutionReviewStatus;
+  routeSequence: number;
+  routeNotional: number;
+  estimatedSlippageBps: number;
+  estimatedCommissionBps: number;
+  estimatedRouteCost: number;
+  routeNote: string;
+};
+
 function normalizeWarehouseKey(value: string | undefined, fallback: string) {
   const cleanValue = String(value || fallback).trim().replaceAll(" ", "-").slice(0, 80);
   return cleanValue || fallback;
@@ -75,6 +90,12 @@ function executionReviewLabel(status: ExecutionReviewStatus) {
 
 export function tradeTicketApprovalLabel(status: ExecutionReviewStatus) {
   return executionReviewLabel(status);
+}
+
+export function executionRouteStateLabel(state: ExecutionRouteState) {
+  if (state === "routed") return "已模擬路由";
+  if (state === "staged") return "待人工確認";
+  return "暫停路由";
 }
 
 export function tradeTicketRows(rows: RebalanceDraftRow[], minimumTradeAmount: number): TradeTicketRow[] {
@@ -406,6 +427,104 @@ export function tradeTicketApprovalGateCsv(rows: TradeTicketApprovalGateItem[]) 
     row.evidence,
     row.rule,
     row.action,
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+export function buildExecutionRouteRows({
+  tradeBatches,
+  approvalDecision,
+  primaryVenue,
+  backupVenue,
+  venueCapacityAmount,
+  routeSlippageBps,
+  routeCommissionBps,
+}: {
+  tradeBatches: TradeBatchRow[];
+  approvalDecision: ExecutionReviewStatus;
+  primaryVenue: string;
+  backupVenue: string;
+  venueCapacityAmount: number;
+  routeSlippageBps: number;
+  routeCommissionBps: number;
+}): ExecutionRouteRow[] {
+  const cleanPrimaryVenue = primaryVenue.trim() || "Paper route";
+  const cleanBackupVenue = backupVenue.trim() || "Manual review queue";
+  const cleanVenueCapacityAmount = Math.max(0, venueCapacityAmount);
+  const cleanRouteSlippageBps = Math.max(0, routeSlippageBps);
+  const cleanRouteCommissionBps = Math.max(0, routeCommissionBps);
+  const allInCostBps = cleanRouteSlippageBps + cleanRouteCommissionBps;
+
+  return tradeBatches.map((row, index) => {
+    const exceedsVenueCapacity = cleanVenueCapacityAmount > 0 && row.batchGrossAmount > cleanVenueCapacityAmount;
+    const routeStatus: ExecutionReviewStatus =
+      approvalDecision === "block"
+        ? "block"
+        : exceedsVenueCapacity || approvalDecision === "watch" || allInCostBps > 30
+          ? "watch"
+          : "pass";
+    const routeState: ExecutionRouteState =
+      routeStatus === "block" ? "blocked" : routeStatus === "watch" ? "staged" : "routed";
+    const venue = routeStatus === "pass" ? cleanPrimaryVenue : cleanBackupVenue;
+    const estimatedRouteCost = row.ticketAmount * (allInCostBps / 10_000);
+    const routeNote =
+      routeStatus === "block"
+        ? "approval gate 尚未通過，禁止進入正式路由"
+        : exceedsVenueCapacity
+          ? "批次金額超過 venue 容量，需拆單或改走人工隊列"
+          : routeStatus === "watch"
+            ? "需人工確認後才能進入正式路由"
+            : "僅為模擬路由，尚未送出真實委託";
+
+    return {
+      ...row,
+      routeId: `RT-${row.batchNumber}-${row.sequenceInBatch}-${row.symbol}-${row.direction}`,
+      venue,
+      routeState,
+      routeStatus,
+      routeSequence: index + 1,
+      routeNotional: row.ticketAmount,
+      estimatedSlippageBps: cleanRouteSlippageBps,
+      estimatedCommissionBps: cleanRouteCommissionBps,
+      estimatedRouteCost,
+      routeNote,
+    };
+  });
+}
+
+export function executionRouteCsv(rows: ExecutionRouteRow[]) {
+  const header = [
+    "route_id",
+    "route_sequence",
+    "batch_number",
+    "symbol",
+    "direction",
+    "venue",
+    "route_state",
+    "route_status",
+    "route_notional",
+    "estimated_slippage_bps",
+    "estimated_commission_bps",
+    "estimated_route_cost",
+    "cash_impact",
+    "note",
+  ];
+  const csvRows = rows.map((row) => [
+    row.routeId,
+    row.routeSequence,
+    row.batchNumber,
+    row.symbol,
+    row.direction,
+    row.venue,
+    executionRouteStateLabel(row.routeState),
+    executionReviewLabel(row.routeStatus),
+    row.routeNotional,
+    row.estimatedSlippageBps,
+    row.estimatedCommissionBps,
+    row.estimatedRouteCost,
+    row.cashImpact,
+    row.routeNote,
   ]);
 
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
