@@ -38,6 +38,7 @@ import {
   fetchBigQueryAssetProfile,
   fetchBigQueryAssets,
   fetchLatestResearchTasksFromBigQuery,
+  fetchResearchTaskWarehouseStatus,
   syncResearchTasksToBigQuery,
 } from "@/lib/marketApi";
 import {
@@ -164,6 +165,7 @@ import type {
   BigQueryAsset,
   BigQueryAssetHistoryResponse,
   BigQueryAssetProfileResponse,
+  ResearchTaskWarehouseStatus,
 } from "@/types/market";
 import { AllocationDraftSection } from "./AllocationDraftSection";
 import { AssetComparisonTable } from "./AssetComparisonTable";
@@ -302,6 +304,8 @@ export function MarketDataPanel() {
     "idle" | "syncing" | "loading" | "synced" | "loaded" | "error"
   >("idle");
   const [researchTaskSyncMessage, setResearchTaskSyncMessage] = useState("");
+  const [researchTaskWarehouseStatus, setResearchTaskWarehouseStatus] = useState<ResearchTaskWarehouseStatus | null>(null);
+  const [researchTaskWarehouseError, setResearchTaskWarehouseError] = useState("");
   const [watchlistMemoCopyStatus, setWatchlistMemoCopyStatus] = useState<"idle" | "copied">("idle");
   const sources = data?.sources ?? [];
   const securedCount = sources.filter((source) => source.status !== "needs_secret").length;
@@ -989,6 +993,29 @@ export function MarketDataPanel() {
 
     return () => {
       window.clearTimeout(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadResearchTaskWarehouseStatus() {
+      try {
+        const result = await fetchResearchTaskWarehouseStatus();
+        if (ignore) return;
+        setResearchTaskWarehouseStatus(result);
+        setResearchTaskWarehouseError("");
+      } catch (err: unknown) {
+        if (ignore) return;
+        setResearchTaskWarehouseStatus(null);
+        setResearchTaskWarehouseError(err instanceof Error ? err.message : String(err));
+      }
+    }
+
+    void loadResearchTaskWarehouseStatus();
+
+    return () => {
+      ignore = true;
     };
   }, []);
 
@@ -2010,6 +2037,8 @@ export function MarketDataPanel() {
             taskOverrides={researchTaskOverrides}
             hasBigQueryCredentials={hasBigQueryCredentials}
             workspaceId={researchTaskWorkspaceId}
+            warehouseTable={researchTaskWarehouseStatus?.taskTable}
+            warehouseError={researchTaskWarehouseError}
             syncStatus={researchTaskSyncStatus}
             syncMessage={researchTaskSyncMessage}
             onWorkspaceIdChange={setResearchTaskWorkspaceId}

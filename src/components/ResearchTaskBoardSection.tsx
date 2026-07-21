@@ -17,6 +17,8 @@ type ResearchTaskBoardSectionProps = {
   taskOverrides: ResearchTaskOverride[];
   hasBigQueryCredentials: boolean;
   workspaceId: string;
+  warehouseTable?: string;
+  warehouseError: string;
   syncStatus: "idle" | "syncing" | "loading" | "synced" | "loaded" | "error";
   syncMessage: string;
   onWorkspaceIdChange: (value: string) => void;
@@ -61,6 +63,8 @@ export function ResearchTaskBoardSection({
   taskOverrides,
   hasBigQueryCredentials,
   workspaceId,
+  warehouseTable,
+  warehouseError,
   syncStatus,
   syncMessage,
   onWorkspaceIdChange,
@@ -152,6 +156,22 @@ export function ResearchTaskBoardSection({
           {syncMessage}
         </p>
       ) : null}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
+        <div className="rounded-md border border-slate-800 bg-slate-950/60 p-2 min-w-0">
+          <p className="text-[10px] text-slate-600">Workspace</p>
+          <p className="mt-1 truncate font-mono font-bold text-slate-100">{workspaceId.trim() || "default"}</p>
+        </div>
+        <div className="rounded-md border border-slate-800 bg-slate-950/60 p-2 min-w-0">
+          <p className="text-[10px] text-slate-600">BigQuery Table</p>
+          <p className="mt-1 truncate font-mono font-bold text-slate-100">{warehouseTable || "--"}</p>
+        </div>
+        <div className="rounded-md border border-slate-800 bg-slate-950/60 p-2 min-w-0">
+          <p className="text-[10px] text-slate-600">Warehouse</p>
+          <p className={`mt-1 truncate font-bold ${warehouseError ? "text-rose-300" : hasBigQueryCredentials ? "text-emerald-300" : "text-amber-300"}`}>
+            {warehouseError || (hasBigQueryCredentials ? "Ready" : "Missing credentials")}
+          </p>
+        </div>
+      </div>
 
       <div className={`rounded-md border p-3 ${statusPanelClass(lifecycle.gateStatus)}`}>
         <div className="flex flex-col xl:flex-row xl:items-start justify-between gap-3">
