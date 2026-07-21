@@ -66,6 +66,28 @@ export type BigQuerySchemaCheck = {
   isReady: boolean;
 };
 
+export type BigQueryQualityStatus = "strong" | "watch" | "risk" | "neutral";
+
+export type BigQueryQualityScorecardDimension = {
+  id: string;
+  label: string;
+  score: number;
+  status: BigQueryQualityStatus;
+  weight: number;
+  evidence: string;
+  action: string;
+};
+
+export type BigQueryQualityScorecard = {
+  overallScore: number;
+  status: BigQueryQualityStatus;
+  level: "production_ready" | "watchlist" | "blocked" | string;
+  summary: string;
+  dimensions: BigQueryQualityScorecardDimension[];
+  blockers: string[];
+  nextActions: string[];
+};
+
 export type BigQueryMarketDiagnostics = {
   generatedAt: string;
   status: Omit<BigQueryMarketStatus, "generatedAt">;
@@ -78,6 +100,7 @@ export type BigQueryMarketDiagnostics = {
   recentSymbols: BigQueryRecentSymbol[];
   staleSymbols?: BigQueryStaleSymbol[];
   fxCurrencies?: BigQueryFxCurrency[];
+  qualityScorecard?: BigQueryQualityScorecard;
 };
 
 export type BigQueryAsset = {

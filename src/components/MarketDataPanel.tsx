@@ -142,6 +142,7 @@ import { BigQueryConnectionSection } from "./BigQueryConnectionSection";
 import { BigQueryPortfolioPanel } from "./BigQueryPortfolioPanel";
 import {
   BigQueryQualityCardGrid,
+  BigQueryQualityScorecard,
   BigQueryWarehouseSnapshotSection,
 } from "./BigQueryWarehouseDiagnosticsSection";
 import { AssetProfileSection } from "./AssetProfileSection";
@@ -1586,6 +1587,7 @@ export function MarketDataPanel() {
                 qualityCards={qualityCards}
                 issueCards={issueCards}
               />
+              <BigQueryQualityScorecard scorecard={bigQueryDiagnostics.qualityScorecard} />
 
               <DataOperationsSection
                 dataPipelineDecision={dataPipelineDecision}

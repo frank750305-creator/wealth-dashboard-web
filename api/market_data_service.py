@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from datetime import date
 from typing import Dict, Iterable, List, Optional
 
 import numpy as np
@@ -71,9 +72,11 @@ def load_bigquery_market_diagnostics() -> Dict:
         "recentSymbols": [],
         "staleSymbols": [],
         "fxCurrencies": [],
+        "qualityScorecard": {},
     }
 
     if not schema_checks["priceTable"]["isReady"] or not schema_checks["fxTable"]["isReady"]:
+        diagnostics["qualityScorecard"] = _build_bigquery_quality_scorecard(diagnostics)
         return diagnostics
 
     price_summary_query = f"""
@@ -173,6 +176,7 @@ def load_bigquery_market_diagnostics() -> Dict:
         _summary_row_to_dict(row, date_fields=("first_date", "latest_date"))
         for row in fx_currencies
     ]
+    diagnostics["qualityScorecard"] = _build_bigquery_quality_scorecard(diagnostics)
     return diagnostics
 
 
@@ -637,6 +641,205 @@ def _load_schema_checks(*, bigquery, client, price_table_name: str, fx_table_nam
         "priceTable": table_check(price_table_name),
         "fxTable": table_check(fx_table_name),
     }
+
+
+def _build_bigquery_quality_scorecard(diagnostics: Dict) -> Dict:
+    schema_checks = diagnostics.get("schemaChecks") or {}
+    price_schema = schema_checks.get("priceTable") or {}
+    fx_schema = schema_checks.get("fxTable") or {}
+    price_summary = diagnostics.get("priceSummary") or {}
+    fx_summary = diagnostics.get("fxSummary") or {}
+    stale_symbols = diagnostics.get("staleSymbols") or []
+
+    price_schema_ready = bool(price_schema.get("isReady"))
+    fx_schema_ready = bool(fx_schema.get("isReady"))
+    schema_ready_count = int(price_schema_ready) + int(fx_schema_ready)
+    schema_score = 100 if schema_ready_count == 2 else 50 if schema_ready_count == 1 else 0
+
+    price_days = _days_since_iso_date(price_summary.get("latest_date"))
+    fx_days = _days_since_iso_date(fx_summary.get("latest_date"))
+    freshness_score = round((_freshness_score(price_days) + _freshness_score(fx_days)) / 2)
+
+    symbol_score = _coverage_score(_safe_number(price_summary.get("symbol_count")), strong=100, watch=50)
+    row_score = _coverage_score(_safe_number(price_summary.get("row_count")), strong=100_000, watch=50_000)
+    fx_score = _coverage_score(_safe_number(fx_summary.get("currency_count")), strong=3, watch=2)
+    coverage_score = round(symbol_score * 0.45 + row_score * 0.35 + fx_score * 0.20)
+
+    price_row_count = _safe_number(price_summary.get("row_count"))
+    adjusted_rows = _safe_number(price_summary.get("adjusted_price_rows"))
+    raw_rows = _safe_number(price_summary.get("raw_price_rows"))
+    if price_row_count > 0:
+        completeness_score = round(min(max(adjusted_rows, raw_rows) / price_row_count, 1) * 100)
+    else:
+        completeness_score = 0
+
+    max_stale_days = max(
+        [_safe_number(symbol.get("stale_days")) for symbol in stale_symbols],
+        default=0,
+    )
+    exception_score = _exception_score(len(stale_symbols), max_stale_days)
+
+    dimensions = [
+        _quality_dimension(
+            "schema",
+            "Schema contract",
+            schema_score,
+            25,
+            "daily_prices / daily_fx required columns",
+            "補齊缺失欄位" if schema_score < 100 else "維持 schema contract",
+        ),
+        _quality_dimension(
+            "freshness",
+            "Freshness",
+            freshness_score,
+            25,
+            f"price {price_days if price_days is not None else '--'}d / fx {fx_days if fx_days is not None else '--'}d",
+            "檢查每日更新批次" if freshness_score < 85 else "維持每日更新監控",
+        ),
+        _quality_dimension(
+            "coverage",
+            "Coverage",
+            coverage_score,
+            20,
+            f"{int(_safe_number(price_summary.get('symbol_count')))} symbols / {int(_safe_number(fx_summary.get('currency_count')))} FX",
+            "擴充商品池與 FX 幣別" if coverage_score < 85 else "可支援主要投組分析",
+        ),
+        _quality_dimension(
+            "completeness",
+            "Price completeness",
+            completeness_score,
+            15,
+            f"adj {int(adjusted_rows)} / raw {int(raw_rows)} / total {int(price_row_count)}",
+            "回補缺漏價格欄位" if completeness_score < 85 else "價格欄位覆蓋正常",
+        ),
+        _quality_dimension(
+            "exceptions",
+            "Stale exceptions",
+            exception_score,
+            15,
+            f"{len(stale_symbols)} stale symbols / max {int(max_stale_days)}d",
+            "優先回補落後商品" if exception_score < 85 else "未見重大落後商品",
+        ),
+    ]
+    total_weight = sum(item["weight"] for item in dimensions)
+    overall_score = round(sum(item["score"] * item["weight"] for item in dimensions) / total_weight)
+    blockers = _quality_blockers(dimensions, price_schema, fx_schema)
+    status = "risk" if blockers else _quality_status(overall_score)
+    level = "production_ready" if status == "strong" else "watchlist" if status == "watch" else "blocked"
+
+    return {
+        "overallScore": overall_score,
+        "status": status,
+        "level": level,
+        "summary": _quality_summary(overall_score, blockers),
+        "dimensions": dimensions,
+        "blockers": blockers,
+        "nextActions": _quality_next_actions(dimensions, blockers),
+    }
+
+
+def _quality_dimension(id: str, label: str, score: int, weight: int, evidence: str, action: str) -> Dict:
+    bounded_score = max(0, min(int(score), 100))
+    return {
+        "id": id,
+        "label": label,
+        "score": bounded_score,
+        "status": _quality_status(bounded_score),
+        "weight": weight,
+        "evidence": evidence,
+        "action": action,
+    }
+
+
+def _quality_status(score: int) -> str:
+    if score >= 85:
+        return "strong"
+    if score >= 60:
+        return "watch"
+    return "risk"
+
+
+def _quality_summary(score: int, blockers: List[str]) -> str:
+    if blockers:
+        return "資料倉儲尚未達到投資分析放行條件。"
+    if score >= 85:
+        return "資料倉儲可支援主要投組分析工作流。"
+    if score >= 60:
+        return "資料倉儲可試跑，但建議先處理觀察項。"
+    return "資料倉儲品質偏弱，應先修復再進入分析。"
+
+
+def _quality_blockers(dimensions: List[Dict], price_schema: Dict, fx_schema: Dict) -> List[str]:
+    blockers: List[str] = []
+    if not price_schema.get("isReady"):
+        blockers.append(f"daily_prices missing columns: {', '.join(price_schema.get('missingColumns') or []) or '--'}")
+    if not fx_schema.get("isReady"):
+        blockers.append(f"daily_fx missing columns: {', '.join(fx_schema.get('missingColumns') or []) or '--'}")
+    for item in dimensions:
+        if item["status"] == "risk":
+            blockers.append(f"{item['label']}: {item['evidence']}")
+    return list(dict.fromkeys(blockers))[:6]
+
+
+def _quality_next_actions(dimensions: List[Dict], blockers: List[str]) -> List[str]:
+    if blockers:
+        return ["先修復 block 項目", "完成回補後重新讀取 diagnostics", "再放行投組分析與研究報告輸出"]
+    actions = [item["action"] for item in dimensions if item["status"] != "strong"]
+    if not actions:
+        return ["維持每日批次監控", "將 scorecard 納入部署後 health check", "建立資料異常告警"]
+    return list(dict.fromkeys(actions))[:4]
+
+
+def _safe_number(value) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return 0
+    return numeric if np.isfinite(numeric) else 0
+
+
+def _coverage_score(value: float, *, strong: float, watch: float) -> int:
+    if value >= strong:
+        return 100
+    if value >= watch:
+        return 75
+    if value > 0:
+        return 35
+    return 0
+
+
+def _freshness_score(days: Optional[int]) -> int:
+    if days is None:
+        return 0
+    if days <= 1:
+        return 100
+    if days <= 3:
+        return 85
+    if days <= 10:
+        return 65
+    if days <= 30:
+        return 35
+    return 10
+
+
+def _exception_score(stale_count: int, max_stale_days: float) -> int:
+    if stale_count <= 0:
+        return 100
+    if stale_count <= 3 and max_stale_days <= 3:
+        return 85
+    if stale_count <= 8 and max_stale_days <= 10:
+        return 60
+    return 35
+
+
+def _days_since_iso_date(value: Optional[str]) -> Optional[int]:
+    if not value:
+        return None
+    try:
+        parsed = date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
+    return max(0, (date.today() - parsed).days)
 
 
 def _summary_row_to_dict(row, *, date_fields: tuple[str, ...]) -> Dict:

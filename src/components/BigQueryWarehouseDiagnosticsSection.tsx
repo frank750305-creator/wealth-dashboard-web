@@ -10,6 +10,7 @@ import {
 import type {
   BigQueryFxCurrency,
   BigQueryMarketDiagnostics,
+  BigQueryQualityScorecard,
   BigQueryStaleSymbol,
 } from "@/types/market";
 
@@ -31,6 +32,22 @@ type BigQueryWarehouseSnapshotSectionProps = {
   staleSymbols: BigQueryStaleSymbol[];
   fxCurrencies: BigQueryFxCurrency[];
 };
+
+type BigQueryQualityScorecardProps = {
+  scorecard: BigQueryQualityScorecard | undefined;
+};
+
+function qualityScoreWidth(score: number) {
+  if (!Number.isFinite(score)) return "0%";
+  return `${Math.max(0, Math.min(score, 100)).toFixed(0)}%`;
+}
+
+function qualityLevelLabel(level: string) {
+  if (level === "production_ready") return "可放行";
+  if (level === "watchlist") return "觀察";
+  if (level === "blocked") return "阻擋";
+  return level || "--";
+}
 
 export function BigQueryQualityCardGrid({
   qualityCards,
@@ -72,6 +89,96 @@ export function BigQueryQualityCardGrid({
         ))}
       </div>
     </>
+  );
+}
+
+export function BigQueryQualityScorecard({
+  scorecard,
+}: BigQueryQualityScorecardProps) {
+  if (!scorecard) return null;
+
+  return (
+    <div className={`rounded-lg border p-3 ${qualityClass(scorecard.status)}`}>
+      <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <p className="text-xs font-bold text-slate-100">Data Quality Scorecard</p>
+            <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${qualityBadgeClass(scorecard.status)}`}>
+              {qualityLabel(scorecard.status)}
+            </span>
+            <span className="rounded border border-slate-700 bg-slate-900 px-2 py-0.5 text-[10px] font-bold text-slate-300">
+              {qualityLevelLabel(scorecard.level)}
+            </span>
+          </div>
+          <p className="mt-1 text-[11px] text-slate-500">{scorecard.summary}</p>
+        </div>
+        <div className="lg:w-56">
+          <div className="flex items-end justify-between gap-3">
+            <span className="font-mono text-3xl font-bold text-slate-100">{scorecard.overallScore}</span>
+            <span className="pb-1 text-[11px] text-slate-500">/ 100</span>
+          </div>
+          <div className="mt-2 h-2 rounded-full bg-slate-900 overflow-hidden">
+            <div
+              className={`h-full rounded-full ${
+                scorecard.status === "strong"
+                  ? "bg-emerald-400"
+                  : scorecard.status === "watch"
+                    ? "bg-amber-400"
+                    : "bg-rose-400"
+              }`}
+              style={{ width: qualityScoreWidth(scorecard.overallScore) }}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-2 text-xs">
+        {scorecard.dimensions.map((dimension) => (
+          <div key={dimension.id} className="rounded-md border border-slate-800 bg-slate-950/70 p-2 min-w-0">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[11px] text-slate-500 truncate">{dimension.label}</p>
+              <span className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-bold ${qualityBadgeClass(dimension.status)}`}>
+                {dimension.score}
+              </span>
+            </div>
+            <div className="mt-2 h-1.5 rounded-full bg-slate-900 overflow-hidden">
+              <div className="h-full rounded-full bg-cyan-400" style={{ width: qualityScoreWidth(dimension.score) }} />
+            </div>
+            <p className="mt-2 text-[11px] text-slate-400 truncate" title={dimension.evidence}>
+              {dimension.evidence}
+            </p>
+            <p className="mt-1 text-[11px] text-slate-600 truncate" title={dimension.action}>
+              {dimension.action}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      {(scorecard.blockers.length || scorecard.nextActions.length) ? (
+        <div className="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-2 text-xs">
+          <div className="rounded-md border border-slate-800 bg-slate-950/70 p-2">
+            <p className="text-[11px] font-bold text-slate-300">阻擋項</p>
+            <div className="mt-2 space-y-1 text-[11px] text-slate-500">
+              {(scorecard.blockers.length ? scorecard.blockers : ["目前沒有 block 項目"]).map((item) => (
+                <p key={item} className="truncate" title={item}>
+                  {item}
+                </p>
+              ))}
+            </div>
+          </div>
+          <div className="rounded-md border border-slate-800 bg-slate-950/70 p-2">
+            <p className="text-[11px] font-bold text-slate-300">下一步</p>
+            <div className="mt-2 space-y-1 text-[11px] text-slate-500">
+              {scorecard.nextActions.map((item) => (
+                <p key={item} className="truncate" title={item}>
+                  {item}
+                </p>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
