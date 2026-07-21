@@ -45,6 +45,10 @@ try:
         load_latest_post_trade_attribution_records,
         sync_post_trade_attribution_records,
     )
+    from .platform_exception_service import (
+        load_latest_platform_exception_records,
+        sync_platform_exception_records,
+    )
 except ImportError:
     from market_data_service import (
         MarketDataError,
@@ -83,6 +87,10 @@ except ImportError:
     from post_trade_attribution_service import (
         load_latest_post_trade_attribution_records,
         sync_post_trade_attribution_records,
+    )
+    from platform_exception_service import (
+        load_latest_platform_exception_records,
+        sync_platform_exception_records,
     )
 
 app = FastAPI(title="高資產傳承與所得稅擇優核算大腦", version="4.0_Ultimate")
@@ -248,6 +256,7 @@ async def platform_data_products():
                     "/api/v1/trading/route-events",
                     "/api/v1/trading/fills",
                     "/api/v1/trading/post-trade-attribution",
+                    "/api/v1/trading/platform-exceptions",
                 ],
             },
         ],
@@ -677,6 +686,33 @@ class PostTradeAttributionSyncPayload(BaseModel):
     generated_at: Optional[str] = None
     records: List[PostTradeAttributionSyncRecordPayload]
 
+class PlatformExceptionSyncRecordPayload(BaseModel):
+    workspace_id: Optional[str] = None
+    actor_id: Optional[str] = None
+    exception_id: str
+    idempotency_key: Optional[str] = None
+    generated_at: str
+    updated_at: str
+    portfolio_id: Optional[str] = None
+    batch_id: Optional[str] = None
+    exception_due_days: int = 0
+    source: str
+    owner: str
+    item: str
+    status: str
+    priority: str
+    due: Optional[str] = None
+    evidence: Optional[str] = None
+    next_action: Optional[str] = None
+
+class PlatformExceptionSyncPayload(BaseModel):
+    workspace_id: Optional[str] = None
+    actor_id: Optional[str] = None
+    portfolio_id: Optional[str] = None
+    batch_id: Optional[str] = None
+    generated_at: Optional[str] = None
+    records: List[PlatformExceptionSyncRecordPayload]
+
 def calc_tw_tax(net_inc: float) -> float:
     if net_inc <= 56: return net_inc * 0.05
     elif net_inc <= 126: return net_inc * 0.12 - 3.92
@@ -938,6 +974,44 @@ async def sync_trading_post_trade_attribution(payload: PostTradeAttributionSyncP
         return {
             "generatedAt": datetime.now(timezone.utc).isoformat(),
             **sync_post_trade_attribution_records(records),
+        }
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+@app.get("/api/v1/trading/platform-exceptions")
+async def trading_platform_exceptions(
+    workspace_id: Optional[str] = None,
+    portfolio_id: Optional[str] = None,
+    batch_id: Optional[str] = None,
+    limit: int = 100,
+):
+    try:
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            **load_latest_platform_exception_records(
+                limit=limit,
+                workspace_id=workspace_id,
+                portfolio_id=portfolio_id,
+                batch_id=batch_id,
+            ),
+        }
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+@app.post("/api/v1/trading/platform-exceptions")
+async def sync_trading_platform_exceptions(payload: PlatformExceptionSyncPayload):
+    try:
+        records = []
+        for record in payload.records:
+            item = record.model_dump()
+            item["workspace_id"] = item.get("workspace_id") or payload.workspace_id
+            item["actor_id"] = item.get("actor_id") or payload.actor_id
+            item["portfolio_id"] = item.get("portfolio_id") or payload.portfolio_id
+            item["batch_id"] = item.get("batch_id") or payload.batch_id
+            records.append(item)
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            **sync_platform_exception_records(records),
         }
     except MarketDataError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc))

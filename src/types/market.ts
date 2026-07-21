@@ -734,3 +734,56 @@ export type PostTradeAttributionWarehouseLatestResponse = {
   missingFields?: string[];
   attributions: PostTradeAttributionWarehouseRecord[];
 };
+
+export type PlatformExceptionWarehouseRecord = {
+  workspace_id: string;
+  actor_id: string;
+  exception_id: string;
+  idempotency_key: string;
+  generated_at: string;
+  updated_at: string;
+  portfolio_id: string | null;
+  batch_id: string | null;
+  exception_due_days: number;
+  source: string;
+  owner: string;
+  item: string;
+  status: string;
+  priority: string;
+  due: string | null;
+  evidence: string | null;
+  next_action: string | null;
+};
+
+export type PlatformExceptionWarehouseSyncPayload = {
+  table: string;
+  workspace_id: string;
+  actor_id: string;
+  portfolio_id: string;
+  batch_id: string;
+  generated_at: string;
+  record_count: number;
+  records: PlatformExceptionWarehouseRecord[];
+};
+
+export type PlatformExceptionWarehouseSyncResponse = {
+  generatedAt: string;
+  status: "synced" | "partial_error" | string;
+  table: string;
+  receivedCount: number;
+  insertedCount: number;
+  errors: unknown[];
+};
+
+export type PlatformExceptionWarehouseLatestResponse = {
+  generatedAt: string;
+  status: "loaded" | "missing" | "schema_outdated" | string;
+  table: string;
+  workspaceId: string;
+  portfolioId?: string | null;
+  batchId?: string | null;
+  limit: number;
+  exceptionCount: number;
+  missingFields?: string[];
+  exceptions: PlatformExceptionWarehouseRecord[];
+};

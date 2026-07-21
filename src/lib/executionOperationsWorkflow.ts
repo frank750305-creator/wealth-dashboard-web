@@ -6,7 +6,10 @@ import type {
   TradeBatchRow,
   TradeTicketRow,
 } from "@/lib/tradeExecutionWorkflow";
-import type { PostTradeAttributionWarehouseSyncPayload } from "@/types/market";
+import type {
+  PlatformExceptionWarehouseSyncPayload,
+  PostTradeAttributionWarehouseSyncPayload,
+} from "@/types/market";
 
 export type ExecutionHandoffPriority = "high" | "medium" | "low";
 
@@ -500,4 +503,61 @@ export function platformExceptionCsv(rows: PlatformExceptionItem[]) {
   ]);
 
   return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+export function buildPlatformExceptionSyncPayload({
+  items,
+  generatedAt,
+  workspaceId,
+  actorId,
+  portfolioId,
+  batchId,
+  exceptionDueDays,
+}: {
+  items: PlatformExceptionItem[];
+  generatedAt: string;
+  workspaceId?: string;
+  actorId?: string;
+  portfolioId?: string;
+  batchId?: string;
+  exceptionDueDays: number;
+}): PlatformExceptionWarehouseSyncPayload {
+  const cleanWorkspaceId = normalizeWarehouseKey(workspaceId, "default");
+  const cleanActorId = normalizeWarehouseKey(actorId, "system");
+  const cleanPortfolioId = normalizeWarehouseKey(portfolioId, "default-portfolio");
+  const cleanBatchId = normalizeWarehouseKey(batchId, generatedAt);
+  const records = items.map((item, index) => {
+    const exceptionId = `${cleanPortfolioId}:${cleanBatchId}:EXC:${index + 1}`;
+
+    return {
+      workspace_id: cleanWorkspaceId,
+      actor_id: cleanActorId,
+      exception_id: exceptionId,
+      idempotency_key: `${cleanWorkspaceId}:${cleanActorId}:${exceptionId}:${generatedAt}`,
+      generated_at: generatedAt,
+      updated_at: generatedAt,
+      portfolio_id: cleanPortfolioId,
+      batch_id: cleanBatchId,
+      exception_due_days: Math.max(1, Math.floor(exceptionDueDays)),
+      source: item.source,
+      owner: item.owner,
+      item: item.item,
+      status: item.status,
+      priority: item.priority,
+      due: item.due,
+      evidence: item.evidence,
+      next_action: item.nextAction,
+    };
+  });
+
+  return {
+    table: "platform_exceptions",
+    workspace_id: cleanWorkspaceId,
+    actor_id: cleanActorId,
+    portfolio_id: cleanPortfolioId,
+    batch_id: cleanBatchId,
+    generated_at: generatedAt,
+    record_count: records.length,
+    records,
+  };
 }

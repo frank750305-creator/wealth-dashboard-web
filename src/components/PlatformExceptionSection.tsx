@@ -9,6 +9,12 @@ type PlatformExceptionSectionProps = {
   platformExceptionDecision: ExecutionReviewStatus;
   exceptionDueDays: number;
   onExceptionDueDaysChange: (value: number) => void;
+  hasBigQueryCredentials: boolean;
+  syncStatus: "idle" | "syncing" | "loading" | "synced" | "loaded" | "error";
+  syncMessage: string;
+  warehouseExceptionCount: number;
+  onSyncPlatformExceptionsToBigQuery: () => void;
+  onLoadPlatformExceptionsFromBigQuery: () => void;
   onExportPlatformExceptionCsv: () => void;
   platformExceptionItems: PlatformExceptionItem[];
   platformExceptionHighPriorityCount: number;
@@ -38,6 +44,12 @@ export function PlatformExceptionSection({
   platformExceptionDecision,
   exceptionDueDays,
   onExceptionDueDaysChange,
+  hasBigQueryCredentials,
+  syncStatus,
+  syncMessage,
+  warehouseExceptionCount,
+  onSyncPlatformExceptionsToBigQuery,
+  onLoadPlatformExceptionsFromBigQuery,
   onExportPlatformExceptionCsv,
   platformExceptionItems,
   platformExceptionHighPriorityCount,
@@ -58,7 +70,7 @@ export function PlatformExceptionSection({
             將政策、簽核、交接、成交與復盤的觀察/暫停項目集中成 Action Queue
           </p>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-[120px_auto] gap-2 text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-[120px_repeat(3,auto)] gap-2 text-xs">
           <label className="space-y-1">
             <span className="text-slate-500">處理期限</span>
             <input
@@ -72,6 +84,20 @@ export function PlatformExceptionSection({
             />
           </label>
           <button
+            onClick={onSyncPlatformExceptionsToBigQuery}
+            disabled={!hasBigQueryCredentials || !platformExceptionItems.length || syncStatus === "syncing" || syncStatus === "loading"}
+            className="sm:col-span-2 xl:col-span-1 xl:self-end px-3 py-2 rounded-md bg-cyan-700 hover:bg-cyan-600 text-white font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+          >
+            {syncStatus === "syncing" ? "同步中" : "同步 BigQuery"}
+          </button>
+          <button
+            onClick={onLoadPlatformExceptionsFromBigQuery}
+            disabled={!hasBigQueryCredentials || syncStatus === "syncing" || syncStatus === "loading"}
+            className="sm:col-span-2 xl:col-span-1 xl:self-end px-3 py-2 rounded-md bg-sky-700 hover:bg-sky-600 text-white font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
+          >
+            {syncStatus === "loading" ? "載入中" : "載入 BigQuery"}
+          </button>
+          <button
             onClick={onExportPlatformExceptionCsv}
             disabled={!platformExceptionItems.length}
             className="sm:self-end px-3 py-2 rounded-md bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-100 font-bold disabled:cursor-not-allowed disabled:bg-slate-950 disabled:text-slate-600"
@@ -80,13 +106,19 @@ export function PlatformExceptionSection({
           </button>
         </div>
       </div>
+      {syncMessage ? (
+        <p className={`text-[11px] ${syncStatus === "error" ? "text-rose-300" : "text-slate-500"}`}>
+          {syncMessage}
+        </p>
+      ) : null}
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
         {[
           ["待處理", `${platformExceptionItems.length} 項`],
           ["高優先", `${platformExceptionHighPriorityCount} 項`],
           ["暫停 / 觀察", `${platformExceptionBlockCount} / ${platformExceptionWatchCount}`],
           ["期限", `T+${exceptionDueDays}`],
+          ["倉儲例外", `${warehouseExceptionCount} 項`],
         ].map(([label, value]) => (
           <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 p-3 min-w-0">
             <p className="text-[11px] text-slate-600 truncate">{label}</p>

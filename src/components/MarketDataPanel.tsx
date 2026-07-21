@@ -40,6 +40,7 @@ import {
   fetchLatestExecutionFillsFromBigQuery,
   fetchLatestExecutionRouteEventsFromBigQuery,
   fetchLatestExecutionRoutesFromBigQuery,
+  fetchLatestPlatformExceptionsFromBigQuery,
   fetchLatestPostTradeAttributionsFromBigQuery,
   fetchLatestTradeTicketsFromBigQuery,
   fetchLatestResearchTasksFromBigQuery,
@@ -48,6 +49,7 @@ import {
   syncExecutionFillsToBigQuery,
   syncExecutionRouteEventsToBigQuery,
   syncExecutionRoutesToBigQuery,
+  syncPlatformExceptionsToBigQuery,
   syncPostTradeAttributionsToBigQuery,
   syncTradeTicketsToBigQuery,
   syncResearchTasksToBigQuery,
@@ -154,6 +156,7 @@ import {
 } from "@/lib/executionReviewWorkflow";
 import {
   buildExecutionHandoffItems,
+  buildPlatformExceptionSyncPayload,
   buildPostTradeAttributionSyncPayload,
   executionHandoffCsv,
   platformExceptionCsv,
@@ -370,6 +373,11 @@ export function MarketDataPanel() {
   >("idle");
   const [postTradeAttributionSyncMessage, setPostTradeAttributionSyncMessage] = useState("");
   const [postTradeAttributionWarehouseCount, setPostTradeAttributionWarehouseCount] = useState(0);
+  const [platformExceptionSyncStatus, setPlatformExceptionSyncStatus] = useState<
+    "idle" | "syncing" | "loading" | "synced" | "loaded" | "error"
+  >("idle");
+  const [platformExceptionSyncMessage, setPlatformExceptionSyncMessage] = useState("");
+  const [platformExceptionWarehouseCount, setPlatformExceptionWarehouseCount] = useState(0);
   const [watchlistMemoCopyStatus, setWatchlistMemoCopyStatus] = useState<"idle" | "copied">("idle");
   const sources = data?.sources ?? [];
   const securedCount = sources.filter((source) => source.status !== "needs_secret").length;
@@ -1867,6 +1875,56 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleSyncPlatformExceptionsToBigQuery = async () => {
+    if (!platformExceptionItems.length) return;
+
+    setPlatformExceptionSyncStatus("syncing");
+    setPlatformExceptionSyncMessage("例外事項同步中。");
+
+    try {
+      const result = await syncPlatformExceptionsToBigQuery(
+        buildPlatformExceptionSyncPayload({
+          items: platformExceptionItems,
+          generatedAt: decisionGeneratedAt,
+          workspaceId: researchTaskWorkspaceId,
+          actorId: riskOwner,
+          portfolioId: tradeTicketPortfolioId,
+          batchId: tradeTicketBatchId,
+          exceptionDueDays,
+        }),
+      );
+      const isSynced = result.status === "synced";
+      setPlatformExceptionSyncStatus(isSynced ? "synced" : "error");
+      setPlatformExceptionWarehouseCount(result.insertedCount);
+      setPlatformExceptionSyncMessage(`${result.insertedCount}/${result.receivedCount} 項例外事項寫入 ${result.table}`);
+    } catch (err: unknown) {
+      setPlatformExceptionSyncStatus("error");
+      setPlatformExceptionSyncMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
+  const handleLoadPlatformExceptionsFromBigQuery = async () => {
+    setPlatformExceptionSyncStatus("loading");
+    setPlatformExceptionSyncMessage("例外事項載入中。");
+
+    try {
+      const result = await fetchLatestPlatformExceptionsFromBigQuery({
+        limit: 100,
+        workspaceId: researchTaskWorkspaceId,
+        portfolioId: tradeTicketPortfolioId,
+      });
+      if (result.status === "schema_outdated") {
+        setPlatformExceptionSyncStatus("error");
+        setPlatformExceptionSyncMessage(`例外事項表需先同步升級欄位：${result.missingFields?.join(", ") || "--"}`);
+        return;
+      }
+      setPlatformExceptionWarehouseCount(result.exceptionCount);
+      setPlatformExceptionSyncStatus("loaded");
+      setPlatformExceptionSyncMessage(`已讀取 ${result.exceptionCount} 項例外事項 ${result.workspaceId}`);
+    } catch (err: unknown) {
+      setPlatformExceptionSyncStatus("error");
+      setPlatformExceptionSyncMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
   const handleExportPlatformExceptionCsv = () => {
     if (!platformExceptionItems.length) return;
 
@@ -2767,6 +2825,12 @@ export function MarketDataPanel() {
                             platformExceptionDecision={platformExceptionDecision}
                             exceptionDueDays={exceptionDueDays}
                             onExceptionDueDaysChange={setExceptionDueDays}
+                            hasBigQueryCredentials={hasBigQueryCredentials}
+                            syncStatus={platformExceptionSyncStatus}
+                            syncMessage={platformExceptionSyncMessage}
+                            warehouseExceptionCount={platformExceptionWarehouseCount}
+                            onSyncPlatformExceptionsToBigQuery={handleSyncPlatformExceptionsToBigQuery}
+                            onLoadPlatformExceptionsFromBigQuery={handleLoadPlatformExceptionsFromBigQuery}
                             onExportPlatformExceptionCsv={handleExportPlatformExceptionCsv}
                             platformExceptionItems={platformExceptionItems}
                             platformExceptionHighPriorityCount={platformExceptionHighPriorityCount}
