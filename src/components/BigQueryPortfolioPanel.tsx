@@ -7,6 +7,7 @@ import type { BigQueryAsset, PortfolioAnalysisResponse, PortfolioOptimizationRes
 import { BigQueryPortfolioAllocationSummary } from "./BigQueryPortfolioAllocationSummary";
 import { BigQueryPortfolioAssetSuggestions } from "./BigQueryPortfolioAssetSuggestions";
 import { BigQueryPortfolioAssetTools } from "./BigQueryPortfolioAssetTools";
+import { BigQueryPortfolioDecisionSections } from "./BigQueryPortfolioDecisionSections";
 import { BigQueryPortfolioHeader } from "./BigQueryPortfolioHeader";
 import { BigQueryPortfolioPresetBar } from "./BigQueryPortfolioPresetBar";
 import { BigQueryPortfolioResultExportBar } from "./BigQueryPortfolioResultExportBar";
@@ -390,13 +391,6 @@ function metricDeltaClass(value: number | null) {
 
 function isFiniteNumber(value: number | null | undefined): value is number {
   return typeof value === "number" && Number.isFinite(value);
-}
-
-function decisionSignalClass(status: DecisionSignal["status"]) {
-  if (status === "strong") return "border-emerald-500/20 bg-emerald-950/10";
-  if (status === "watch") return "border-amber-500/25 bg-amber-950/10";
-  if (status === "risk") return "border-rose-500/25 bg-rose-950/10";
-  return "border-slate-800 bg-slate-950";
 }
 
 function decisionSignalBadgeClass(status: DecisionSignal["status"]) {
@@ -2656,63 +2650,13 @@ export function BigQueryPortfolioPanel({ hasBigQueryCredentials }: BigQueryPortf
             rows={snapshotComparisonRows}
           />
 
-          {policySignals.length ? (
-            <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-bold text-slate-200">投資政策檢核</p>
-                  <p className="text-[11px] text-slate-500 mt-0.5">
-                    Return {requiredReturn.toFixed(1)}% · Loss {maxLossTolerance.toFixed(1)}% · Confidence {(confidenceLevel * 100).toFixed(0)}%
-                  </p>
-                </div>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
-                {policySignals.map((signal) => (
-                  <div
-                    key={signal.label}
-                    className={`rounded-lg border p-3 min-w-0 ${decisionSignalClass(signal.status)}`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-[11px] text-slate-500 truncate">{signal.label}</p>
-                      <span
-                        className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-bold ${decisionSignalBadgeClass(signal.status)}`}
-                      >
-                        {decisionSignalStatusLabel(signal.status)}
-                      </span>
-                    </div>
-                    <p className="mt-2 font-mono text-sm font-bold text-slate-100 truncate" title={signal.value}>
-                      {signal.value}
-                    </p>
-                    <p className="mt-1 text-[11px] text-slate-500 leading-relaxed">{signal.note}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
-          {decisionSignals.length ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
-              {decisionSignals.map((signal) => (
-                <div
-                  key={signal.label}
-                  className={`rounded-lg border p-3 min-w-0 ${decisionSignalClass(signal.status)}`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-[11px] text-slate-500 truncate">{signal.label}</p>
-                    <span
-                      className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-bold ${decisionSignalBadgeClass(signal.status)}`}
-                    >
-                      {decisionSignalStatusLabel(signal.status)}
-                    </span>
-                  </div>
-                  <p className="mt-2 font-mono text-sm font-bold text-slate-100 truncate" title={signal.value}>
-                    {signal.value}
-                  </p>
-                  <p className="mt-1 text-[11px] text-slate-500 leading-relaxed">{signal.note}</p>
-                </div>
-              ))}
-            </div>
-          ) : null}
+          <BigQueryPortfolioDecisionSections
+            policySignals={policySignals}
+            decisionSignals={decisionSignals}
+            requiredReturn={requiredReturn}
+            maxLossTolerance={maxLossTolerance}
+            confidenceLevel={confidenceLevel}
+          />
 
           {monitoringRules.length ? (
             <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 space-y-3">
