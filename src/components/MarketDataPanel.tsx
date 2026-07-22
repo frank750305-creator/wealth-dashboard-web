@@ -194,6 +194,11 @@ import {
   revenueForecastCsv,
 } from "@/lib/revenueForecast";
 import {
+  accountHealthCsv,
+  buildAccountHealthItems,
+  summarizeAccountHealth,
+} from "@/lib/accountHealth";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -253,6 +258,7 @@ import {
   BigQueryWarehouseSnapshotSection,
 } from "./BigQueryWarehouseDiagnosticsSection";
 import { AssetProfileSection } from "./AssetProfileSection";
+import { AccountHealthSection } from "./AccountHealthSection";
 import { CioOperatingBriefSection } from "./CioOperatingBriefSection";
 import { CommitteeApprovalSection } from "./CommitteeApprovalSection";
 import { CommercializationSection } from "./CommercializationSection";
@@ -1260,6 +1266,14 @@ export function MarketDataPanel() {
     errorBudgetItems: dataProductErrorBudgetItems,
   });
   const dataProductClientImpactSummary = summarizeDataProductClientImpact(dataProductClientImpactItems);
+  const accountHealthItems = buildAccountHealthItems({
+    workspaces: clientWorkspaceProvisioningItems,
+    billingItems: usageBillingItems,
+    customerSuccessHealthItems,
+    revenueForecastItems,
+    dataProductClientImpactItems,
+  });
+  const accountHealthSummary = summarizeAccountHealth(accountHealthItems);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1589,6 +1603,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-revenue-forecast-${resultStamp()}.csv`,
       revenueForecastCsv(revenueForecastItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportAccountHealthCsv = () => {
+    if (!accountHealthItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-account-health-${resultStamp()}.csv`,
+      accountHealthCsv(accountHealthItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -2980,6 +3003,11 @@ export function MarketDataPanel() {
                 summary={dataProductClientImpactSummary}
                 items={dataProductClientImpactItems}
                 onExportCsv={handleExportDataProductClientImpactCsv}
+              />
+              <AccountHealthSection
+                summary={accountHealthSummary}
+                items={accountHealthItems}
+                onExportCsv={handleExportAccountHealthCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
