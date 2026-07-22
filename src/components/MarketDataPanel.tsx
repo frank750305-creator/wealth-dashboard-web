@@ -102,6 +102,11 @@ import {
   summarizeDataProductSlo,
 } from "@/lib/dataProductObservability";
 import {
+  buildDataProductStatusPageItems,
+  dataProductStatusPageCsv,
+  summarizeDataProductStatusPage,
+} from "@/lib/dataProductStatusPage";
+import {
   buildCoverageUniverseItems,
   buildDataContractItems,
   buildDataPipelineHealthItems,
@@ -244,6 +249,7 @@ import { CommercializationSection } from "./CommercializationSection";
 import { MarketDataConsoleHeader } from "./MarketDataConsoleHeader";
 import { DataOperationsSection } from "./DataOperationsSection";
 import { DataProductObservabilitySection } from "./DataProductObservabilitySection";
+import { DataProductStatusPageSection } from "./DataProductStatusPageSection";
 import { DecisionFunnelSection } from "./DecisionFunnelSection";
 import { DecisionAuditSection } from "./DecisionAuditSection";
 import { EnterpriseReadinessSection } from "./EnterpriseReadinessSection";
@@ -1224,6 +1230,11 @@ export function MarketDataPanel() {
   const dataProductReliabilityActions = buildDataProductReliabilityActions(dataProductObservabilityItems);
   const dataProductSloItems = buildDataProductSloItems(dataProductObservabilityItems);
   const dataProductSloSummary = summarizeDataProductSlo(dataProductSloItems);
+  const dataProductStatusPageItems = buildDataProductStatusPageItems({
+    sloItems: dataProductSloItems,
+    reliabilityActions: dataProductReliabilityActions,
+  });
+  const dataProductStatusPageSummary = summarizeDataProductStatusPage(dataProductStatusPageItems);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1418,6 +1429,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-data-product-slo-${resultStamp()}.csv`,
       dataProductSloCsv(dataProductSloItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportDataProductStatusPageCsv = () => {
+    if (!dataProductStatusPageItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-data-product-status-page-${resultStamp()}.csv`,
+      dataProductStatusPageCsv(dataProductStatusPageItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -2902,6 +2922,11 @@ export function MarketDataPanel() {
                 onExportCsv={handleExportDataProductObservabilityCsv}
                 onExportReliabilityCsv={handleExportDataProductReliabilityActionsCsv}
                 onExportSloCsv={handleExportDataProductSloCsv}
+              />
+              <DataProductStatusPageSection
+                summary={dataProductStatusPageSummary}
+                items={dataProductStatusPageItems}
+                onExportCsv={handleExportDataProductStatusPageCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
