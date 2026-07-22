@@ -199,6 +199,11 @@ import {
   summarizeAccountHealth,
 } from "@/lib/accountHealth";
 import {
+  accountActionQueueCsv,
+  buildAccountActionQueueItems,
+  summarizeAccountActionQueue,
+} from "@/lib/accountActionQueue";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -258,6 +263,7 @@ import {
   BigQueryWarehouseSnapshotSection,
 } from "./BigQueryWarehouseDiagnosticsSection";
 import { AssetProfileSection } from "./AssetProfileSection";
+import { AccountActionQueueSection } from "./AccountActionQueueSection";
 import { AccountHealthSection } from "./AccountHealthSection";
 import { CioOperatingBriefSection } from "./CioOperatingBriefSection";
 import { CommitteeApprovalSection } from "./CommitteeApprovalSection";
@@ -1274,6 +1280,8 @@ export function MarketDataPanel() {
     dataProductClientImpactItems,
   });
   const accountHealthSummary = summarizeAccountHealth(accountHealthItems);
+  const accountActionQueueItems = buildAccountActionQueueItems(accountHealthItems);
+  const accountActionQueueSummary = summarizeAccountActionQueue(accountActionQueueItems);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1612,6 +1620,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-account-health-${resultStamp()}.csv`,
       accountHealthCsv(accountHealthItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportAccountActionQueueCsv = () => {
+    if (!accountActionQueueItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-account-action-queue-${resultStamp()}.csv`,
+      accountActionQueueCsv(accountActionQueueItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -3008,6 +3025,11 @@ export function MarketDataPanel() {
                 summary={accountHealthSummary}
                 items={accountHealthItems}
                 onExportCsv={handleExportAccountHealthCsv}
+              />
+              <AccountActionQueueSection
+                summary={accountActionQueueSummary}
+                items={accountActionQueueItems}
+                onExportCsv={handleExportAccountActionQueueCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
