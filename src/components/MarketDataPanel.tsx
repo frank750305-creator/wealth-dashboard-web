@@ -107,6 +107,11 @@ import {
   summarizeDataProductErrorBudget,
 } from "@/lib/dataProductErrorBudget";
 import {
+  buildDataProductClientImpactItems,
+  dataProductClientImpactCsv,
+  summarizeDataProductClientImpact,
+} from "@/lib/dataProductClientImpact";
+import {
   buildDataProductStatusPageItems,
   dataProductStatusPageCsv,
   summarizeDataProductStatusPage,
@@ -253,6 +258,7 @@ import { CommitteeApprovalSection } from "./CommitteeApprovalSection";
 import { CommercializationSection } from "./CommercializationSection";
 import { MarketDataConsoleHeader } from "./MarketDataConsoleHeader";
 import { DataOperationsSection } from "./DataOperationsSection";
+import { DataProductClientImpactSection } from "./DataProductClientImpactSection";
 import { DataProductErrorBudgetSection } from "./DataProductErrorBudgetSection";
 import { DataProductObservabilitySection } from "./DataProductObservabilitySection";
 import { DataProductStatusPageSection } from "./DataProductStatusPageSection";
@@ -1247,6 +1253,13 @@ export function MarketDataPanel() {
     reliabilityActions: dataProductReliabilityActions,
   });
   const dataProductErrorBudgetSummary = summarizeDataProductErrorBudget(dataProductErrorBudgetItems);
+  const dataProductClientImpactItems = buildDataProductClientImpactItems({
+    workspaces: clientWorkspaceProvisioningItems,
+    billingItems: usageBillingItems,
+    statusPageItems: dataProductStatusPageItems,
+    errorBudgetItems: dataProductErrorBudgetItems,
+  });
+  const dataProductClientImpactSummary = summarizeDataProductClientImpact(dataProductClientImpactItems);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1459,6 +1472,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-data-product-error-budget-${resultStamp()}.csv`,
       dataProductErrorBudgetCsv(dataProductErrorBudgetItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportDataProductClientImpactCsv = () => {
+    if (!dataProductClientImpactItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-data-product-client-impact-${resultStamp()}.csv`,
+      dataProductClientImpactCsv(dataProductClientImpactItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -2953,6 +2975,11 @@ export function MarketDataPanel() {
                 summary={dataProductErrorBudgetSummary}
                 items={dataProductErrorBudgetItems}
                 onExportCsv={handleExportDataProductErrorBudgetCsv}
+              />
+              <DataProductClientImpactSection
+                summary={dataProductClientImpactSummary}
+                items={dataProductClientImpactItems}
+                onExportCsv={handleExportDataProductClientImpactCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
