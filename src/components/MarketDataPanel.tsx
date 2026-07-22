@@ -204,6 +204,11 @@ import {
   summarizeAccountActionQueue,
 } from "@/lib/accountActionQueue";
 import {
+  buildPlatformCommandSearchItems,
+  platformCommandSearchCsv,
+  summarizePlatformCommandSearch,
+} from "@/lib/platformCommandSearch";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -287,6 +292,7 @@ import { MarketAlertSection } from "./MarketAlertSection";
 import { MarketSourceInventorySection } from "./MarketSourceInventorySection";
 import { OperatingKriSection } from "./OperatingKriSection";
 import { PolicyLimitSection } from "./PolicyLimitSection";
+import { PlatformCommandSearchSection } from "./PlatformCommandSearchSection";
 import { PlatformExceptionSection } from "./PlatformExceptionSection";
 import { PostTradeAttributionSection } from "./PostTradeAttributionSection";
 import { RebalanceDraftSection } from "./RebalanceDraftSection";
@@ -1282,6 +1288,15 @@ export function MarketDataPanel() {
   const accountHealthSummary = summarizeAccountHealth(accountHealthItems);
   const accountActionQueueItems = buildAccountActionQueueItems(accountHealthItems);
   const accountActionQueueSummary = summarizeAccountActionQueue(accountActionQueueItems);
+  const platformCommandSearchItems = buildPlatformCommandSearchItems({
+    accountHealthItems,
+    accountActionQueueItems,
+    dataProductStatusPageItems,
+    dataProductErrorBudgetItems,
+    apiServiceCatalogItems,
+    sources,
+  });
+  const platformCommandSearchSummary = summarizePlatformCommandSearch(platformCommandSearchItems);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1629,6 +1644,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-account-action-queue-${resultStamp()}.csv`,
       accountActionQueueCsv(accountActionQueueItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportPlatformCommandSearchCsv = () => {
+    if (!platformCommandSearchItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-command-search-${resultStamp()}.csv`,
+      platformCommandSearchCsv(platformCommandSearchItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -3030,6 +3054,11 @@ export function MarketDataPanel() {
                 summary={accountActionQueueSummary}
                 items={accountActionQueueItems}
                 onExportCsv={handleExportAccountActionQueueCsv}
+              />
+              <PlatformCommandSearchSection
+                summary={platformCommandSearchSummary}
+                items={platformCommandSearchItems}
+                onExportCsv={handleExportPlatformCommandSearchCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
