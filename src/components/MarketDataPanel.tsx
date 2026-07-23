@@ -344,6 +344,11 @@ import {
   summarizePlatformCommandPricingGovernance,
 } from "@/lib/platformCommandPricingGovernance";
 import {
+  buildPlatformCommandQuoteDeskItems,
+  platformCommandQuoteDeskCsv,
+  summarizePlatformCommandQuoteDesk,
+} from "@/lib/platformCommandQuoteDesk";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -452,6 +457,7 @@ import { PlatformCommandRenewalForecastSection } from "./PlatformCommandRenewalF
 import { PlatformCommandRevenueOperationsLedgerSection } from "./PlatformCommandRevenueOperationsLedgerSection";
 import { PlatformCommandUnitEconomicsSection } from "./PlatformCommandUnitEconomicsSection";
 import { PlatformCommandPricingGovernanceSection } from "./PlatformCommandPricingGovernanceSection";
+import { PlatformCommandQuoteDeskSection } from "./PlatformCommandQuoteDeskSection";
 import { PlatformCommandSearchSection } from "./PlatformCommandSearchSection";
 import { PlatformCommandSlaSection } from "./PlatformCommandSlaSection";
 import { PlatformCommandTriageSection } from "./PlatformCommandTriageSection";
@@ -1575,6 +1581,8 @@ export function MarketDataPanel() {
   const platformCommandPricingGovernanceSummary = summarizePlatformCommandPricingGovernance(
     platformCommandPricingGovernanceItems,
   );
+  const platformCommandQuoteDeskItems = buildPlatformCommandQuoteDeskItems(platformCommandPricingGovernanceItems);
+  const platformCommandQuoteDeskSummary = summarizePlatformCommandQuoteDesk(platformCommandQuoteDeskItems);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -2174,6 +2182,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-command-pricing-governance-${resultStamp()}.csv`,
       platformCommandPricingGovernanceCsv(platformCommandPricingGovernanceItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportPlatformCommandQuoteDeskCsv = () => {
+    if (!platformCommandQuoteDeskItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-command-quote-desk-${resultStamp()}.csv`,
+      platformCommandQuoteDeskCsv(platformCommandQuoteDeskItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -3715,6 +3732,11 @@ export function MarketDataPanel() {
                 summary={platformCommandPricingGovernanceSummary}
                 items={platformCommandPricingGovernanceItems}
                 onExportCsv={handleExportPlatformCommandPricingGovernanceCsv}
+              />
+              <PlatformCommandQuoteDeskSection
+                summary={platformCommandQuoteDeskSummary}
+                items={platformCommandQuoteDeskItems}
+                onExportCsv={handleExportPlatformCommandQuoteDeskCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
