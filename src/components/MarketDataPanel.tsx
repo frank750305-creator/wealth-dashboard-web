@@ -259,6 +259,11 @@ import {
   summarizePlatformCommandOperatingReview,
 } from "@/lib/platformCommandOperatingReview";
 import {
+  buildPlatformCommandExecutiveBriefItems,
+  platformCommandExecutiveBriefCsv,
+  summarizePlatformCommandExecutiveBrief,
+} from "@/lib/platformCommandExecutiveBrief";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -350,6 +355,7 @@ import { PlatformCommandPostmortemSection } from "./PlatformCommandPostmortemSec
 import { PlatformCommandReleaseReadinessSection } from "./PlatformCommandReleaseReadinessSection";
 import { PlatformCommandReleaseMonitorSection } from "./PlatformCommandReleaseMonitorSection";
 import { PlatformCommandOperatingReviewSection } from "./PlatformCommandOperatingReviewSection";
+import { PlatformCommandExecutiveBriefSection } from "./PlatformCommandExecutiveBriefSection";
 import { PlatformCommandSearchSection } from "./PlatformCommandSearchSection";
 import { PlatformCommandSlaSection } from "./PlatformCommandSlaSection";
 import { PlatformCommandTriageSection } from "./PlatformCommandTriageSection";
@@ -1389,6 +1395,10 @@ export function MarketDataPanel() {
   const platformCommandOperatingReviewSummary = summarizePlatformCommandOperatingReview(
     platformCommandOperatingReviewItems,
   );
+  const platformCommandExecutiveBriefItems = buildPlatformCommandExecutiveBriefItems(
+    platformCommandOperatingReviewItems,
+  );
+  const platformCommandExecutiveBriefSummary = summarizePlatformCommandExecutiveBrief(platformCommandExecutiveBriefItems);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1835,6 +1845,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-command-operating-review-${resultStamp()}.csv`,
       platformCommandOperatingReviewCsv(platformCommandOperatingReviewItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportPlatformCommandExecutiveBriefCsv = () => {
+    if (!platformCommandExecutiveBriefItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-command-executive-brief-${resultStamp()}.csv`,
+      platformCommandExecutiveBriefCsv(platformCommandExecutiveBriefItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -3291,6 +3310,11 @@ export function MarketDataPanel() {
                 summary={platformCommandOperatingReviewSummary}
                 items={platformCommandOperatingReviewItems}
                 onExportCsv={handleExportPlatformCommandOperatingReviewCsv}
+              />
+              <PlatformCommandExecutiveBriefSection
+                summary={platformCommandExecutiveBriefSummary}
+                items={platformCommandExecutiveBriefItems}
+                onExportCsv={handleExportPlatformCommandExecutiveBriefCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
