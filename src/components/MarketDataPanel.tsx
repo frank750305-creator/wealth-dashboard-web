@@ -379,6 +379,11 @@ import {
   summarizePlatformCommandCustomerHealth,
 } from "@/lib/platformCommandCustomerHealth";
 import {
+  buildPlatformCommandManagementOverviewItems,
+  platformCommandManagementOverviewCsv,
+  summarizePlatformCommandManagementOverview,
+} from "@/lib/platformCommandManagementOverview";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -494,6 +499,7 @@ import { PlatformCommandSlaOperationsSection } from "./PlatformCommandSlaOperati
 import { PlatformCommandUsageMonitoringSection } from "./PlatformCommandUsageMonitoringSection";
 import { PlatformCommandRevenueAuditSection } from "./PlatformCommandRevenueAuditSection";
 import { PlatformCommandCustomerHealthSection } from "./PlatformCommandCustomerHealthSection";
+import { PlatformCommandManagementOverviewSection } from "./PlatformCommandManagementOverviewSection";
 import { PlatformCommandSearchSection } from "./PlatformCommandSearchSection";
 import { PlatformCommandSlaSection } from "./PlatformCommandSlaSection";
 import { PlatformCommandTriageSection } from "./PlatformCommandTriageSection";
@@ -1645,6 +1651,12 @@ export function MarketDataPanel() {
   const platformCommandRevenueAuditSummary = summarizePlatformCommandRevenueAudit(platformCommandRevenueAuditItems);
   const platformCommandCustomerHealthItems = buildPlatformCommandCustomerHealthItems(platformCommandRevenueAuditItems);
   const platformCommandCustomerHealthSummary = summarizePlatformCommandCustomerHealth(platformCommandCustomerHealthItems);
+  const platformCommandManagementOverviewItems = buildPlatformCommandManagementOverviewItems(
+    platformCommandCustomerHealthItems,
+  );
+  const platformCommandManagementOverviewSummary = summarizePlatformCommandManagementOverview(
+    platformCommandManagementOverviewItems,
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -2307,6 +2319,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-command-customer-health-${resultStamp()}.csv`,
       platformCommandCustomerHealthCsv(platformCommandCustomerHealthItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportPlatformCommandManagementOverviewCsv = () => {
+    if (!platformCommandManagementOverviewItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-command-management-overview-${resultStamp()}.csv`,
+      platformCommandManagementOverviewCsv(platformCommandManagementOverviewItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -3883,6 +3904,11 @@ export function MarketDataPanel() {
                 summary={platformCommandCustomerHealthSummary}
                 items={platformCommandCustomerHealthItems}
                 onExportCsv={handleExportPlatformCommandCustomerHealthCsv}
+              />
+              <PlatformCommandManagementOverviewSection
+                summary={platformCommandManagementOverviewSummary}
+                items={platformCommandManagementOverviewItems}
+                onExportCsv={handleExportPlatformCommandManagementOverviewCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
