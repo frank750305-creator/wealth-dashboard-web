@@ -234,6 +234,11 @@ import {
   summarizePlatformCommandClosure,
 } from "@/lib/platformCommandClosure";
 import {
+  buildPlatformCommandPostmortemItems,
+  platformCommandPostmortemCsv,
+  summarizePlatformCommandPostmortem,
+} from "@/lib/platformCommandPostmortem";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -320,6 +325,7 @@ import { PolicyLimitSection } from "./PolicyLimitSection";
 import { PlatformCommandHandoffSection } from "./PlatformCommandHandoffSection";
 import { PlatformCommandClosureSection } from "./PlatformCommandClosureSection";
 import { PlatformCommandOwnerLoadSection } from "./PlatformCommandOwnerLoadSection";
+import { PlatformCommandPostmortemSection } from "./PlatformCommandPostmortemSection";
 import { PlatformCommandSearchSection } from "./PlatformCommandSearchSection";
 import { PlatformCommandSlaSection } from "./PlatformCommandSlaSection";
 import { PlatformCommandTriageSection } from "./PlatformCommandTriageSection";
@@ -1337,6 +1343,8 @@ export function MarketDataPanel() {
   const platformCommandHandoffSummary = summarizePlatformCommandHandoff(platformCommandHandoffItems);
   const platformCommandClosureItems = buildPlatformCommandClosureItems(platformCommandHandoffItems);
   const platformCommandClosureSummary = summarizePlatformCommandClosure(platformCommandClosureItems);
+  const platformCommandPostmortemItems = buildPlatformCommandPostmortemItems(platformCommandClosureItems);
+  const platformCommandPostmortemSummary = summarizePlatformCommandPostmortem(platformCommandPostmortemItems);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1738,6 +1746,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-command-closure-${resultStamp()}.csv`,
       platformCommandClosureCsv(platformCommandClosureItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportPlatformCommandPostmortemCsv = () => {
+    if (!platformCommandPostmortemItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-command-postmortem-${resultStamp()}.csv`,
+      platformCommandPostmortemCsv(platformCommandPostmortemItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -3169,6 +3186,11 @@ export function MarketDataPanel() {
                 summary={platformCommandClosureSummary}
                 items={platformCommandClosureItems}
                 onExportCsv={handleExportPlatformCommandClosureCsv}
+              />
+              <PlatformCommandPostmortemSection
+                summary={platformCommandPostmortemSummary}
+                items={platformCommandPostmortemItems}
+                onExportCsv={handleExportPlatformCommandPostmortemCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
