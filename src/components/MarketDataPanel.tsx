@@ -229,6 +229,11 @@ import {
   summarizePlatformCommandHandoff,
 } from "@/lib/platformCommandHandoff";
 import {
+  buildPlatformCommandClosureItems,
+  platformCommandClosureCsv,
+  summarizePlatformCommandClosure,
+} from "@/lib/platformCommandClosure";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -313,6 +318,7 @@ import { MarketSourceInventorySection } from "./MarketSourceInventorySection";
 import { OperatingKriSection } from "./OperatingKriSection";
 import { PolicyLimitSection } from "./PolicyLimitSection";
 import { PlatformCommandHandoffSection } from "./PlatformCommandHandoffSection";
+import { PlatformCommandClosureSection } from "./PlatformCommandClosureSection";
 import { PlatformCommandOwnerLoadSection } from "./PlatformCommandOwnerLoadSection";
 import { PlatformCommandSearchSection } from "./PlatformCommandSearchSection";
 import { PlatformCommandSlaSection } from "./PlatformCommandSlaSection";
@@ -1329,6 +1335,8 @@ export function MarketDataPanel() {
   const platformCommandOwnerLoadSummary = summarizePlatformCommandOwnerLoad(platformCommandOwnerLoadItems);
   const platformCommandHandoffItems = buildPlatformCommandHandoffItems(platformCommandOwnerLoadItems);
   const platformCommandHandoffSummary = summarizePlatformCommandHandoff(platformCommandHandoffItems);
+  const platformCommandClosureItems = buildPlatformCommandClosureItems(platformCommandHandoffItems);
+  const platformCommandClosureSummary = summarizePlatformCommandClosure(platformCommandClosureItems);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1721,6 +1729,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-command-handoff-${resultStamp()}.csv`,
       platformCommandHandoffCsv(platformCommandHandoffItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportPlatformCommandClosureCsv = () => {
+    if (!platformCommandClosureItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-command-closure-${resultStamp()}.csv`,
+      platformCommandClosureCsv(platformCommandClosureItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -3147,6 +3164,11 @@ export function MarketDataPanel() {
                 summary={platformCommandHandoffSummary}
                 items={platformCommandHandoffItems}
                 onExportCsv={handleExportPlatformCommandHandoffCsv}
+              />
+              <PlatformCommandClosureSection
+                summary={platformCommandClosureSummary}
+                items={platformCommandClosureItems}
+                onExportCsv={handleExportPlatformCommandClosureCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
