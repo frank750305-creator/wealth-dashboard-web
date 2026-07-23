@@ -314,6 +314,11 @@ import {
   summarizePlatformCommandGtmLaunch,
 } from "@/lib/platformCommandGtmLaunch";
 import {
+  buildPlatformCommandCustomerSuccessActivationItems,
+  platformCommandCustomerSuccessActivationCsv,
+  summarizePlatformCommandCustomerSuccessActivation,
+} from "@/lib/platformCommandCustomerSuccessActivation";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -416,6 +421,7 @@ import { PlatformCommandClientReadoutSection } from "./PlatformCommandClientRead
 import { PlatformCommandProductPackagingSection } from "./PlatformCommandProductPackagingSection";
 import { PlatformCommandRevenueReadinessSection } from "./PlatformCommandRevenueReadinessSection";
 import { PlatformCommandGtmLaunchSection } from "./PlatformCommandGtmLaunchSection";
+import { PlatformCommandCustomerSuccessActivationSection } from "./PlatformCommandCustomerSuccessActivationSection";
 import { PlatformCommandSearchSection } from "./PlatformCommandSearchSection";
 import { PlatformCommandSlaSection } from "./PlatformCommandSlaSection";
 import { PlatformCommandTriageSection } from "./PlatformCommandTriageSection";
@@ -1503,6 +1509,12 @@ export function MarketDataPanel() {
   );
   const platformCommandGtmLaunchItems = buildPlatformCommandGtmLaunchItems(platformCommandRevenueReadinessItems);
   const platformCommandGtmLaunchSummary = summarizePlatformCommandGtmLaunch(platformCommandGtmLaunchItems);
+  const platformCommandCustomerSuccessActivationItems = buildPlatformCommandCustomerSuccessActivationItems(
+    platformCommandGtmLaunchItems,
+  );
+  const platformCommandCustomerSuccessActivationSummary = summarizePlatformCommandCustomerSuccessActivation(
+    platformCommandCustomerSuccessActivationItems,
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -2048,6 +2060,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-command-gtm-launch-${resultStamp()}.csv`,
       platformCommandGtmLaunchCsv(platformCommandGtmLaunchItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportPlatformCommandCustomerSuccessActivationCsv = () => {
+    if (!platformCommandCustomerSuccessActivationItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-command-customer-success-activation-${resultStamp()}.csv`,
+      platformCommandCustomerSuccessActivationCsv(platformCommandCustomerSuccessActivationItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -3559,6 +3580,11 @@ export function MarketDataPanel() {
                 summary={platformCommandGtmLaunchSummary}
                 items={platformCommandGtmLaunchItems}
                 onExportCsv={handleExportPlatformCommandGtmLaunchCsv}
+              />
+              <PlatformCommandCustomerSuccessActivationSection
+                summary={platformCommandCustomerSuccessActivationSummary}
+                items={platformCommandCustomerSuccessActivationItems}
+                onExportCsv={handleExportPlatformCommandCustomerSuccessActivationCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
