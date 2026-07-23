@@ -239,6 +239,11 @@ import {
   summarizePlatformCommandPostmortem,
 } from "@/lib/platformCommandPostmortem";
 import {
+  buildPlatformCommandImprovementBacklogItems,
+  platformCommandImprovementBacklogCsv,
+  summarizePlatformCommandImprovementBacklog,
+} from "@/lib/platformCommandImprovementBacklog";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -324,6 +329,7 @@ import { OperatingKriSection } from "./OperatingKriSection";
 import { PolicyLimitSection } from "./PolicyLimitSection";
 import { PlatformCommandHandoffSection } from "./PlatformCommandHandoffSection";
 import { PlatformCommandClosureSection } from "./PlatformCommandClosureSection";
+import { PlatformCommandImprovementBacklogSection } from "./PlatformCommandImprovementBacklogSection";
 import { PlatformCommandOwnerLoadSection } from "./PlatformCommandOwnerLoadSection";
 import { PlatformCommandPostmortemSection } from "./PlatformCommandPostmortemSection";
 import { PlatformCommandSearchSection } from "./PlatformCommandSearchSection";
@@ -1345,6 +1351,12 @@ export function MarketDataPanel() {
   const platformCommandClosureSummary = summarizePlatformCommandClosure(platformCommandClosureItems);
   const platformCommandPostmortemItems = buildPlatformCommandPostmortemItems(platformCommandClosureItems);
   const platformCommandPostmortemSummary = summarizePlatformCommandPostmortem(platformCommandPostmortemItems);
+  const platformCommandImprovementBacklogItems = buildPlatformCommandImprovementBacklogItems(
+    platformCommandPostmortemItems,
+  );
+  const platformCommandImprovementBacklogSummary = summarizePlatformCommandImprovementBacklog(
+    platformCommandImprovementBacklogItems,
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1755,6 +1767,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-command-postmortem-${resultStamp()}.csv`,
       platformCommandPostmortemCsv(platformCommandPostmortemItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportPlatformCommandImprovementBacklogCsv = () => {
+    if (!platformCommandImprovementBacklogItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-command-improvement-backlog-${resultStamp()}.csv`,
+      platformCommandImprovementBacklogCsv(platformCommandImprovementBacklogItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -3191,6 +3212,11 @@ export function MarketDataPanel() {
                 summary={platformCommandPostmortemSummary}
                 items={platformCommandPostmortemItems}
                 onExportCsv={handleExportPlatformCommandPostmortemCsv}
+              />
+              <PlatformCommandImprovementBacklogSection
+                summary={platformCommandImprovementBacklogSummary}
+                items={platformCommandImprovementBacklogItems}
+                onExportCsv={handleExportPlatformCommandImprovementBacklogCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
