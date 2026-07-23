@@ -41,6 +41,7 @@ export function PlatformCommandSearchSection({
 }: PlatformCommandSearchSectionProps) {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<"all" | PlatformCommandCategory>("all");
+  const [selectedItemId, setSelectedItemId] = useState("");
   const cleanQuery = normalizeQuery(query);
   const filteredItems = useMemo(
     () =>
@@ -54,6 +55,10 @@ export function PlatformCommandSearchSection({
         })
         .slice(0, 24),
     [category, cleanQuery, items],
+  );
+  const selectedItem = useMemo(
+    () => filteredItems.find((item) => item.id === selectedItemId) ?? filteredItems[0] ?? null,
+    [filteredItems, selectedItemId],
   );
   const metrics = [
     ["命令", `${summary.itemCount}`],
@@ -132,6 +137,56 @@ export function PlatformCommandSearchSection({
             <p className="mt-1 font-mono text-2xl font-bold text-slate-100">{filteredItems.length}</p>
             <p className="mt-1 text-[11px] text-slate-500">最多顯示 24 筆，CSV 仍匯出完整命令索引。</p>
           </div>
+          {selectedItem ? (
+            <div className="rounded-lg border border-cyan-500/20 bg-cyan-950/10 p-3 space-y-3">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="font-mono text-xs font-bold text-cyan-200">{selectedItem.command}</p>
+                  <p className="mt-1 text-sm font-bold text-slate-100">{selectedItem.title}</p>
+                  <p className="mt-0.5 text-[11px] text-slate-500">{selectedItem.subtitle}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void navigator.clipboard?.writeText(selectedItem.command)}
+                  className="shrink-0 rounded-md border border-slate-700 px-2 py-1 text-[10px] font-bold text-slate-300 hover:border-cyan-500/60 hover:text-cyan-200"
+                >
+                  複製
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="rounded-md border border-slate-800 bg-slate-900/70 p-2">
+                  <p className="text-[10px] text-slate-600">Priority</p>
+                  <span className={`mt-1 inline-block rounded px-2 py-0.5 text-[10px] font-bold ${priorityBadgeClass(selectedItem.priority)}`}>
+                    {platformCommandPriorityLabel(selectedItem.priority)}
+                  </span>
+                </div>
+                <div className="rounded-md border border-slate-800 bg-slate-900/70 p-2">
+                  <p className="text-[10px] text-slate-600">Status</p>
+                  <span className={`mt-1 inline-block rounded px-2 py-0.5 text-[10px] font-bold ${statusBadgeClass(selectedItem.status)}`}>
+                    {platformCommandStatusLabel(selectedItem.status)}
+                  </span>
+                </div>
+              </div>
+              <dl className="space-y-2 text-xs">
+                <div>
+                  <dt className="text-[10px] text-slate-600">Owner</dt>
+                  <dd className="mt-0.5 text-slate-300">{selectedItem.owner}</dd>
+                </div>
+                <div>
+                  <dt className="text-[10px] text-slate-600">Metric</dt>
+                  <dd className="mt-0.5 font-mono text-slate-300">{selectedItem.metric}</dd>
+                </div>
+                <div>
+                  <dt className="text-[10px] text-slate-600">Evidence</dt>
+                  <dd className="mt-0.5 text-slate-500">{selectedItem.evidence}</dd>
+                </div>
+                <div>
+                  <dt className="text-[10px] text-slate-600">Next Action</dt>
+                  <dd className="mt-0.5 text-amber-200">{selectedItem.nextAction}</dd>
+                </div>
+              </dl>
+            </div>
+          ) : null}
         </div>
 
         <div className="overflow-x-auto rounded-lg border border-slate-800">
@@ -150,7 +205,13 @@ export function PlatformCommandSearchSection({
             </thead>
             <tbody>
               {filteredItems.map((item) => (
-                <tr key={item.id} className="border-t border-slate-800/80">
+                <tr
+                  key={item.id}
+                  onClick={() => setSelectedItemId(item.id)}
+                  className={`cursor-pointer border-t border-slate-800/80 hover:bg-slate-900/70 ${
+                    selectedItem?.id === item.id ? "bg-cyan-950/20" : ""
+                  }`}
+                >
                   <td className="py-2 px-3">
                     <p className="font-mono font-bold text-cyan-200">{item.command}</p>
                     <p className="mt-0.5 text-[10px] text-slate-600">{platformCommandCategoryLabel(item.category)}</p>
