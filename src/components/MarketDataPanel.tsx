@@ -274,6 +274,11 @@ import {
   summarizePlatformCommandDecisionFollowUp,
 } from "@/lib/platformCommandDecisionFollowUp";
 import {
+  buildPlatformCommandEvidenceLedgerItems,
+  platformCommandEvidenceLedgerCsv,
+  summarizePlatformCommandEvidenceLedger,
+} from "@/lib/platformCommandEvidenceLedger";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -368,6 +373,7 @@ import { PlatformCommandOperatingReviewSection } from "./PlatformCommandOperatin
 import { PlatformCommandExecutiveBriefSection } from "./PlatformCommandExecutiveBriefSection";
 import { PlatformCommandDecisionRegisterSection } from "./PlatformCommandDecisionRegisterSection";
 import { PlatformCommandDecisionFollowUpSection } from "./PlatformCommandDecisionFollowUpSection";
+import { PlatformCommandEvidenceLedgerSection } from "./PlatformCommandEvidenceLedgerSection";
 import { PlatformCommandSearchSection } from "./PlatformCommandSearchSection";
 import { PlatformCommandSlaSection } from "./PlatformCommandSlaSection";
 import { PlatformCommandTriageSection } from "./PlatformCommandTriageSection";
@@ -1423,6 +1429,12 @@ export function MarketDataPanel() {
   const platformCommandDecisionFollowUpSummary = summarizePlatformCommandDecisionFollowUp(
     platformCommandDecisionFollowUpItems,
   );
+  const platformCommandEvidenceLedgerItems = buildPlatformCommandEvidenceLedgerItems(
+    platformCommandDecisionFollowUpItems,
+  );
+  const platformCommandEvidenceLedgerSummary = summarizePlatformCommandEvidenceLedger(
+    platformCommandEvidenceLedgerItems,
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1896,6 +1908,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-command-decision-follow-up-${resultStamp()}.csv`,
       platformCommandDecisionFollowUpCsv(platformCommandDecisionFollowUpItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportPlatformCommandEvidenceLedgerCsv = () => {
+    if (!platformCommandEvidenceLedgerItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-command-evidence-ledger-${resultStamp()}.csv`,
+      platformCommandEvidenceLedgerCsv(platformCommandEvidenceLedgerItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -3367,6 +3388,11 @@ export function MarketDataPanel() {
                 summary={platformCommandDecisionFollowUpSummary}
                 items={platformCommandDecisionFollowUpItems}
                 onExportCsv={handleExportPlatformCommandDecisionFollowUpCsv}
+              />
+              <PlatformCommandEvidenceLedgerSection
+                summary={platformCommandEvidenceLedgerSummary}
+                items={platformCommandEvidenceLedgerItems}
+                onExportCsv={handleExportPlatformCommandEvidenceLedgerCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
