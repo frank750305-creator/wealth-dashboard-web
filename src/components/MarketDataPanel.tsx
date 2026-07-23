@@ -209,6 +209,11 @@ import {
   summarizePlatformCommandSearch,
 } from "@/lib/platformCommandSearch";
 import {
+  buildPlatformCommandTriageItems,
+  platformCommandTriageCsv,
+  summarizePlatformCommandTriage,
+} from "@/lib/platformCommandTriage";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -293,6 +298,7 @@ import { MarketSourceInventorySection } from "./MarketSourceInventorySection";
 import { OperatingKriSection } from "./OperatingKriSection";
 import { PolicyLimitSection } from "./PolicyLimitSection";
 import { PlatformCommandSearchSection } from "./PlatformCommandSearchSection";
+import { PlatformCommandTriageSection } from "./PlatformCommandTriageSection";
 import { PlatformExceptionSection } from "./PlatformExceptionSection";
 import { PostTradeAttributionSection } from "./PostTradeAttributionSection";
 import { RebalanceDraftSection } from "./RebalanceDraftSection";
@@ -1297,6 +1303,8 @@ export function MarketDataPanel() {
     sources,
   });
   const platformCommandSearchSummary = summarizePlatformCommandSearch(platformCommandSearchItems);
+  const platformCommandTriageItems = buildPlatformCommandTriageItems(platformCommandSearchItems);
+  const platformCommandTriageSummary = summarizePlatformCommandTriage(platformCommandTriageItems);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1653,6 +1661,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-command-search-${resultStamp()}.csv`,
       platformCommandSearchCsv(platformCommandSearchItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportPlatformCommandTriageCsv = () => {
+    if (!platformCommandTriageItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-command-triage-${resultStamp()}.csv`,
+      platformCommandTriageCsv(platformCommandTriageItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -3059,6 +3076,11 @@ export function MarketDataPanel() {
                 summary={platformCommandSearchSummary}
                 items={platformCommandSearchItems}
                 onExportCsv={handleExportPlatformCommandSearchCsv}
+              />
+              <PlatformCommandTriageSection
+                summary={platformCommandTriageSummary}
+                items={platformCommandTriageItems}
+                onExportCsv={handleExportPlatformCommandTriageCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
