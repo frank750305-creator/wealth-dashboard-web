@@ -224,6 +224,11 @@ import {
   summarizePlatformCommandOwnerLoad,
 } from "@/lib/platformCommandOwnerLoad";
 import {
+  buildPlatformCommandHandoffItems,
+  platformCommandHandoffCsv,
+  summarizePlatformCommandHandoff,
+} from "@/lib/platformCommandHandoff";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -307,6 +312,7 @@ import { MarketAlertSection } from "./MarketAlertSection";
 import { MarketSourceInventorySection } from "./MarketSourceInventorySection";
 import { OperatingKriSection } from "./OperatingKriSection";
 import { PolicyLimitSection } from "./PolicyLimitSection";
+import { PlatformCommandHandoffSection } from "./PlatformCommandHandoffSection";
 import { PlatformCommandOwnerLoadSection } from "./PlatformCommandOwnerLoadSection";
 import { PlatformCommandSearchSection } from "./PlatformCommandSearchSection";
 import { PlatformCommandSlaSection } from "./PlatformCommandSlaSection";
@@ -1321,6 +1327,8 @@ export function MarketDataPanel() {
   const platformCommandSlaSummary = summarizePlatformCommandSla(platformCommandSlaItems);
   const platformCommandOwnerLoadItems = buildPlatformCommandOwnerLoadItems(platformCommandSlaItems);
   const platformCommandOwnerLoadSummary = summarizePlatformCommandOwnerLoad(platformCommandOwnerLoadItems);
+  const platformCommandHandoffItems = buildPlatformCommandHandoffItems(platformCommandOwnerLoadItems);
+  const platformCommandHandoffSummary = summarizePlatformCommandHandoff(platformCommandHandoffItems);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1704,6 +1712,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-command-owner-load-${resultStamp()}.csv`,
       platformCommandOwnerLoadCsv(platformCommandOwnerLoadItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportPlatformCommandHandoffCsv = () => {
+    if (!platformCommandHandoffItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-command-handoff-${resultStamp()}.csv`,
+      platformCommandHandoffCsv(platformCommandHandoffItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -3125,6 +3142,11 @@ export function MarketDataPanel() {
                 summary={platformCommandOwnerLoadSummary}
                 items={platformCommandOwnerLoadItems}
                 onExportCsv={handleExportPlatformCommandOwnerLoadCsv}
+              />
+              <PlatformCommandHandoffSection
+                summary={platformCommandHandoffSummary}
+                items={platformCommandHandoffItems}
+                onExportCsv={handleExportPlatformCommandHandoffCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
