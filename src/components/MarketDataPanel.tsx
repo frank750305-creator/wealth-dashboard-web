@@ -339,6 +339,11 @@ import {
   summarizePlatformCommandUnitEconomics,
 } from "@/lib/platformCommandUnitEconomics";
 import {
+  buildPlatformCommandPricingGovernanceItems,
+  platformCommandPricingGovernanceCsv,
+  summarizePlatformCommandPricingGovernance,
+} from "@/lib/platformCommandPricingGovernance";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -446,6 +451,7 @@ import { PlatformCommandExpansionPlaybookSection } from "./PlatformCommandExpans
 import { PlatformCommandRenewalForecastSection } from "./PlatformCommandRenewalForecastSection";
 import { PlatformCommandRevenueOperationsLedgerSection } from "./PlatformCommandRevenueOperationsLedgerSection";
 import { PlatformCommandUnitEconomicsSection } from "./PlatformCommandUnitEconomicsSection";
+import { PlatformCommandPricingGovernanceSection } from "./PlatformCommandPricingGovernanceSection";
 import { PlatformCommandSearchSection } from "./PlatformCommandSearchSection";
 import { PlatformCommandSlaSection } from "./PlatformCommandSlaSection";
 import { PlatformCommandTriageSection } from "./PlatformCommandTriageSection";
@@ -1563,6 +1569,12 @@ export function MarketDataPanel() {
   const platformCommandUnitEconomicsSummary = summarizePlatformCommandUnitEconomics(
     platformCommandUnitEconomicsItems,
   );
+  const platformCommandPricingGovernanceItems = buildPlatformCommandPricingGovernanceItems(
+    platformCommandUnitEconomicsItems,
+  );
+  const platformCommandPricingGovernanceSummary = summarizePlatformCommandPricingGovernance(
+    platformCommandPricingGovernanceItems,
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -2153,6 +2165,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-command-unit-economics-${resultStamp()}.csv`,
       platformCommandUnitEconomicsCsv(platformCommandUnitEconomicsItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportPlatformCommandPricingGovernanceCsv = () => {
+    if (!platformCommandPricingGovernanceItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-command-pricing-governance-${resultStamp()}.csv`,
+      platformCommandPricingGovernanceCsv(platformCommandPricingGovernanceItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -3689,6 +3710,11 @@ export function MarketDataPanel() {
                 summary={platformCommandUnitEconomicsSummary}
                 items={platformCommandUnitEconomicsItems}
                 onExportCsv={handleExportPlatformCommandUnitEconomicsCsv}
+              />
+              <PlatformCommandPricingGovernanceSection
+                summary={platformCommandPricingGovernanceSummary}
+                items={platformCommandPricingGovernanceItems}
+                onExportCsv={handleExportPlatformCommandPricingGovernanceCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
