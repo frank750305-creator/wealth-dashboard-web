@@ -304,6 +304,11 @@ import {
   summarizePlatformCommandProductPackaging,
 } from "@/lib/platformCommandProductPackaging";
 import {
+  buildPlatformCommandRevenueReadinessItems,
+  platformCommandRevenueReadinessCsv,
+  summarizePlatformCommandRevenueReadiness,
+} from "@/lib/platformCommandRevenueReadiness";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -404,6 +409,7 @@ import { PlatformCommandComplianceAttestationSection } from "./PlatformCommandCo
 import { PlatformCommandBoardReportingSection } from "./PlatformCommandBoardReportingSection";
 import { PlatformCommandClientReadoutSection } from "./PlatformCommandClientReadoutSection";
 import { PlatformCommandProductPackagingSection } from "./PlatformCommandProductPackagingSection";
+import { PlatformCommandRevenueReadinessSection } from "./PlatformCommandRevenueReadinessSection";
 import { PlatformCommandSearchSection } from "./PlatformCommandSearchSection";
 import { PlatformCommandSlaSection } from "./PlatformCommandSlaSection";
 import { PlatformCommandTriageSection } from "./PlatformCommandTriageSection";
@@ -1483,6 +1489,12 @@ export function MarketDataPanel() {
   const platformCommandProductPackagingSummary = summarizePlatformCommandProductPackaging(
     platformCommandProductPackagingItems,
   );
+  const platformCommandRevenueReadinessItems = buildPlatformCommandRevenueReadinessItems(
+    platformCommandProductPackagingItems,
+  );
+  const platformCommandRevenueReadinessSummary = summarizePlatformCommandRevenueReadiness(
+    platformCommandRevenueReadinessItems,
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -2010,6 +2022,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-command-product-packaging-${resultStamp()}.csv`,
       platformCommandProductPackagingCsv(platformCommandProductPackagingItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportPlatformCommandRevenueReadinessCsv = () => {
+    if (!platformCommandRevenueReadinessItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-command-revenue-readiness-${resultStamp()}.csv`,
+      platformCommandRevenueReadinessCsv(platformCommandRevenueReadinessItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -3511,6 +3532,11 @@ export function MarketDataPanel() {
                 summary={platformCommandProductPackagingSummary}
                 items={platformCommandProductPackagingItems}
                 onExportCsv={handleExportPlatformCommandProductPackagingCsv}
+              />
+              <PlatformCommandRevenueReadinessSection
+                summary={platformCommandRevenueReadinessSummary}
+                items={platformCommandRevenueReadinessItems}
+                onExportCsv={handleExportPlatformCommandRevenueReadinessCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
