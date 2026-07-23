@@ -27,6 +27,10 @@ export type PlatformCommandSearchItem = {
   owner: string;
   metric: string;
   evidence: string;
+  runbook: string;
+  terminalRoute: string;
+  escalation: string;
+  expectedOutput: string;
   nextAction: string;
   keywords: string;
 };
@@ -115,6 +119,19 @@ function sourcePriority(source: MarketSource): PlatformCommandPriority {
   return "low";
 }
 
+function accountRunbook(item: AccountHealthItem) {
+  if (item.stage === "risk") return "建立保留方案，先處理阻擋項、客戶訊息與續約條件";
+  if (item.stage === "watch") return "安排 14 天健康改善計畫，追蹤使用深度、帳務與資料產品影響";
+  if (item.stage === "expand") return "準備 QBR 擴售提案，對齊席位、API 額度與資料包升級";
+  return "維持月度健康檢查與續約證據留存";
+}
+
+function escalationForStatus(status: AccountHealthStatus, owner: string) {
+  if (status === "block") return `${owner} 需升級到風控、客戶成功與產品 owner`;
+  if (status === "watch") return `${owner} 需在下一次週會回報改善狀態`;
+  return "例行追蹤即可";
+}
+
 export function platformCommandCategoryLabel(category: PlatformCommandCategory) {
   if (category === "account") return "Account";
   if (category === "action") return "Action";
@@ -162,8 +179,12 @@ export function buildPlatformCommandSearchItems({
     owner: item.owner,
     metric: item.targetMrr ? formatCurrency(item.targetMrr) : item.dueWindow,
     evidence: item.evidence,
+    runbook: item.playbook,
+    terminalRoute: `Revenue Ops / ${accountActionMotionLabel(item.motion)}`,
+    escalation: escalationForStatus(item.status, item.owner),
+    expectedOutput: item.successMetric,
     nextAction: item.nextAction,
-    keywords: searchKeywords([item.workspace, item.plan, item.motion, item.priority, item.owner, item.playbook, item.evidence, item.nextAction]),
+    keywords: searchKeywords([item.workspace, item.plan, item.motion, item.priority, item.owner, item.playbook, item.evidence, item.nextAction, item.successMetric]),
   }));
 
   const accountCommands = accountHealthItems.map((item): PlatformCommandSearchItem => ({
@@ -177,8 +198,12 @@ export function buildPlatformCommandSearchItems({
     owner: item.owner,
     metric: `${item.healthScore} 分 / ${Math.round(item.renewalProbability * 100)}%`,
     evidence: item.riskDrivers.join(" / "),
+    runbook: accountRunbook(item),
+    terminalRoute: `Account Health / ${accountHealthStageLabel(item.stage)}`,
+    escalation: escalationForStatus(item.status, item.owner),
+    expectedOutput: item.stage === "expand" ? "形成擴售提案與 pipeline 金額" : "更新續約機率、健康分數與風險處理紀錄",
     nextAction: item.nextAction,
-    keywords: searchKeywords([item.workspace, item.segment, item.plan, item.stage, item.owner, item.riskDrivers, item.nextAction]),
+    keywords: searchKeywords([item.workspace, item.segment, item.plan, item.stage, item.owner, item.riskDrivers, item.nextAction, accountRunbook(item)]),
   }));
 
   const statusCommands = dataProductStatusPageItems.map((item): PlatformCommandSearchItem => ({
@@ -192,8 +217,12 @@ export function buildPlatformCommandSearchItems({
     owner: item.owner,
     metric: `${item.sloScore} SLO`,
     evidence: item.customerMessage,
+    runbook: item.operatorNote,
+    terminalRoute: `Status Page / ${item.domain}`,
+    escalation: item.serviceState === "incident" ? `${item.owner} 需啟動 incident 更新節奏` : escalationForStatus(item.status, item.owner),
+    expectedOutput: `${serviceStateLabel(item.serviceState)} / ${item.nextUpdate}`,
     nextAction: item.operatorNote,
-    keywords: searchKeywords([item.domain, item.product, item.serviceState, item.status, item.owner, item.customerMessage, item.operatorNote]),
+    keywords: searchKeywords([item.domain, item.product, item.serviceState, item.status, item.owner, item.customerMessage, item.operatorNote, item.nextUpdate]),
   }));
 
   const budgetCommands = dataProductErrorBudgetItems.map((item): PlatformCommandSearchItem => ({
@@ -207,6 +236,10 @@ export function buildPlatformCommandSearchItems({
     owner: item.owner,
     metric: `${Math.round(item.budgetRemainingPercent * 100)}% budget`,
     evidence: item.evidence,
+    runbook: item.action,
+    terminalRoute: `Error Budget / ${item.domain}`,
+    escalation: item.releasePolicy === "freeze" ? `${item.owner} 需凍結發布並啟動 SLO 修復` : `${item.owner} 追蹤發布條件`,
+    expectedOutput: item.releasePolicy === "freeze" ? "解除 freeze 或形成正式例外核准" : "恢復 budget 到可發布水位",
     nextAction: item.action,
     keywords: searchKeywords([item.domain, item.product, item.releasePolicy, item.owner, item.evidence, item.action]),
   }));
@@ -222,6 +255,10 @@ export function buildPlatformCommandSearchItems({
     owner: item.owner,
     metric: item.serviceLevel,
     evidence: `${item.consumer} / ${item.output}`,
+    runbook: item.action,
+    terminalRoute: `API Catalog / ${item.method}`,
+    escalation: escalationForStatus(item.status, item.owner),
+    expectedOutput: `${item.input} -> ${item.output}`,
     nextAction: item.action,
     keywords: searchKeywords([item.endpoint, item.method, item.product, item.status, item.owner, item.consumer, item.input, item.output, item.action]),
   }));
@@ -237,6 +274,10 @@ export function buildPlatformCommandSearchItems({
     owner: "資料工程",
     metric: source.status,
     evidence: `${source.currentStorage} / ${source.integrationPath}`,
+    runbook: source.nextAction,
+    terminalRoute: `Data Source / ${source.category}`,
+    escalation: source.status === "needs_secret" ? "資料工程需補齊環境變數與讀取權限" : "維持資料源盤點節奏",
+    expectedOutput: source.integrationPath,
     nextAction: source.nextAction,
     keywords: searchKeywords([source.id, source.name, source.provider, source.category, source.status, source.currentStorage, source.integrationPath, source.nextAction]),
   }));
@@ -279,6 +320,10 @@ export function platformCommandSearchCsv(items: PlatformCommandSearchItem[]) {
     "owner",
     "metric",
     "evidence",
+    "runbook",
+    "terminal_route",
+    "escalation",
+    "expected_output",
     "next_action",
   ];
   const rows = items.map((item) => [
@@ -291,6 +336,10 @@ export function platformCommandSearchCsv(items: PlatformCommandSearchItem[]) {
     item.owner,
     item.metric,
     item.evidence,
+    item.runbook,
+    item.terminalRoute,
+    item.escalation,
+    item.expectedOutput,
     item.nextAction,
   ]);
 

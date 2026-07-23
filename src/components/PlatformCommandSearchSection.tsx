@@ -49,7 +49,7 @@ export function PlatformCommandSearchSection({
         .filter((item) => category === "all" || item.category === category)
         .filter((item) => {
           if (!cleanQuery) return true;
-          return `${item.command} ${item.title} ${item.subtitle} ${item.owner} ${item.metric} ${item.evidence} ${item.nextAction} ${item.keywords}`
+          return `${item.command} ${item.title} ${item.subtitle} ${item.owner} ${item.metric} ${item.evidence} ${item.runbook} ${item.terminalRoute} ${item.escalation} ${item.expectedOutput} ${item.nextAction} ${item.keywords}`
             .toLowerCase()
             .includes(cleanQuery);
         })
@@ -177,8 +177,24 @@ export function PlatformCommandSearchSection({
                   <dd className="mt-0.5 font-mono text-slate-300">{selectedItem.metric}</dd>
                 </div>
                 <div>
+                  <dt className="text-[10px] text-slate-600">Route</dt>
+                  <dd className="mt-0.5 text-cyan-200">{selectedItem.terminalRoute}</dd>
+                </div>
+                <div>
                   <dt className="text-[10px] text-slate-600">Evidence</dt>
                   <dd className="mt-0.5 text-slate-500">{selectedItem.evidence}</dd>
+                </div>
+                <div>
+                  <dt className="text-[10px] text-slate-600">Runbook</dt>
+                  <dd className="mt-0.5 text-slate-300">{selectedItem.runbook}</dd>
+                </div>
+                <div>
+                  <dt className="text-[10px] text-slate-600">Escalation</dt>
+                  <dd className="mt-0.5 text-slate-500">{selectedItem.escalation}</dd>
+                </div>
+                <div>
+                  <dt className="text-[10px] text-slate-600">Expected Output</dt>
+                  <dd className="mt-0.5 text-slate-300">{selectedItem.expectedOutput}</dd>
                 </div>
                 <div>
                   <dt className="text-[10px] text-slate-600">Next Action</dt>
@@ -198,6 +214,7 @@ export function PlatformCommandSearchSection({
                 <th className="py-2 px-3 font-medium">Status</th>
                 <th className="py-2 px-3 font-medium">Title</th>
                 <th className="py-2 px-3 font-medium">Metric</th>
+                <th className="py-2 px-3 font-medium">Route</th>
                 <th className="py-2 px-3 font-medium">Owner</th>
                 <th className="py-2 px-3 font-medium">Evidence</th>
                 <th className="py-2 px-3 font-medium">Next Action</th>
@@ -231,6 +248,7 @@ export function PlatformCommandSearchSection({
                     <p className="mt-0.5 text-[10px] text-slate-600">{item.subtitle}</p>
                   </td>
                   <td className="py-2 px-3 font-mono text-slate-300">{item.metric}</td>
+                  <td className="py-2 px-3 text-cyan-200">{item.terminalRoute}</td>
                   <td className="py-2 px-3 text-slate-400">{item.owner}</td>
                   <td className="py-2 px-3 text-slate-500">{item.evidence}</td>
                   <td className="py-2 px-3 text-slate-500">{item.nextAction}</td>
