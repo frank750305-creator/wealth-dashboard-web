@@ -269,6 +269,11 @@ import {
   summarizePlatformCommandDecisionRegister,
 } from "@/lib/platformCommandDecisionRegister";
 import {
+  buildPlatformCommandDecisionFollowUpItems,
+  platformCommandDecisionFollowUpCsv,
+  summarizePlatformCommandDecisionFollowUp,
+} from "@/lib/platformCommandDecisionFollowUp";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -362,6 +367,7 @@ import { PlatformCommandReleaseMonitorSection } from "./PlatformCommandReleaseMo
 import { PlatformCommandOperatingReviewSection } from "./PlatformCommandOperatingReviewSection";
 import { PlatformCommandExecutiveBriefSection } from "./PlatformCommandExecutiveBriefSection";
 import { PlatformCommandDecisionRegisterSection } from "./PlatformCommandDecisionRegisterSection";
+import { PlatformCommandDecisionFollowUpSection } from "./PlatformCommandDecisionFollowUpSection";
 import { PlatformCommandSearchSection } from "./PlatformCommandSearchSection";
 import { PlatformCommandSlaSection } from "./PlatformCommandSlaSection";
 import { PlatformCommandTriageSection } from "./PlatformCommandTriageSection";
@@ -1411,6 +1417,12 @@ export function MarketDataPanel() {
   const platformCommandDecisionRegisterSummary = summarizePlatformCommandDecisionRegister(
     platformCommandDecisionRegisterItems,
   );
+  const platformCommandDecisionFollowUpItems = buildPlatformCommandDecisionFollowUpItems(
+    platformCommandDecisionRegisterItems,
+  );
+  const platformCommandDecisionFollowUpSummary = summarizePlatformCommandDecisionFollowUp(
+    platformCommandDecisionFollowUpItems,
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1875,6 +1887,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-command-decision-register-${resultStamp()}.csv`,
       platformCommandDecisionRegisterCsv(platformCommandDecisionRegisterItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportPlatformCommandDecisionFollowUpCsv = () => {
+    if (!platformCommandDecisionFollowUpItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-command-decision-follow-up-${resultStamp()}.csv`,
+      platformCommandDecisionFollowUpCsv(platformCommandDecisionFollowUpItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -3341,6 +3362,11 @@ export function MarketDataPanel() {
                 summary={platformCommandDecisionRegisterSummary}
                 items={platformCommandDecisionRegisterItems}
                 onExportCsv={handleExportPlatformCommandDecisionRegisterCsv}
+              />
+              <PlatformCommandDecisionFollowUpSection
+                summary={platformCommandDecisionFollowUpSummary}
+                items={platformCommandDecisionFollowUpItems}
+                onExportCsv={handleExportPlatformCommandDecisionFollowUpCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
