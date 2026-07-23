@@ -349,6 +349,11 @@ import {
   summarizePlatformCommandQuoteDesk,
 } from "@/lib/platformCommandQuoteDesk";
 import {
+  buildPlatformCommandEntitlementProvisioningItems,
+  platformCommandEntitlementProvisioningCsv,
+  summarizePlatformCommandEntitlementProvisioning,
+} from "@/lib/platformCommandEntitlementProvisioning";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -458,6 +463,7 @@ import { PlatformCommandRevenueOperationsLedgerSection } from "./PlatformCommand
 import { PlatformCommandUnitEconomicsSection } from "./PlatformCommandUnitEconomicsSection";
 import { PlatformCommandPricingGovernanceSection } from "./PlatformCommandPricingGovernanceSection";
 import { PlatformCommandQuoteDeskSection } from "./PlatformCommandQuoteDeskSection";
+import { PlatformCommandEntitlementProvisioningSection } from "./PlatformCommandEntitlementProvisioningSection";
 import { PlatformCommandSearchSection } from "./PlatformCommandSearchSection";
 import { PlatformCommandSlaSection } from "./PlatformCommandSlaSection";
 import { PlatformCommandTriageSection } from "./PlatformCommandTriageSection";
@@ -1583,6 +1589,12 @@ export function MarketDataPanel() {
   );
   const platformCommandQuoteDeskItems = buildPlatformCommandQuoteDeskItems(platformCommandPricingGovernanceItems);
   const platformCommandQuoteDeskSummary = summarizePlatformCommandQuoteDesk(platformCommandQuoteDeskItems);
+  const platformCommandEntitlementProvisioningItems = buildPlatformCommandEntitlementProvisioningItems(
+    platformCommandQuoteDeskItems,
+  );
+  const platformCommandEntitlementProvisioningSummary = summarizePlatformCommandEntitlementProvisioning(
+    platformCommandEntitlementProvisioningItems,
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -2191,6 +2203,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-command-quote-desk-${resultStamp()}.csv`,
       platformCommandQuoteDeskCsv(platformCommandQuoteDeskItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportPlatformCommandEntitlementProvisioningCsv = () => {
+    if (!platformCommandEntitlementProvisioningItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-command-entitlement-provisioning-${resultStamp()}.csv`,
+      platformCommandEntitlementProvisioningCsv(platformCommandEntitlementProvisioningItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -3737,6 +3758,11 @@ export function MarketDataPanel() {
                 summary={platformCommandQuoteDeskSummary}
                 items={platformCommandQuoteDeskItems}
                 onExportCsv={handleExportPlatformCommandQuoteDeskCsv}
+              />
+              <PlatformCommandEntitlementProvisioningSection
+                summary={platformCommandEntitlementProvisioningSummary}
+                items={platformCommandEntitlementProvisioningItems}
+                onExportCsv={handleExportPlatformCommandEntitlementProvisioningCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
