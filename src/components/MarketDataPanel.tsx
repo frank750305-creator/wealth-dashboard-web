@@ -219,6 +219,11 @@ import {
   summarizePlatformCommandSla,
 } from "@/lib/platformCommandSla";
 import {
+  buildPlatformCommandOwnerLoadItems,
+  platformCommandOwnerLoadCsv,
+  summarizePlatformCommandOwnerLoad,
+} from "@/lib/platformCommandOwnerLoad";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -302,6 +307,7 @@ import { MarketAlertSection } from "./MarketAlertSection";
 import { MarketSourceInventorySection } from "./MarketSourceInventorySection";
 import { OperatingKriSection } from "./OperatingKriSection";
 import { PolicyLimitSection } from "./PolicyLimitSection";
+import { PlatformCommandOwnerLoadSection } from "./PlatformCommandOwnerLoadSection";
 import { PlatformCommandSearchSection } from "./PlatformCommandSearchSection";
 import { PlatformCommandSlaSection } from "./PlatformCommandSlaSection";
 import { PlatformCommandTriageSection } from "./PlatformCommandTriageSection";
@@ -1313,6 +1319,8 @@ export function MarketDataPanel() {
   const platformCommandTriageSummary = summarizePlatformCommandTriage(platformCommandTriageItems);
   const platformCommandSlaItems = buildPlatformCommandSlaItems(platformCommandSearchItems);
   const platformCommandSlaSummary = summarizePlatformCommandSla(platformCommandSlaItems);
+  const platformCommandOwnerLoadItems = buildPlatformCommandOwnerLoadItems(platformCommandSlaItems);
+  const platformCommandOwnerLoadSummary = summarizePlatformCommandOwnerLoad(platformCommandOwnerLoadItems);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1687,6 +1695,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-command-sla-${resultStamp()}.csv`,
       platformCommandSlaCsv(platformCommandSlaItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportPlatformCommandOwnerLoadCsv = () => {
+    if (!platformCommandOwnerLoadItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-command-owner-load-${resultStamp()}.csv`,
+      platformCommandOwnerLoadCsv(platformCommandOwnerLoadItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -3103,6 +3120,11 @@ export function MarketDataPanel() {
                 summary={platformCommandSlaSummary}
                 items={platformCommandSlaItems}
                 onExportCsv={handleExportPlatformCommandSlaCsv}
+              />
+              <PlatformCommandOwnerLoadSection
+                summary={platformCommandOwnerLoadSummary}
+                items={platformCommandOwnerLoadItems}
+                onExportCsv={handleExportPlatformCommandOwnerLoadCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
