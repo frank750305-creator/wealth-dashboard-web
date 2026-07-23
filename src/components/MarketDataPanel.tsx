@@ -399,6 +399,11 @@ import {
   summarizePlatformCommandCeoDecisionConsole,
 } from "@/lib/platformCommandCeoDecisionConsole";
 import {
+  buildPlatformCommandStakeholderOutputPackItems,
+  platformCommandStakeholderOutputPackCsv,
+  summarizePlatformCommandStakeholderOutputPack,
+} from "@/lib/platformCommandStakeholderOutputPack";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -518,6 +523,7 @@ import { PlatformCommandManagementOverviewSection } from "./PlatformCommandManag
 import { PlatformCommandBoardPackSection } from "./PlatformCommandBoardPackSection";
 import { PlatformCommandOperatingControlTowerSection } from "./PlatformCommandOperatingControlTowerSection";
 import { PlatformCommandCeoDecisionConsoleSection } from "./PlatformCommandCeoDecisionConsoleSection";
+import { PlatformCommandStakeholderOutputPackSection } from "./PlatformCommandStakeholderOutputPackSection";
 import { PlatformCommandSearchSection } from "./PlatformCommandSearchSection";
 import { PlatformCommandSlaSection } from "./PlatformCommandSlaSection";
 import { PlatformCommandTriageSection } from "./PlatformCommandTriageSection";
@@ -1688,6 +1694,12 @@ export function MarketDataPanel() {
   const platformCommandCeoDecisionConsoleSummary = summarizePlatformCommandCeoDecisionConsole(
     platformCommandCeoDecisionConsoleItems,
   );
+  const platformCommandStakeholderOutputPackItems = buildPlatformCommandStakeholderOutputPackItems(
+    platformCommandCeoDecisionConsoleItems,
+  );
+  const platformCommandStakeholderOutputPackSummary = summarizePlatformCommandStakeholderOutputPack(
+    platformCommandStakeholderOutputPackItems,
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -2386,6 +2398,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-command-ceo-decision-console-${resultStamp()}.csv`,
       platformCommandCeoDecisionConsoleCsv(platformCommandCeoDecisionConsoleItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportPlatformCommandStakeholderOutputPackCsv = () => {
+    if (!platformCommandStakeholderOutputPackItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-command-stakeholder-output-pack-${resultStamp()}.csv`,
+      platformCommandStakeholderOutputPackCsv(platformCommandStakeholderOutputPackItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -3982,6 +4003,11 @@ export function MarketDataPanel() {
                 summary={platformCommandCeoDecisionConsoleSummary}
                 items={platformCommandCeoDecisionConsoleItems}
                 onExportCsv={handleExportPlatformCommandCeoDecisionConsoleCsv}
+              />
+              <PlatformCommandStakeholderOutputPackSection
+                summary={platformCommandStakeholderOutputPackSummary}
+                items={platformCommandStakeholderOutputPackItems}
+                onExportCsv={handleExportPlatformCommandStakeholderOutputPackCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
