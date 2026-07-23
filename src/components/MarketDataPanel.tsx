@@ -384,6 +384,11 @@ import {
   summarizePlatformCommandManagementOverview,
 } from "@/lib/platformCommandManagementOverview";
 import {
+  buildPlatformCommandBoardPackItems,
+  platformCommandBoardPackCsv,
+  summarizePlatformCommandBoardPack,
+} from "@/lib/platformCommandBoardPack";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -500,6 +505,7 @@ import { PlatformCommandUsageMonitoringSection } from "./PlatformCommandUsageMon
 import { PlatformCommandRevenueAuditSection } from "./PlatformCommandRevenueAuditSection";
 import { PlatformCommandCustomerHealthSection } from "./PlatformCommandCustomerHealthSection";
 import { PlatformCommandManagementOverviewSection } from "./PlatformCommandManagementOverviewSection";
+import { PlatformCommandBoardPackSection } from "./PlatformCommandBoardPackSection";
 import { PlatformCommandSearchSection } from "./PlatformCommandSearchSection";
 import { PlatformCommandSlaSection } from "./PlatformCommandSlaSection";
 import { PlatformCommandTriageSection } from "./PlatformCommandTriageSection";
@@ -1657,6 +1663,8 @@ export function MarketDataPanel() {
   const platformCommandManagementOverviewSummary = summarizePlatformCommandManagementOverview(
     platformCommandManagementOverviewItems,
   );
+  const platformCommandBoardPackItems = buildPlatformCommandBoardPackItems(platformCommandManagementOverviewItems);
+  const platformCommandBoardPackSummary = summarizePlatformCommandBoardPack(platformCommandBoardPackItems);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -2328,6 +2336,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-command-management-overview-${resultStamp()}.csv`,
       platformCommandManagementOverviewCsv(platformCommandManagementOverviewItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportPlatformCommandBoardPackCsv = () => {
+    if (!platformCommandBoardPackItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-command-board-pack-${resultStamp()}.csv`,
+      platformCommandBoardPackCsv(platformCommandBoardPackItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -3909,6 +3926,11 @@ export function MarketDataPanel() {
                 summary={platformCommandManagementOverviewSummary}
                 items={platformCommandManagementOverviewItems}
                 onExportCsv={handleExportPlatformCommandManagementOverviewCsv}
+              />
+              <PlatformCommandBoardPackSection
+                summary={platformCommandBoardPackSummary}
+                items={platformCommandBoardPackItems}
+                onExportCsv={handleExportPlatformCommandBoardPackCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
