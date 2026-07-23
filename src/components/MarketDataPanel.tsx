@@ -405,9 +405,11 @@ import {
 } from "@/lib/platformCommandStakeholderOutputPack";
 import {
   buildPlatformCommandProductNavigatorItems,
+  loadPlatformCommandProductNavigatorAreaFromStorage,
   summarizePlatformCommandProductNavigator,
-  type PlatformCommandProductNavigatorAreaId,
+  type PlatformCommandProductNavigatorActiveArea,
   type PlatformCommandProductNavigatorStatus,
+  writePlatformCommandProductNavigatorAreaToStorage,
 } from "@/lib/platformCommandProductNavigator";
 import {
   executionReviewCsv,
@@ -720,7 +722,7 @@ export function MarketDataPanel() {
   const [marketAlertAuditMessage, setMarketAlertAuditMessage] = useState("");
   const [marketAlertAuditRecords, setMarketAlertAuditRecords] = useState<MarketAlertWarehouseAuditRecord[]>([]);
   const [watchlistMemoCopyStatus, setWatchlistMemoCopyStatus] = useState<"idle" | "copied">("idle");
-  const [activeCommandAreaId, setActiveCommandAreaId] = useState<PlatformCommandProductNavigatorAreaId | "all">("all");
+  const [activeCommandAreaId, setActiveCommandAreaId] = useState<PlatformCommandProductNavigatorActiveArea>("all");
   const sources = data?.sources ?? [];
   const securedCount = sources.filter((source) => source.status !== "needs_secret").length;
   const hasBigQueryCredentials = Boolean(
@@ -1878,13 +1880,18 @@ export function MarketDataPanel() {
   const platformCommandProductNavigatorSummary = summarizePlatformCommandProductNavigator(
     platformCommandProductNavigatorItems,
   );
-  const isCommandAreaVisible = (areaId: PlatformCommandProductNavigatorAreaId) =>
+  const isCommandAreaVisible = (areaId: Exclude<PlatformCommandProductNavigatorActiveArea, "all">) =>
     activeCommandAreaId === "all" || activeCommandAreaId === areaId;
+  const handleSelectCommandArea = (areaId: PlatformCommandProductNavigatorActiveArea) => {
+    setActiveCommandAreaId(areaId);
+    writePlatformCommandProductNavigatorAreaToStorage(areaId);
+  };
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
       const presets = loadWatchlistPresetsFromStorage();
       const taskOverrides = loadResearchTaskOverridesFromStorage();
+      setActiveCommandAreaId(loadPlatformCommandProductNavigatorAreaFromStorage());
       setSavedWatchlistPresets(presets);
       setResearchTaskOverrides(taskOverrides);
       setResearchTaskWorkspaceId(loadResearchTaskWorkspaceIdFromStorage());
@@ -3993,7 +4000,7 @@ export function MarketDataPanel() {
                 summary={platformCommandProductNavigatorSummary}
                 items={platformCommandProductNavigatorItems}
                 activeAreaId={activeCommandAreaId}
-                onSelectArea={setActiveCommandAreaId}
+                onSelectArea={handleSelectCommandArea}
               />
               <div
                 id="command-foundation"

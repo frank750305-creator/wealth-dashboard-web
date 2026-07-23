@@ -6,6 +6,37 @@ export type PlatformCommandProductNavigatorAreaId =
   | "command-revenue-engine"
   | "command-executive-control"
   | "command-stakeholder-output";
+export type PlatformCommandProductNavigatorActiveArea = PlatformCommandProductNavigatorAreaId | "all";
+
+const platformCommandProductNavigatorStorageKey = "wealth-dashboard.commandProductNavigator.activeArea";
+
+const platformCommandProductNavigatorAreaIds: PlatformCommandProductNavigatorAreaId[] = [
+  "command-foundation",
+  "command-governance",
+  "command-client-commercial",
+  "command-revenue-engine",
+  "command-executive-control",
+  "command-stakeholder-output",
+];
+
+function isPlatformCommandProductNavigatorAreaId(value: string): value is PlatformCommandProductNavigatorAreaId {
+  return platformCommandProductNavigatorAreaIds.includes(value as PlatformCommandProductNavigatorAreaId);
+}
+
+export function loadPlatformCommandProductNavigatorAreaFromStorage(): PlatformCommandProductNavigatorActiveArea {
+  if (typeof window === "undefined") return "all";
+
+  const storedAreaId = window.localStorage.getItem(platformCommandProductNavigatorStorageKey);
+  if (!storedAreaId || storedAreaId === "all") return "all";
+  return isPlatformCommandProductNavigatorAreaId(storedAreaId) ? storedAreaId : "all";
+}
+
+export function writePlatformCommandProductNavigatorAreaToStorage(
+  areaId: PlatformCommandProductNavigatorActiveArea,
+) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(platformCommandProductNavigatorStorageKey, areaId);
+}
 
 export type PlatformCommandProductNavigatorInput = {
   areaId: PlatformCommandProductNavigatorAreaId;

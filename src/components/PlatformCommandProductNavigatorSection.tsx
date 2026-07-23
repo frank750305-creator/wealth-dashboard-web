@@ -1,5 +1,5 @@
 import {
-  type PlatformCommandProductNavigatorAreaId,
+  type PlatformCommandProductNavigatorActiveArea,
   type PlatformCommandProductNavigatorItem,
   type PlatformCommandProductNavigatorStatus,
   type PlatformCommandProductNavigatorSummary,
@@ -9,8 +9,8 @@ import { platformCommandStatusLabel } from "@/lib/platformCommandSearch";
 type PlatformCommandProductNavigatorSectionProps = {
   summary: PlatformCommandProductNavigatorSummary;
   items: PlatformCommandProductNavigatorItem[];
-  activeAreaId: PlatformCommandProductNavigatorAreaId | "all";
-  onSelectArea: (areaId: PlatformCommandProductNavigatorAreaId | "all") => void;
+  activeAreaId: PlatformCommandProductNavigatorActiveArea;
+  onSelectArea: (areaId: PlatformCommandProductNavigatorActiveArea) => void;
 };
 
 function statusBadgeClass(status: PlatformCommandProductNavigatorStatus) {
@@ -37,6 +37,7 @@ export function PlatformCommandProductNavigatorSection({
   activeAreaId,
   onSelectArea: handleSelectArea,
 }: PlatformCommandProductNavigatorSectionProps) {
+  const activeItem = activeAreaId === "all" ? null : items.find((item) => item.areaId === activeAreaId) ?? null;
   const metrics = [
     ["Areas", `${summary.areaCount}`],
     ["Modules", `${summary.moduleCount}`],
@@ -98,6 +99,27 @@ export function PlatformCommandProductNavigatorSection({
             {item.title}
           </button>
         ))}
+      </div>
+
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 rounded-lg border border-slate-800 bg-slate-900/70 px-3 py-2 text-xs">
+        <div>
+          <p className="text-[10px] text-slate-600">Current Focus</p>
+          <p className="mt-0.5 font-bold text-slate-100">
+            {activeItem ? `${activeItem.stage} / ${activeItem.title}` : "全部 Command 區塊"}
+          </p>
+          <p className="mt-0.5 text-[11px] text-slate-500">
+            {activeItem ? activeItem.entryPoint : "顯示所有產品入口與完整作戰流程"}
+          </p>
+        </div>
+        {activeItem ? (
+          <button
+            type="button"
+            onClick={() => handleSelectArea("all")}
+            className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 font-bold text-slate-200 hover:border-cyan-700 hover:text-cyan-100"
+          >
+            回到全部
+          </button>
+        ) : null}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3">
