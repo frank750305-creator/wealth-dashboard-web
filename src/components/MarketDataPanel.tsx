@@ -214,6 +214,11 @@ import {
   summarizePlatformCommandTriage,
 } from "@/lib/platformCommandTriage";
 import {
+  buildPlatformCommandSlaItems,
+  platformCommandSlaCsv,
+  summarizePlatformCommandSla,
+} from "@/lib/platformCommandSla";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -298,6 +303,7 @@ import { MarketSourceInventorySection } from "./MarketSourceInventorySection";
 import { OperatingKriSection } from "./OperatingKriSection";
 import { PolicyLimitSection } from "./PolicyLimitSection";
 import { PlatformCommandSearchSection } from "./PlatformCommandSearchSection";
+import { PlatformCommandSlaSection } from "./PlatformCommandSlaSection";
 import { PlatformCommandTriageSection } from "./PlatformCommandTriageSection";
 import { PlatformExceptionSection } from "./PlatformExceptionSection";
 import { PostTradeAttributionSection } from "./PostTradeAttributionSection";
@@ -1305,6 +1311,8 @@ export function MarketDataPanel() {
   const platformCommandSearchSummary = summarizePlatformCommandSearch(platformCommandSearchItems);
   const platformCommandTriageItems = buildPlatformCommandTriageItems(platformCommandSearchItems);
   const platformCommandTriageSummary = summarizePlatformCommandTriage(platformCommandTriageItems);
+  const platformCommandSlaItems = buildPlatformCommandSlaItems(platformCommandSearchItems);
+  const platformCommandSlaSummary = summarizePlatformCommandSla(platformCommandSlaItems);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1670,6 +1678,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-command-triage-${resultStamp()}.csv`,
       platformCommandTriageCsv(platformCommandTriageItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportPlatformCommandSlaCsv = () => {
+    if (!platformCommandSlaItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-command-sla-${resultStamp()}.csv`,
+      platformCommandSlaCsv(platformCommandSlaItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -3081,6 +3098,11 @@ export function MarketDataPanel() {
                 summary={platformCommandTriageSummary}
                 items={platformCommandTriageItems}
                 onExportCsv={handleExportPlatformCommandTriageCsv}
+              />
+              <PlatformCommandSlaSection
+                summary={platformCommandSlaSummary}
+                items={platformCommandSlaItems}
+                onExportCsv={handleExportPlatformCommandSlaCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
