@@ -279,6 +279,11 @@ import {
   summarizePlatformCommandEvidenceLedger,
 } from "@/lib/platformCommandEvidenceLedger";
 import {
+  buildPlatformCommandAuditTrailItems,
+  platformCommandAuditTrailCsv,
+  summarizePlatformCommandAuditTrail,
+} from "@/lib/platformCommandAuditTrail";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -374,6 +379,7 @@ import { PlatformCommandExecutiveBriefSection } from "./PlatformCommandExecutive
 import { PlatformCommandDecisionRegisterSection } from "./PlatformCommandDecisionRegisterSection";
 import { PlatformCommandDecisionFollowUpSection } from "./PlatformCommandDecisionFollowUpSection";
 import { PlatformCommandEvidenceLedgerSection } from "./PlatformCommandEvidenceLedgerSection";
+import { PlatformCommandAuditTrailSection } from "./PlatformCommandAuditTrailSection";
 import { PlatformCommandSearchSection } from "./PlatformCommandSearchSection";
 import { PlatformCommandSlaSection } from "./PlatformCommandSlaSection";
 import { PlatformCommandTriageSection } from "./PlatformCommandTriageSection";
@@ -1435,6 +1441,8 @@ export function MarketDataPanel() {
   const platformCommandEvidenceLedgerSummary = summarizePlatformCommandEvidenceLedger(
     platformCommandEvidenceLedgerItems,
   );
+  const platformCommandAuditTrailItems = buildPlatformCommandAuditTrailItems(platformCommandEvidenceLedgerItems);
+  const platformCommandAuditTrailSummary = summarizePlatformCommandAuditTrail(platformCommandAuditTrailItems);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1917,6 +1925,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-command-evidence-ledger-${resultStamp()}.csv`,
       platformCommandEvidenceLedgerCsv(platformCommandEvidenceLedgerItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportPlatformCommandAuditTrailCsv = () => {
+    if (!platformCommandAuditTrailItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-command-audit-trail-${resultStamp()}.csv`,
+      platformCommandAuditTrailCsv(platformCommandAuditTrailItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -3393,6 +3410,11 @@ export function MarketDataPanel() {
                 summary={platformCommandEvidenceLedgerSummary}
                 items={platformCommandEvidenceLedgerItems}
                 onExportCsv={handleExportPlatformCommandEvidenceLedgerCsv}
+              />
+              <PlatformCommandAuditTrailSection
+                summary={platformCommandAuditTrailSummary}
+                items={platformCommandAuditTrailItems}
+                onExportCsv={handleExportPlatformCommandAuditTrailCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
