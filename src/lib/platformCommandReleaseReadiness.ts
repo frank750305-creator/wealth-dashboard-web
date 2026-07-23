@@ -197,7 +197,7 @@ export function summarizePlatformCommandReleaseReadiness(
     guardedCount,
     goCount: items.filter((item) => item.releaseState === "go").length,
     deferredCount: items.filter((item) => item.releaseState === "deferred").length,
-    rollbackPlanCount: items.filter((item) => item.rollbackPlan !== "不發布，不需要 rollback").length,
+    rollbackPlanCount: items.filter((item) => item.releaseState === "guarded" || item.releaseState === "go").length,
     averageReadinessScore,
     nextReleaseWindow: blockedCount > 0 ? "解除阻擋後" : guardedCount > 0 ? "Guarded rollout" : "本輪 release",
   };

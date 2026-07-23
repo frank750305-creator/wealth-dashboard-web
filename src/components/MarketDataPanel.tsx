@@ -249,6 +249,11 @@ import {
   summarizePlatformCommandReleaseReadiness,
 } from "@/lib/platformCommandReleaseReadiness";
 import {
+  buildPlatformCommandReleaseMonitorItems,
+  platformCommandReleaseMonitorCsv,
+  summarizePlatformCommandReleaseMonitor,
+} from "@/lib/platformCommandReleaseMonitor";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -338,6 +343,7 @@ import { PlatformCommandImprovementBacklogSection } from "./PlatformCommandImpro
 import { PlatformCommandOwnerLoadSection } from "./PlatformCommandOwnerLoadSection";
 import { PlatformCommandPostmortemSection } from "./PlatformCommandPostmortemSection";
 import { PlatformCommandReleaseReadinessSection } from "./PlatformCommandReleaseReadinessSection";
+import { PlatformCommandReleaseMonitorSection } from "./PlatformCommandReleaseMonitorSection";
 import { PlatformCommandSearchSection } from "./PlatformCommandSearchSection";
 import { PlatformCommandSlaSection } from "./PlatformCommandSlaSection";
 import { PlatformCommandTriageSection } from "./PlatformCommandTriageSection";
@@ -1369,6 +1375,10 @@ export function MarketDataPanel() {
   const platformCommandReleaseReadinessSummary = summarizePlatformCommandReleaseReadiness(
     platformCommandReleaseReadinessItems,
   );
+  const platformCommandReleaseMonitorItems = buildPlatformCommandReleaseMonitorItems(
+    platformCommandReleaseReadinessItems,
+  );
+  const platformCommandReleaseMonitorSummary = summarizePlatformCommandReleaseMonitor(platformCommandReleaseMonitorItems);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1797,6 +1807,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-command-release-readiness-${resultStamp()}.csv`,
       platformCommandReleaseReadinessCsv(platformCommandReleaseReadinessItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportPlatformCommandReleaseMonitorCsv = () => {
+    if (!platformCommandReleaseMonitorItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-command-release-monitor-${resultStamp()}.csv`,
+      platformCommandReleaseMonitorCsv(platformCommandReleaseMonitorItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -3243,6 +3262,11 @@ export function MarketDataPanel() {
                 summary={platformCommandReleaseReadinessSummary}
                 items={platformCommandReleaseReadinessItems}
                 onExportCsv={handleExportPlatformCommandReleaseReadinessCsv}
+              />
+              <PlatformCommandReleaseMonitorSection
+                summary={platformCommandReleaseMonitorSummary}
+                items={platformCommandReleaseMonitorItems}
+                onExportCsv={handleExportPlatformCommandReleaseMonitorCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
