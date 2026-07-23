@@ -334,6 +334,11 @@ import {
   summarizePlatformCommandRevenueOperationsLedger,
 } from "@/lib/platformCommandRevenueOperationsLedger";
 import {
+  buildPlatformCommandUnitEconomicsItems,
+  platformCommandUnitEconomicsCsv,
+  summarizePlatformCommandUnitEconomics,
+} from "@/lib/platformCommandUnitEconomics";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -440,6 +445,7 @@ import { PlatformCommandCustomerSuccessActivationSection } from "./PlatformComma
 import { PlatformCommandExpansionPlaybookSection } from "./PlatformCommandExpansionPlaybookSection";
 import { PlatformCommandRenewalForecastSection } from "./PlatformCommandRenewalForecastSection";
 import { PlatformCommandRevenueOperationsLedgerSection } from "./PlatformCommandRevenueOperationsLedgerSection";
+import { PlatformCommandUnitEconomicsSection } from "./PlatformCommandUnitEconomicsSection";
 import { PlatformCommandSearchSection } from "./PlatformCommandSearchSection";
 import { PlatformCommandSlaSection } from "./PlatformCommandSlaSection";
 import { PlatformCommandTriageSection } from "./PlatformCommandTriageSection";
@@ -1551,6 +1557,12 @@ export function MarketDataPanel() {
   const platformCommandRevenueOperationsLedgerSummary = summarizePlatformCommandRevenueOperationsLedger(
     platformCommandRevenueOperationsLedgerItems,
   );
+  const platformCommandUnitEconomicsItems = buildPlatformCommandUnitEconomicsItems(
+    platformCommandRevenueOperationsLedgerItems,
+  );
+  const platformCommandUnitEconomicsSummary = summarizePlatformCommandUnitEconomics(
+    platformCommandUnitEconomicsItems,
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -2132,6 +2144,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-command-revenue-operations-ledger-${resultStamp()}.csv`,
       platformCommandRevenueOperationsLedgerCsv(platformCommandRevenueOperationsLedgerItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportPlatformCommandUnitEconomicsCsv = () => {
+    if (!platformCommandUnitEconomicsItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-command-unit-economics-${resultStamp()}.csv`,
+      platformCommandUnitEconomicsCsv(platformCommandUnitEconomicsItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -3663,6 +3684,11 @@ export function MarketDataPanel() {
                 summary={platformCommandRevenueOperationsLedgerSummary}
                 items={platformCommandRevenueOperationsLedgerItems}
                 onExportCsv={handleExportPlatformCommandRevenueOperationsLedgerCsv}
+              />
+              <PlatformCommandUnitEconomicsSection
+                summary={platformCommandUnitEconomicsSummary}
+                items={platformCommandUnitEconomicsItems}
+                onExportCsv={handleExportPlatformCommandUnitEconomicsCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
