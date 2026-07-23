@@ -284,6 +284,11 @@ import {
   summarizePlatformCommandAuditTrail,
 } from "@/lib/platformCommandAuditTrail";
 import {
+  buildPlatformCommandComplianceAttestationItems,
+  platformCommandComplianceAttestationCsv,
+  summarizePlatformCommandComplianceAttestation,
+} from "@/lib/platformCommandComplianceAttestation";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -380,6 +385,7 @@ import { PlatformCommandDecisionRegisterSection } from "./PlatformCommandDecisio
 import { PlatformCommandDecisionFollowUpSection } from "./PlatformCommandDecisionFollowUpSection";
 import { PlatformCommandEvidenceLedgerSection } from "./PlatformCommandEvidenceLedgerSection";
 import { PlatformCommandAuditTrailSection } from "./PlatformCommandAuditTrailSection";
+import { PlatformCommandComplianceAttestationSection } from "./PlatformCommandComplianceAttestationSection";
 import { PlatformCommandSearchSection } from "./PlatformCommandSearchSection";
 import { PlatformCommandSlaSection } from "./PlatformCommandSlaSection";
 import { PlatformCommandTriageSection } from "./PlatformCommandTriageSection";
@@ -1443,6 +1449,12 @@ export function MarketDataPanel() {
   );
   const platformCommandAuditTrailItems = buildPlatformCommandAuditTrailItems(platformCommandEvidenceLedgerItems);
   const platformCommandAuditTrailSummary = summarizePlatformCommandAuditTrail(platformCommandAuditTrailItems);
+  const platformCommandComplianceAttestationItems = buildPlatformCommandComplianceAttestationItems(
+    platformCommandAuditTrailItems,
+  );
+  const platformCommandComplianceAttestationSummary = summarizePlatformCommandComplianceAttestation(
+    platformCommandComplianceAttestationItems,
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1934,6 +1946,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-command-audit-trail-${resultStamp()}.csv`,
       platformCommandAuditTrailCsv(platformCommandAuditTrailItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportPlatformCommandComplianceAttestationCsv = () => {
+    if (!platformCommandComplianceAttestationItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-command-compliance-attestation-${resultStamp()}.csv`,
+      platformCommandComplianceAttestationCsv(platformCommandComplianceAttestationItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -3415,6 +3436,11 @@ export function MarketDataPanel() {
                 summary={platformCommandAuditTrailSummary}
                 items={platformCommandAuditTrailItems}
                 onExportCsv={handleExportPlatformCommandAuditTrailCsv}
+              />
+              <PlatformCommandComplianceAttestationSection
+                summary={platformCommandComplianceAttestationSummary}
+                items={platformCommandComplianceAttestationItems}
+                onExportCsv={handleExportPlatformCommandComplianceAttestationCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
