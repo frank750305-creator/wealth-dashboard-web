@@ -324,6 +324,11 @@ import {
   summarizePlatformCommandExpansionPlaybook,
 } from "@/lib/platformCommandExpansionPlaybook";
 import {
+  buildPlatformCommandRenewalForecastItems,
+  platformCommandRenewalForecastCsv,
+  summarizePlatformCommandRenewalForecast,
+} from "@/lib/platformCommandRenewalForecast";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -428,6 +433,7 @@ import { PlatformCommandRevenueReadinessSection } from "./PlatformCommandRevenue
 import { PlatformCommandGtmLaunchSection } from "./PlatformCommandGtmLaunchSection";
 import { PlatformCommandCustomerSuccessActivationSection } from "./PlatformCommandCustomerSuccessActivationSection";
 import { PlatformCommandExpansionPlaybookSection } from "./PlatformCommandExpansionPlaybookSection";
+import { PlatformCommandRenewalForecastSection } from "./PlatformCommandRenewalForecastSection";
 import { PlatformCommandSearchSection } from "./PlatformCommandSearchSection";
 import { PlatformCommandSlaSection } from "./PlatformCommandSlaSection";
 import { PlatformCommandTriageSection } from "./PlatformCommandTriageSection";
@@ -1527,6 +1533,12 @@ export function MarketDataPanel() {
   const platformCommandExpansionPlaybookSummary = summarizePlatformCommandExpansionPlaybook(
     platformCommandExpansionPlaybookItems,
   );
+  const platformCommandRenewalForecastItems = buildPlatformCommandRenewalForecastItems(
+    platformCommandExpansionPlaybookItems,
+  );
+  const platformCommandRenewalForecastSummary = summarizePlatformCommandRenewalForecast(
+    platformCommandRenewalForecastItems,
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -2090,6 +2102,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-command-expansion-playbook-${resultStamp()}.csv`,
       platformCommandExpansionPlaybookCsv(platformCommandExpansionPlaybookItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportPlatformCommandRenewalForecastCsv = () => {
+    if (!platformCommandRenewalForecastItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-command-renewal-forecast-${resultStamp()}.csv`,
+      platformCommandRenewalForecastCsv(platformCommandRenewalForecastItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -3611,6 +3632,11 @@ export function MarketDataPanel() {
                 summary={platformCommandExpansionPlaybookSummary}
                 items={platformCommandExpansionPlaybookItems}
                 onExportCsv={handleExportPlatformCommandExpansionPlaybookCsv}
+              />
+              <PlatformCommandRenewalForecastSection
+                summary={platformCommandRenewalForecastSummary}
+                items={platformCommandRenewalForecastItems}
+                onExportCsv={handleExportPlatformCommandRenewalForecastCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
