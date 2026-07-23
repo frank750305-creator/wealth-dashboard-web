@@ -412,6 +412,10 @@ import {
   writePlatformCommandProductNavigatorAreaToStorage,
 } from "@/lib/platformCommandProductNavigator";
 import {
+  buildPlatformCommandLaunchReadinessItems,
+  summarizePlatformCommandLaunchReadiness,
+} from "@/lib/platformCommandLaunchReadiness";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -532,6 +536,7 @@ import { PlatformCommandBoardPackSection } from "./PlatformCommandBoardPackSecti
 import { PlatformCommandOperatingControlTowerSection } from "./PlatformCommandOperatingControlTowerSection";
 import { PlatformCommandCeoDecisionConsoleSection } from "./PlatformCommandCeoDecisionConsoleSection";
 import { PlatformCommandStakeholderOutputPackSection } from "./PlatformCommandStakeholderOutputPackSection";
+import { PlatformCommandLaunchReadinessSection } from "./PlatformCommandLaunchReadinessSection";
 import { PlatformCommandProductNavigatorSection } from "./PlatformCommandProductNavigatorSection";
 import { PlatformCommandSearchSection } from "./PlatformCommandSearchSection";
 import { PlatformCommandSlaSection } from "./PlatformCommandSlaSection";
@@ -1879,6 +1884,13 @@ export function MarketDataPanel() {
   ]);
   const platformCommandProductNavigatorSummary = summarizePlatformCommandProductNavigator(
     platformCommandProductNavigatorItems,
+  );
+  const platformCommandLaunchReadinessItems = buildPlatformCommandLaunchReadinessItems(
+    platformCommandProductNavigatorSummary,
+    platformCommandProductNavigatorItems,
+  );
+  const platformCommandLaunchReadinessSummary = summarizePlatformCommandLaunchReadiness(
+    platformCommandLaunchReadinessItems,
   );
   const isCommandAreaVisible = (areaId: Exclude<PlatformCommandProductNavigatorActiveArea, "all">) =>
     activeCommandAreaId === "all" || activeCommandAreaId === areaId;
@@ -4000,6 +4012,11 @@ export function MarketDataPanel() {
                 summary={platformCommandProductNavigatorSummary}
                 items={platformCommandProductNavigatorItems}
                 activeAreaId={activeCommandAreaId}
+                onSelectArea={handleSelectCommandArea}
+              />
+              <PlatformCommandLaunchReadinessSection
+                summary={platformCommandLaunchReadinessSummary}
+                items={platformCommandLaunchReadinessItems}
                 onSelectArea={handleSelectCommandArea}
               />
               <div
