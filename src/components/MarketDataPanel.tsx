@@ -254,6 +254,11 @@ import {
   summarizePlatformCommandReleaseMonitor,
 } from "@/lib/platformCommandReleaseMonitor";
 import {
+  buildPlatformCommandOperatingReviewItems,
+  platformCommandOperatingReviewCsv,
+  summarizePlatformCommandOperatingReview,
+} from "@/lib/platformCommandOperatingReview";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -344,6 +349,7 @@ import { PlatformCommandOwnerLoadSection } from "./PlatformCommandOwnerLoadSecti
 import { PlatformCommandPostmortemSection } from "./PlatformCommandPostmortemSection";
 import { PlatformCommandReleaseReadinessSection } from "./PlatformCommandReleaseReadinessSection";
 import { PlatformCommandReleaseMonitorSection } from "./PlatformCommandReleaseMonitorSection";
+import { PlatformCommandOperatingReviewSection } from "./PlatformCommandOperatingReviewSection";
 import { PlatformCommandSearchSection } from "./PlatformCommandSearchSection";
 import { PlatformCommandSlaSection } from "./PlatformCommandSlaSection";
 import { PlatformCommandTriageSection } from "./PlatformCommandTriageSection";
@@ -1379,6 +1385,10 @@ export function MarketDataPanel() {
     platformCommandReleaseReadinessItems,
   );
   const platformCommandReleaseMonitorSummary = summarizePlatformCommandReleaseMonitor(platformCommandReleaseMonitorItems);
+  const platformCommandOperatingReviewItems = buildPlatformCommandOperatingReviewItems(platformCommandReleaseMonitorItems);
+  const platformCommandOperatingReviewSummary = summarizePlatformCommandOperatingReview(
+    platformCommandOperatingReviewItems,
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1816,6 +1826,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-command-release-monitor-${resultStamp()}.csv`,
       platformCommandReleaseMonitorCsv(platformCommandReleaseMonitorItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportPlatformCommandOperatingReviewCsv = () => {
+    if (!platformCommandOperatingReviewItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-command-operating-review-${resultStamp()}.csv`,
+      platformCommandOperatingReviewCsv(platformCommandOperatingReviewItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -3267,6 +3286,11 @@ export function MarketDataPanel() {
                 summary={platformCommandReleaseMonitorSummary}
                 items={platformCommandReleaseMonitorItems}
                 onExportCsv={handleExportPlatformCommandReleaseMonitorCsv}
+              />
+              <PlatformCommandOperatingReviewSection
+                summary={platformCommandOperatingReviewSummary}
+                items={platformCommandOperatingReviewItems}
+                onExportCsv={handleExportPlatformCommandOperatingReviewCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
