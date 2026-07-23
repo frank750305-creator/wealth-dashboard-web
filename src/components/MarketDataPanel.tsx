@@ -309,6 +309,11 @@ import {
   summarizePlatformCommandRevenueReadiness,
 } from "@/lib/platformCommandRevenueReadiness";
 import {
+  buildPlatformCommandGtmLaunchItems,
+  platformCommandGtmLaunchCsv,
+  summarizePlatformCommandGtmLaunch,
+} from "@/lib/platformCommandGtmLaunch";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -410,6 +415,7 @@ import { PlatformCommandBoardReportingSection } from "./PlatformCommandBoardRepo
 import { PlatformCommandClientReadoutSection } from "./PlatformCommandClientReadoutSection";
 import { PlatformCommandProductPackagingSection } from "./PlatformCommandProductPackagingSection";
 import { PlatformCommandRevenueReadinessSection } from "./PlatformCommandRevenueReadinessSection";
+import { PlatformCommandGtmLaunchSection } from "./PlatformCommandGtmLaunchSection";
 import { PlatformCommandSearchSection } from "./PlatformCommandSearchSection";
 import { PlatformCommandSlaSection } from "./PlatformCommandSlaSection";
 import { PlatformCommandTriageSection } from "./PlatformCommandTriageSection";
@@ -1495,6 +1501,8 @@ export function MarketDataPanel() {
   const platformCommandRevenueReadinessSummary = summarizePlatformCommandRevenueReadiness(
     platformCommandRevenueReadinessItems,
   );
+  const platformCommandGtmLaunchItems = buildPlatformCommandGtmLaunchItems(platformCommandRevenueReadinessItems);
+  const platformCommandGtmLaunchSummary = summarizePlatformCommandGtmLaunch(platformCommandGtmLaunchItems);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -2031,6 +2039,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-command-revenue-readiness-${resultStamp()}.csv`,
       platformCommandRevenueReadinessCsv(platformCommandRevenueReadinessItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportPlatformCommandGtmLaunchCsv = () => {
+    if (!platformCommandGtmLaunchItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-command-gtm-launch-${resultStamp()}.csv`,
+      platformCommandGtmLaunchCsv(platformCommandGtmLaunchItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -3537,6 +3554,11 @@ export function MarketDataPanel() {
                 summary={platformCommandRevenueReadinessSummary}
                 items={platformCommandRevenueReadinessItems}
                 onExportCsv={handleExportPlatformCommandRevenueReadinessCsv}
+              />
+              <PlatformCommandGtmLaunchSection
+                summary={platformCommandGtmLaunchSummary}
+                items={platformCommandGtmLaunchItems}
+                onExportCsv={handleExportPlatformCommandGtmLaunchCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
