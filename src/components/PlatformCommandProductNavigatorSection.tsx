@@ -1,4 +1,5 @@
 import {
+  type PlatformCommandProductNavigatorAreaId,
   type PlatformCommandProductNavigatorItem,
   type PlatformCommandProductNavigatorStatus,
   type PlatformCommandProductNavigatorSummary,
@@ -8,6 +9,8 @@ import { platformCommandStatusLabel } from "@/lib/platformCommandSearch";
 type PlatformCommandProductNavigatorSectionProps = {
   summary: PlatformCommandProductNavigatorSummary;
   items: PlatformCommandProductNavigatorItem[];
+  activeAreaId: PlatformCommandProductNavigatorAreaId | "all";
+  onSelectArea: (areaId: PlatformCommandProductNavigatorAreaId | "all") => void;
 };
 
 function statusBadgeClass(status: PlatformCommandProductNavigatorStatus) {
@@ -31,6 +34,8 @@ function scoreClass(score: number) {
 export function PlatformCommandProductNavigatorSection({
   summary,
   items,
+  activeAreaId,
+  onSelectArea: handleSelectArea,
 }: PlatformCommandProductNavigatorSectionProps) {
   const metrics = [
     ["Areas", `${summary.areaCount}`],
@@ -44,7 +49,7 @@ export function PlatformCommandProductNavigatorSection({
   ];
 
   return (
-    <div className="rounded-lg border border-slate-800 bg-slate-950 p-4 space-y-4">
+    <div id="command-product-navigator" className="rounded-lg border border-slate-800 bg-slate-950 p-4 space-y-4">
       <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
@@ -67,12 +72,45 @@ export function PlatformCommandProductNavigatorSection({
         </div>
       </div>
 
+      <div className="flex flex-wrap gap-2 text-xs">
+        <button
+          type="button"
+          onClick={() => handleSelectArea("all")}
+          className={`rounded-md border px-3 py-2 font-bold transition-colors ${
+            activeAreaId === "all"
+              ? "border-cyan-500 bg-cyan-500/15 text-cyan-100"
+              : "border-slate-800 bg-slate-900 text-slate-400 hover:border-slate-700 hover:text-slate-100"
+          }`}
+        >
+          全部
+        </button>
+        {items.map((item) => (
+          <button
+            key={`${item.areaId}-filter`}
+            type="button"
+            onClick={() => handleSelectArea(item.areaId)}
+            className={`rounded-md border px-3 py-2 font-bold transition-colors ${
+              activeAreaId === item.areaId
+                ? "border-cyan-500 bg-cyan-500/15 text-cyan-100"
+                : "border-slate-800 bg-slate-900 text-slate-400 hover:border-slate-700 hover:text-slate-100"
+            }`}
+          >
+            {item.title}
+          </button>
+        ))}
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3">
         {items.map((item) => (
-          <a
+          <button
             key={item.areaId}
-            href={item.href}
-            className="rounded-lg border border-slate-800 bg-slate-900/60 p-3 hover:border-cyan-700/80 hover:bg-slate-900 transition-colors"
+            type="button"
+            onClick={() => handleSelectArea(item.areaId)}
+            className={`rounded-lg border p-3 text-left transition-colors ${
+              activeAreaId === item.areaId
+                ? "border-cyan-500 bg-cyan-500/10"
+                : "border-slate-800 bg-slate-900/60 hover:border-cyan-700/80 hover:bg-slate-900"
+            }`}
           >
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -118,9 +156,9 @@ export function PlatformCommandProductNavigatorSection({
             </div>
             <div className="mt-3 flex items-center justify-between text-[10px] text-slate-600">
               <span>{item.owner}</span>
-              <span>Jump</span>
+              <span>{activeAreaId === item.areaId ? "Focused" : "Focus"}</span>
             </div>
-          </a>
+          </button>
         ))}
       </div>
     </div>

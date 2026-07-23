@@ -406,6 +406,7 @@ import {
 import {
   buildPlatformCommandProductNavigatorItems,
   summarizePlatformCommandProductNavigator,
+  type PlatformCommandProductNavigatorAreaId,
   type PlatformCommandProductNavigatorStatus,
 } from "@/lib/platformCommandProductNavigator";
 import {
@@ -719,6 +720,7 @@ export function MarketDataPanel() {
   const [marketAlertAuditMessage, setMarketAlertAuditMessage] = useState("");
   const [marketAlertAuditRecords, setMarketAlertAuditRecords] = useState<MarketAlertWarehouseAuditRecord[]>([]);
   const [watchlistMemoCopyStatus, setWatchlistMemoCopyStatus] = useState<"idle" | "copied">("idle");
+  const [activeCommandAreaId, setActiveCommandAreaId] = useState<PlatformCommandProductNavigatorAreaId | "all">("all");
   const sources = data?.sources ?? [];
   const securedCount = sources.filter((source) => source.status !== "needs_secret").length;
   const hasBigQueryCredentials = Boolean(
@@ -1876,6 +1878,8 @@ export function MarketDataPanel() {
   const platformCommandProductNavigatorSummary = summarizePlatformCommandProductNavigator(
     platformCommandProductNavigatorItems,
   );
+  const isCommandAreaVisible = (areaId: PlatformCommandProductNavigatorAreaId) =>
+    activeCommandAreaId === "all" || activeCommandAreaId === areaId;
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -3988,8 +3992,13 @@ export function MarketDataPanel() {
               <PlatformCommandProductNavigatorSection
                 summary={platformCommandProductNavigatorSummary}
                 items={platformCommandProductNavigatorItems}
+                activeAreaId={activeCommandAreaId}
+                onSelectArea={setActiveCommandAreaId}
               />
-              <div id="command-foundation" className="scroll-mt-24" />
+              <div
+                id="command-foundation"
+                className={isCommandAreaVisible("command-foundation") ? "space-y-3 scroll-mt-24" : "hidden"}
+              >
               <PlatformCommandSearchSection
                 summary={platformCommandSearchSummary}
                 items={platformCommandSearchItems}
@@ -4030,7 +4039,11 @@ export function MarketDataPanel() {
                 items={platformCommandImprovementBacklogItems}
                 onExportCsv={handleExportPlatformCommandImprovementBacklogCsv}
               />
-              <div id="command-governance" className="scroll-mt-24" />
+              </div>
+              <div
+                id="command-governance"
+                className={isCommandAreaVisible("command-governance") ? "space-y-3 scroll-mt-24" : "hidden"}
+              >
               <PlatformCommandReleaseReadinessSection
                 summary={platformCommandReleaseReadinessSummary}
                 items={platformCommandReleaseReadinessItems}
@@ -4081,7 +4094,11 @@ export function MarketDataPanel() {
                 items={platformCommandBoardReportingItems}
                 onExportCsv={handleExportPlatformCommandBoardReportingCsv}
               />
-              <div id="command-client-commercial" className="scroll-mt-24" />
+              </div>
+              <div
+                id="command-client-commercial"
+                className={isCommandAreaVisible("command-client-commercial") ? "space-y-3 scroll-mt-24" : "hidden"}
+              >
               <PlatformCommandClientReadoutSection
                 summary={platformCommandClientReadoutSummary}
                 items={platformCommandClientReadoutItems}
@@ -4112,7 +4129,11 @@ export function MarketDataPanel() {
                 items={platformCommandExpansionPlaybookItems}
                 onExportCsv={handleExportPlatformCommandExpansionPlaybookCsv}
               />
-              <div id="command-revenue-engine" className="scroll-mt-24" />
+              </div>
+              <div
+                id="command-revenue-engine"
+                className={isCommandAreaVisible("command-revenue-engine") ? "space-y-3 scroll-mt-24" : "hidden"}
+              >
               <PlatformCommandRenewalForecastSection
                 summary={platformCommandRenewalForecastSummary}
                 items={platformCommandRenewalForecastItems}
@@ -4168,7 +4189,11 @@ export function MarketDataPanel() {
                 items={platformCommandCustomerHealthItems}
                 onExportCsv={handleExportPlatformCommandCustomerHealthCsv}
               />
-              <div id="command-executive-control" className="scroll-mt-24" />
+              </div>
+              <div
+                id="command-executive-control"
+                className={isCommandAreaVisible("command-executive-control") ? "space-y-3 scroll-mt-24" : "hidden"}
+              >
               <PlatformCommandManagementOverviewSection
                 summary={platformCommandManagementOverviewSummary}
                 items={platformCommandManagementOverviewItems}
@@ -4189,12 +4214,17 @@ export function MarketDataPanel() {
                 items={platformCommandCeoDecisionConsoleItems}
                 onExportCsv={handleExportPlatformCommandCeoDecisionConsoleCsv}
               />
-              <div id="command-stakeholder-output" className="scroll-mt-24" />
+              </div>
+              <div
+                id="command-stakeholder-output"
+                className={isCommandAreaVisible("command-stakeholder-output") ? "space-y-3 scroll-mt-24" : "hidden"}
+              >
               <PlatformCommandStakeholderOutputPackSection
                 summary={platformCommandStakeholderOutputPackSummary}
                 items={platformCommandStakeholderOutputPackItems}
                 onExportCsv={handleExportPlatformCommandStakeholderOutputPackCsv}
               />
+              </div>
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
                 dataProductReadyCount={dataProductReadyCount}

@@ -1,7 +1,14 @@
 export type PlatformCommandProductNavigatorStatus = "pass" | "watch" | "block";
+export type PlatformCommandProductNavigatorAreaId =
+  | "command-foundation"
+  | "command-governance"
+  | "command-client-commercial"
+  | "command-revenue-engine"
+  | "command-executive-control"
+  | "command-stakeholder-output";
 
 export type PlatformCommandProductNavigatorInput = {
-  areaId: string;
+  areaId: PlatformCommandProductNavigatorAreaId;
   title: string;
   stage: string;
   owner: string;
