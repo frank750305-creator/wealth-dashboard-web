@@ -404,6 +404,11 @@ import {
   summarizePlatformCommandStakeholderOutputPack,
 } from "@/lib/platformCommandStakeholderOutputPack";
 import {
+  buildPlatformCommandProductNavigatorItems,
+  summarizePlatformCommandProductNavigator,
+  type PlatformCommandProductNavigatorStatus,
+} from "@/lib/platformCommandProductNavigator";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -524,6 +529,7 @@ import { PlatformCommandBoardPackSection } from "./PlatformCommandBoardPackSecti
 import { PlatformCommandOperatingControlTowerSection } from "./PlatformCommandOperatingControlTowerSection";
 import { PlatformCommandCeoDecisionConsoleSection } from "./PlatformCommandCeoDecisionConsoleSection";
 import { PlatformCommandStakeholderOutputPackSection } from "./PlatformCommandStakeholderOutputPackSection";
+import { PlatformCommandProductNavigatorSection } from "./PlatformCommandProductNavigatorSection";
 import { PlatformCommandSearchSection } from "./PlatformCommandSearchSection";
 import { PlatformCommandSlaSection } from "./PlatformCommandSlaSection";
 import { PlatformCommandTriageSection } from "./PlatformCommandTriageSection";
@@ -1699,6 +1705,176 @@ export function MarketDataPanel() {
   );
   const platformCommandStakeholderOutputPackSummary = summarizePlatformCommandStakeholderOutputPack(
     platformCommandStakeholderOutputPackItems,
+  );
+  const platformCommandProductNavigatorItems = buildPlatformCommandProductNavigatorItems([
+    {
+      areaId: "command-foundation",
+      title: "營運基礎層",
+      stage: "01 / Foundation",
+      owner: "Platform Ops",
+      href: "#command-foundation",
+      statuses: [
+        platformCommandSearchSummary.blockCount > 0
+          ? "block"
+          : platformCommandSearchSummary.watchCount > 0
+            ? "watch"
+            : "pass",
+        platformCommandTriageSummary.status,
+        platformCommandSlaSummary.status,
+        platformCommandOwnerLoadSummary.status,
+        platformCommandHandoffSummary.status,
+        platformCommandClosureSummary.status,
+        platformCommandPostmortemSummary.status,
+        platformCommandImprovementBacklogSummary.status,
+      ] as PlatformCommandProductNavigatorStatus[],
+      recordCount:
+        platformCommandSearchItems.length +
+        platformCommandTriageItems.length +
+        platformCommandSlaItems.length +
+        platformCommandOwnerLoadItems.length +
+        platformCommandHandoffItems.length +
+        platformCommandClosureItems.length +
+        platformCommandPostmortemItems.length +
+        platformCommandImprovementBacklogItems.length,
+      moduleCount: 8,
+      entryPoint: "從搜尋、分流、SLA、責任人、交接、結案與改善 backlog 開始",
+      narrative: "用來把資料平台每日運轉的例外與責任歸屬整理清楚，是所有下游治理與商業化的入口。",
+      modules: ["Search", "Triage", "SLA", "Owner", "Handoff", "Closure", "Postmortem", "Backlog"],
+    },
+    {
+      areaId: "command-governance",
+      title: "治理與董事會層",
+      stage: "02 / Governance",
+      owner: "Governance",
+      href: "#command-governance",
+      statuses: [
+        platformCommandReleaseReadinessSummary.status,
+        platformCommandReleaseMonitorSummary.status,
+        platformCommandOperatingReviewSummary.status,
+        platformCommandExecutiveBriefSummary.status,
+        platformCommandDecisionRegisterSummary.status,
+        platformCommandDecisionFollowUpSummary.status,
+        platformCommandEvidenceLedgerSummary.status,
+        platformCommandAuditTrailSummary.status,
+        platformCommandComplianceAttestationSummary.status,
+        platformCommandBoardReportingSummary.status,
+      ] as PlatformCommandProductNavigatorStatus[],
+      recordCount:
+        platformCommandReleaseReadinessItems.length +
+        platformCommandReleaseMonitorItems.length +
+        platformCommandOperatingReviewItems.length +
+        platformCommandExecutiveBriefItems.length +
+        platformCommandDecisionRegisterItems.length +
+        platformCommandDecisionFollowUpItems.length +
+        platformCommandEvidenceLedgerItems.length +
+        platformCommandAuditTrailItems.length +
+        platformCommandComplianceAttestationItems.length +
+        platformCommandBoardReportingItems.length,
+      moduleCount: 10,
+      entryPoint: "看版本、營運複核、管理 brief、決策登記、證據、稽核與董事會報告",
+      narrative: "用來證明平台不是只有資料，而是有可稽核、可追責、可交給董事會的管理流程。",
+      modules: ["Release", "Monitor", "Review", "Brief", "Decision", "Evidence", "Audit", "Attestation", "Board"],
+    },
+    {
+      areaId: "command-client-commercial",
+      title: "客戶與商業化層",
+      stage: "03 / Client",
+      owner: "GTM / CS",
+      href: "#command-client-commercial",
+      statuses: [
+        platformCommandClientReadoutSummary.status,
+        platformCommandProductPackagingSummary.status,
+        platformCommandRevenueReadinessSummary.status,
+        platformCommandGtmLaunchSummary.status,
+        platformCommandCustomerSuccessActivationSummary.status,
+        platformCommandExpansionPlaybookSummary.status,
+      ] as PlatformCommandProductNavigatorStatus[],
+      recordCount:
+        platformCommandClientReadoutItems.length +
+        platformCommandProductPackagingItems.length +
+        platformCommandRevenueReadinessItems.length +
+        platformCommandGtmLaunchItems.length +
+        platformCommandCustomerSuccessActivationItems.length +
+        platformCommandExpansionPlaybookItems.length,
+      moduleCount: 6,
+      entryPoint: "看客戶 readout、產品包裝、收入 ready、GTM、CS 啟動與擴張 playbook",
+      narrative: "把資料能力包成客戶與市場能理解的產品，避免只停留在內部 dashboard。",
+      modules: ["Readout", "Packaging", "Revenue ready", "GTM", "CS", "Expansion"],
+    },
+    {
+      areaId: "command-revenue-engine",
+      title: "收入與計費引擎",
+      stage: "04 / Revenue",
+      owner: "Revenue Ops",
+      href: "#command-revenue-engine",
+      statuses: [
+        platformCommandRenewalForecastSummary.status,
+        platformCommandRevenueOperationsLedgerSummary.status,
+        platformCommandUnitEconomicsSummary.status,
+        platformCommandPricingGovernanceSummary.status,
+        platformCommandQuoteDeskSummary.status,
+        platformCommandEntitlementProvisioningSummary.status,
+        platformCommandSubscriptionBillingSummary.status,
+        platformCommandSlaOperationsSummary.status,
+        platformCommandUsageMonitoringSummary.status,
+        platformCommandRevenueAuditSummary.status,
+        platformCommandCustomerHealthSummary.status,
+      ] as PlatformCommandProductNavigatorStatus[],
+      recordCount:
+        platformCommandRenewalForecastItems.length +
+        platformCommandRevenueOperationsLedgerItems.length +
+        platformCommandUnitEconomicsItems.length +
+        platformCommandPricingGovernanceItems.length +
+        platformCommandQuoteDeskItems.length +
+        platformCommandEntitlementProvisioningItems.length +
+        platformCommandSubscriptionBillingItems.length +
+        platformCommandSlaOperationsItems.length +
+        platformCommandUsageMonitoringItems.length +
+        platformCommandRevenueAuditItems.length +
+        platformCommandCustomerHealthItems.length,
+      moduleCount: 11,
+      entryPoint: "看續約 forecast、收入 ledger、unit economics、定價、報價、權益、計費與使用量",
+      narrative: "把平台從分析工具推進到可收費、可續約、可稽核的收入機器。",
+      modules: ["Renewal", "Ledger", "Economics", "Pricing", "Quote", "Entitlement", "Billing", "Usage", "Health"],
+    },
+    {
+      areaId: "command-executive-control",
+      title: "管理層總控",
+      stage: "05 / Executive",
+      owner: "CEO Office",
+      href: "#command-executive-control",
+      statuses: [
+        platformCommandManagementOverviewSummary.status,
+        platformCommandBoardPackSummary.status,
+        platformCommandOperatingControlTowerSummary.status,
+        platformCommandCeoDecisionConsoleSummary.status,
+      ] as PlatformCommandProductNavigatorStatus[],
+      recordCount:
+        platformCommandManagementOverviewItems.length +
+        platformCommandBoardPackItems.length +
+        platformCommandOperatingControlTowerItems.length +
+        platformCommandCeoDecisionConsoleItems.length,
+      moduleCount: 4,
+      entryPoint: "看管理層總覽、Board Pack、Operating Control Tower、CEO Decision Console",
+      narrative: "把營運、客戶、收入與風險收斂成 CEO 能批准或否決的決策台。",
+      modules: ["Management", "Board Pack", "Control Tower", "CEO Decision"],
+    },
+    {
+      areaId: "command-stakeholder-output",
+      title: "最終輸出層",
+      stage: "06 / Output",
+      owner: "CEO / Communications",
+      href: "#command-stakeholder-output",
+      statuses: [platformCommandStakeholderOutputPackSummary.status] as PlatformCommandProductNavigatorStatus[],
+      recordCount: platformCommandStakeholderOutputPackItems.length,
+      moduleCount: 1,
+      entryPoint: "看投資人、董事會、客戶、內部管理層四種輸出包",
+      narrative: "把 CEO 決策轉成真正能對外或對內發布的交付物，控制可發、條件發與禁止發。",
+      modules: ["Investor", "Board", "Customer", "Internal"],
+    },
+  ]);
+  const platformCommandProductNavigatorSummary = summarizePlatformCommandProductNavigator(
+    platformCommandProductNavigatorItems,
   );
 
   useEffect(() => {
@@ -3809,6 +3985,11 @@ export function MarketDataPanel() {
                 items={accountActionQueueItems}
                 onExportCsv={handleExportAccountActionQueueCsv}
               />
+              <PlatformCommandProductNavigatorSection
+                summary={platformCommandProductNavigatorSummary}
+                items={platformCommandProductNavigatorItems}
+              />
+              <div id="command-foundation" className="scroll-mt-24" />
               <PlatformCommandSearchSection
                 summary={platformCommandSearchSummary}
                 items={platformCommandSearchItems}
@@ -3849,6 +4030,7 @@ export function MarketDataPanel() {
                 items={platformCommandImprovementBacklogItems}
                 onExportCsv={handleExportPlatformCommandImprovementBacklogCsv}
               />
+              <div id="command-governance" className="scroll-mt-24" />
               <PlatformCommandReleaseReadinessSection
                 summary={platformCommandReleaseReadinessSummary}
                 items={platformCommandReleaseReadinessItems}
@@ -3899,6 +4081,7 @@ export function MarketDataPanel() {
                 items={platformCommandBoardReportingItems}
                 onExportCsv={handleExportPlatformCommandBoardReportingCsv}
               />
+              <div id="command-client-commercial" className="scroll-mt-24" />
               <PlatformCommandClientReadoutSection
                 summary={platformCommandClientReadoutSummary}
                 items={platformCommandClientReadoutItems}
@@ -3929,6 +4112,7 @@ export function MarketDataPanel() {
                 items={platformCommandExpansionPlaybookItems}
                 onExportCsv={handleExportPlatformCommandExpansionPlaybookCsv}
               />
+              <div id="command-revenue-engine" className="scroll-mt-24" />
               <PlatformCommandRenewalForecastSection
                 summary={platformCommandRenewalForecastSummary}
                 items={platformCommandRenewalForecastItems}
@@ -3984,6 +4168,7 @@ export function MarketDataPanel() {
                 items={platformCommandCustomerHealthItems}
                 onExportCsv={handleExportPlatformCommandCustomerHealthCsv}
               />
+              <div id="command-executive-control" className="scroll-mt-24" />
               <PlatformCommandManagementOverviewSection
                 summary={platformCommandManagementOverviewSummary}
                 items={platformCommandManagementOverviewItems}
@@ -4004,6 +4189,7 @@ export function MarketDataPanel() {
                 items={platformCommandCeoDecisionConsoleItems}
                 onExportCsv={handleExportPlatformCommandCeoDecisionConsoleCsv}
               />
+              <div id="command-stakeholder-output" className="scroll-mt-24" />
               <PlatformCommandStakeholderOutputPackSection
                 summary={platformCommandStakeholderOutputPackSummary}
                 items={platformCommandStakeholderOutputPackItems}
