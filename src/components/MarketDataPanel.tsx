@@ -354,6 +354,11 @@ import {
   summarizePlatformCommandEntitlementProvisioning,
 } from "@/lib/platformCommandEntitlementProvisioning";
 import {
+  buildPlatformCommandSubscriptionBillingItems,
+  platformCommandSubscriptionBillingCsv,
+  summarizePlatformCommandSubscriptionBilling,
+} from "@/lib/platformCommandSubscriptionBilling";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -464,6 +469,7 @@ import { PlatformCommandUnitEconomicsSection } from "./PlatformCommandUnitEconom
 import { PlatformCommandPricingGovernanceSection } from "./PlatformCommandPricingGovernanceSection";
 import { PlatformCommandQuoteDeskSection } from "./PlatformCommandQuoteDeskSection";
 import { PlatformCommandEntitlementProvisioningSection } from "./PlatformCommandEntitlementProvisioningSection";
+import { PlatformCommandSubscriptionBillingSection } from "./PlatformCommandSubscriptionBillingSection";
 import { PlatformCommandSearchSection } from "./PlatformCommandSearchSection";
 import { PlatformCommandSlaSection } from "./PlatformCommandSlaSection";
 import { PlatformCommandTriageSection } from "./PlatformCommandTriageSection";
@@ -1595,6 +1601,12 @@ export function MarketDataPanel() {
   const platformCommandEntitlementProvisioningSummary = summarizePlatformCommandEntitlementProvisioning(
     platformCommandEntitlementProvisioningItems,
   );
+  const platformCommandSubscriptionBillingItems = buildPlatformCommandSubscriptionBillingItems(
+    platformCommandEntitlementProvisioningItems,
+  );
+  const platformCommandSubscriptionBillingSummary = summarizePlatformCommandSubscriptionBilling(
+    platformCommandSubscriptionBillingItems,
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -2212,6 +2224,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-command-entitlement-provisioning-${resultStamp()}.csv`,
       platformCommandEntitlementProvisioningCsv(platformCommandEntitlementProvisioningItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportPlatformCommandSubscriptionBillingCsv = () => {
+    if (!platformCommandSubscriptionBillingItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-command-subscription-billing-${resultStamp()}.csv`,
+      platformCommandSubscriptionBillingCsv(platformCommandSubscriptionBillingItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -3763,6 +3784,11 @@ export function MarketDataPanel() {
                 summary={platformCommandEntitlementProvisioningSummary}
                 items={platformCommandEntitlementProvisioningItems}
                 onExportCsv={handleExportPlatformCommandEntitlementProvisioningCsv}
+              />
+              <PlatformCommandSubscriptionBillingSection
+                summary={platformCommandSubscriptionBillingSummary}
+                items={platformCommandSubscriptionBillingItems}
+                onExportCsv={handleExportPlatformCommandSubscriptionBillingCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
