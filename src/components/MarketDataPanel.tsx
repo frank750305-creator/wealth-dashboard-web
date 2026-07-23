@@ -294,6 +294,11 @@ import {
   summarizePlatformCommandBoardReporting,
 } from "@/lib/platformCommandBoardReporting";
 import {
+  buildPlatformCommandClientReadoutItems,
+  platformCommandClientReadoutCsv,
+  summarizePlatformCommandClientReadout,
+} from "@/lib/platformCommandClientReadout";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -392,6 +397,7 @@ import { PlatformCommandEvidenceLedgerSection } from "./PlatformCommandEvidenceL
 import { PlatformCommandAuditTrailSection } from "./PlatformCommandAuditTrailSection";
 import { PlatformCommandComplianceAttestationSection } from "./PlatformCommandComplianceAttestationSection";
 import { PlatformCommandBoardReportingSection } from "./PlatformCommandBoardReportingSection";
+import { PlatformCommandClientReadoutSection } from "./PlatformCommandClientReadoutSection";
 import { PlatformCommandSearchSection } from "./PlatformCommandSearchSection";
 import { PlatformCommandSlaSection } from "./PlatformCommandSlaSection";
 import { PlatformCommandTriageSection } from "./PlatformCommandTriageSection";
@@ -1465,6 +1471,8 @@ export function MarketDataPanel() {
     platformCommandComplianceAttestationItems,
   );
   const platformCommandBoardReportingSummary = summarizePlatformCommandBoardReporting(platformCommandBoardReportingItems);
+  const platformCommandClientReadoutItems = buildPlatformCommandClientReadoutItems(platformCommandBoardReportingItems);
+  const platformCommandClientReadoutSummary = summarizePlatformCommandClientReadout(platformCommandClientReadoutItems);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1974,6 +1982,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-command-board-reporting-${resultStamp()}.csv`,
       platformCommandBoardReportingCsv(platformCommandBoardReportingItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportPlatformCommandClientReadoutCsv = () => {
+    if (!platformCommandClientReadoutItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-command-client-readout-${resultStamp()}.csv`,
+      platformCommandClientReadoutCsv(platformCommandClientReadoutItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -3465,6 +3482,11 @@ export function MarketDataPanel() {
                 summary={platformCommandBoardReportingSummary}
                 items={platformCommandBoardReportingItems}
                 onExportCsv={handleExportPlatformCommandBoardReportingCsv}
+              />
+              <PlatformCommandClientReadoutSection
+                summary={platformCommandClientReadoutSummary}
+                items={platformCommandClientReadoutItems}
+                onExportCsv={handleExportPlatformCommandClientReadoutCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
