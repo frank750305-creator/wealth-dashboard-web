@@ -329,6 +329,11 @@ import {
   summarizePlatformCommandRenewalForecast,
 } from "@/lib/platformCommandRenewalForecast";
 import {
+  buildPlatformCommandRevenueOperationsLedgerItems,
+  platformCommandRevenueOperationsLedgerCsv,
+  summarizePlatformCommandRevenueOperationsLedger,
+} from "@/lib/platformCommandRevenueOperationsLedger";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -434,6 +439,7 @@ import { PlatformCommandGtmLaunchSection } from "./PlatformCommandGtmLaunchSecti
 import { PlatformCommandCustomerSuccessActivationSection } from "./PlatformCommandCustomerSuccessActivationSection";
 import { PlatformCommandExpansionPlaybookSection } from "./PlatformCommandExpansionPlaybookSection";
 import { PlatformCommandRenewalForecastSection } from "./PlatformCommandRenewalForecastSection";
+import { PlatformCommandRevenueOperationsLedgerSection } from "./PlatformCommandRevenueOperationsLedgerSection";
 import { PlatformCommandSearchSection } from "./PlatformCommandSearchSection";
 import { PlatformCommandSlaSection } from "./PlatformCommandSlaSection";
 import { PlatformCommandTriageSection } from "./PlatformCommandTriageSection";
@@ -1539,6 +1545,12 @@ export function MarketDataPanel() {
   const platformCommandRenewalForecastSummary = summarizePlatformCommandRenewalForecast(
     platformCommandRenewalForecastItems,
   );
+  const platformCommandRevenueOperationsLedgerItems = buildPlatformCommandRevenueOperationsLedgerItems(
+    platformCommandRenewalForecastItems,
+  );
+  const platformCommandRevenueOperationsLedgerSummary = summarizePlatformCommandRevenueOperationsLedger(
+    platformCommandRevenueOperationsLedgerItems,
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -2111,6 +2123,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-command-renewal-forecast-${resultStamp()}.csv`,
       platformCommandRenewalForecastCsv(platformCommandRenewalForecastItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportPlatformCommandRevenueOperationsLedgerCsv = () => {
+    if (!platformCommandRevenueOperationsLedgerItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-command-revenue-operations-ledger-${resultStamp()}.csv`,
+      platformCommandRevenueOperationsLedgerCsv(platformCommandRevenueOperationsLedgerItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -3637,6 +3658,11 @@ export function MarketDataPanel() {
                 summary={platformCommandRenewalForecastSummary}
                 items={platformCommandRenewalForecastItems}
                 onExportCsv={handleExportPlatformCommandRenewalForecastCsv}
+              />
+              <PlatformCommandRevenueOperationsLedgerSection
+                summary={platformCommandRevenueOperationsLedgerSummary}
+                items={platformCommandRevenueOperationsLedgerItems}
+                onExportCsv={handleExportPlatformCommandRevenueOperationsLedgerCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
