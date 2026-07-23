@@ -359,6 +359,11 @@ import {
   summarizePlatformCommandSubscriptionBilling,
 } from "@/lib/platformCommandSubscriptionBilling";
 import {
+  buildPlatformCommandSlaOperationsItems,
+  platformCommandSlaOperationsCsv,
+  summarizePlatformCommandSlaOperations,
+} from "@/lib/platformCommandSlaOperations";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -470,6 +475,7 @@ import { PlatformCommandPricingGovernanceSection } from "./PlatformCommandPricin
 import { PlatformCommandQuoteDeskSection } from "./PlatformCommandQuoteDeskSection";
 import { PlatformCommandEntitlementProvisioningSection } from "./PlatformCommandEntitlementProvisioningSection";
 import { PlatformCommandSubscriptionBillingSection } from "./PlatformCommandSubscriptionBillingSection";
+import { PlatformCommandSlaOperationsSection } from "./PlatformCommandSlaOperationsSection";
 import { PlatformCommandSearchSection } from "./PlatformCommandSearchSection";
 import { PlatformCommandSlaSection } from "./PlatformCommandSlaSection";
 import { PlatformCommandTriageSection } from "./PlatformCommandTriageSection";
@@ -1607,6 +1613,10 @@ export function MarketDataPanel() {
   const platformCommandSubscriptionBillingSummary = summarizePlatformCommandSubscriptionBilling(
     platformCommandSubscriptionBillingItems,
   );
+  const platformCommandSlaOperationsItems = buildPlatformCommandSlaOperationsItems(
+    platformCommandSubscriptionBillingItems,
+  );
+  const platformCommandSlaOperationsSummary = summarizePlatformCommandSlaOperations(platformCommandSlaOperationsItems);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -2233,6 +2243,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-command-subscription-billing-${resultStamp()}.csv`,
       platformCommandSubscriptionBillingCsv(platformCommandSubscriptionBillingItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportPlatformCommandSlaOperationsCsv = () => {
+    if (!platformCommandSlaOperationsItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-command-sla-operations-${resultStamp()}.csv`,
+      platformCommandSlaOperationsCsv(platformCommandSlaOperationsItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -3789,6 +3808,11 @@ export function MarketDataPanel() {
                 summary={platformCommandSubscriptionBillingSummary}
                 items={platformCommandSubscriptionBillingItems}
                 onExportCsv={handleExportPlatformCommandSubscriptionBillingCsv}
+              />
+              <PlatformCommandSlaOperationsSection
+                summary={platformCommandSlaOperationsSummary}
+                items={platformCommandSlaOperationsItems}
+                onExportCsv={handleExportPlatformCommandSlaOperationsCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
