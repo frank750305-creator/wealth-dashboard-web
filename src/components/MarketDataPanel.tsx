@@ -389,6 +389,11 @@ import {
   summarizePlatformCommandBoardPack,
 } from "@/lib/platformCommandBoardPack";
 import {
+  buildPlatformCommandOperatingControlTowerItems,
+  platformCommandOperatingControlTowerCsv,
+  summarizePlatformCommandOperatingControlTower,
+} from "@/lib/platformCommandOperatingControlTower";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -506,6 +511,7 @@ import { PlatformCommandRevenueAuditSection } from "./PlatformCommandRevenueAudi
 import { PlatformCommandCustomerHealthSection } from "./PlatformCommandCustomerHealthSection";
 import { PlatformCommandManagementOverviewSection } from "./PlatformCommandManagementOverviewSection";
 import { PlatformCommandBoardPackSection } from "./PlatformCommandBoardPackSection";
+import { PlatformCommandOperatingControlTowerSection } from "./PlatformCommandOperatingControlTowerSection";
 import { PlatformCommandSearchSection } from "./PlatformCommandSearchSection";
 import { PlatformCommandSlaSection } from "./PlatformCommandSlaSection";
 import { PlatformCommandTriageSection } from "./PlatformCommandTriageSection";
@@ -1665,6 +1671,11 @@ export function MarketDataPanel() {
   );
   const platformCommandBoardPackItems = buildPlatformCommandBoardPackItems(platformCommandManagementOverviewItems);
   const platformCommandBoardPackSummary = summarizePlatformCommandBoardPack(platformCommandBoardPackItems);
+  const platformCommandOperatingControlTowerItems =
+    buildPlatformCommandOperatingControlTowerItems(platformCommandBoardPackItems);
+  const platformCommandOperatingControlTowerSummary = summarizePlatformCommandOperatingControlTower(
+    platformCommandOperatingControlTowerItems,
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -2345,6 +2356,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-command-board-pack-${resultStamp()}.csv`,
       platformCommandBoardPackCsv(platformCommandBoardPackItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportPlatformCommandOperatingControlTowerCsv = () => {
+    if (!platformCommandOperatingControlTowerItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-command-operating-control-tower-${resultStamp()}.csv`,
+      platformCommandOperatingControlTowerCsv(platformCommandOperatingControlTowerItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -3931,6 +3951,11 @@ export function MarketDataPanel() {
                 summary={platformCommandBoardPackSummary}
                 items={platformCommandBoardPackItems}
                 onExportCsv={handleExportPlatformCommandBoardPackCsv}
+              />
+              <PlatformCommandOperatingControlTowerSection
+                summary={platformCommandOperatingControlTowerSummary}
+                items={platformCommandOperatingControlTowerItems}
+                onExportCsv={handleExportPlatformCommandOperatingControlTowerCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
