@@ -369,6 +369,11 @@ import {
   summarizePlatformCommandUsageMonitoring,
 } from "@/lib/platformCommandUsageMonitoring";
 import {
+  buildPlatformCommandRevenueAuditItems,
+  platformCommandRevenueAuditCsv,
+  summarizePlatformCommandRevenueAudit,
+} from "@/lib/platformCommandRevenueAudit";
+import {
   executionReviewCsv,
   tradeExecutionReviewItems,
   tradeMonitoringRuleItems,
@@ -482,6 +487,7 @@ import { PlatformCommandEntitlementProvisioningSection } from "./PlatformCommand
 import { PlatformCommandSubscriptionBillingSection } from "./PlatformCommandSubscriptionBillingSection";
 import { PlatformCommandSlaOperationsSection } from "./PlatformCommandSlaOperationsSection";
 import { PlatformCommandUsageMonitoringSection } from "./PlatformCommandUsageMonitoringSection";
+import { PlatformCommandRevenueAuditSection } from "./PlatformCommandRevenueAuditSection";
 import { PlatformCommandSearchSection } from "./PlatformCommandSearchSection";
 import { PlatformCommandSlaSection } from "./PlatformCommandSlaSection";
 import { PlatformCommandTriageSection } from "./PlatformCommandTriageSection";
@@ -1629,6 +1635,8 @@ export function MarketDataPanel() {
   const platformCommandUsageMonitoringSummary = summarizePlatformCommandUsageMonitoring(
     platformCommandUsageMonitoringItems,
   );
+  const platformCommandRevenueAuditItems = buildPlatformCommandRevenueAuditItems(platformCommandUsageMonitoringItems);
+  const platformCommandRevenueAuditSummary = summarizePlatformCommandRevenueAudit(platformCommandRevenueAuditItems);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -2273,6 +2281,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `wealth-dashboard-command-usage-monitoring-${resultStamp()}.csv`,
       platformCommandUsageMonitoringCsv(platformCommandUsageMonitoringItems),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportPlatformCommandRevenueAuditCsv = () => {
+    if (!platformCommandRevenueAuditItems.length) return;
+
+    downloadTextFile(
+      `wealth-dashboard-command-revenue-audit-${resultStamp()}.csv`,
+      platformCommandRevenueAuditCsv(platformCommandRevenueAuditItems),
       "text/csv;charset=utf-8",
     );
   };
@@ -3839,6 +3856,11 @@ export function MarketDataPanel() {
                 summary={platformCommandUsageMonitoringSummary}
                 items={platformCommandUsageMonitoringItems}
                 onExportCsv={handleExportPlatformCommandUsageMonitoringCsv}
+              />
+              <PlatformCommandRevenueAuditSection
+                summary={platformCommandRevenueAuditSummary}
+                items={platformCommandRevenueAuditItems}
+                onExportCsv={handleExportPlatformCommandRevenueAuditCsv}
               />
               <CommercializationSection
                 dataProductCatalogDecision={dataProductCatalogDecision}
