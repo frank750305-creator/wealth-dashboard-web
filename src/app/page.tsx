@@ -96,6 +96,7 @@ export default function Home() {
     mInsurance,
     familyPayload,
   });
+  const shouldShowControlCenter = activeTab === "main";
 
   return (
     <main className="min-h-screen bg-slate-950 text-white p-4 md:p-8 font-sans overflow-x-hidden">
@@ -105,7 +106,7 @@ export default function Home() {
         <DashboardTabs activeTab={activeTab} onActiveTabChange={setActiveTab} />
 
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
-          {activeTab !== "client" && (
+          {shouldShowControlCenter && (
             <ControlCenterPanel
               activeSection={activeSection}
               onActiveSectionChange={setActiveSection}
@@ -145,7 +146,7 @@ export default function Home() {
             onTaxParamChange={updateTaxParam}
             monthlyNetFlow={monthlyNetFlow}
             realRetireFundPv={realRetireFundPv}
-            isFullWidth={activeTab === "client"}
+            isFullWidth={!shouldShowControlCenter}
           />
         </div>
       </div>
