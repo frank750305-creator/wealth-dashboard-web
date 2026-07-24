@@ -1,4 +1,5 @@
 import type { ComponentProps } from "react";
+import { ClientDemoPanel } from "@/components/ClientDemoPanel";
 import { MainResultsPanel } from "@/components/MainResultsPanel";
 import { MarketDataPanel } from "@/components/MarketDataPanel";
 import { TaxParametersPanel } from "@/components/TaxParametersPanel";
@@ -9,6 +10,7 @@ type TaxPanelProps = ComponentProps<typeof TaxParametersPanel>;
 
 type ResultsWorkspacePanelProps = {
   activeTab: DashboardTab;
+  onActiveTabChange: (tab: DashboardTab) => void;
   simulationResult: MainPanelProps["simulationResult"];
   currentAge: MainPanelProps["currentAge"];
   lifeExpectancy: MainPanelProps["lifeExpectancy"];
@@ -17,10 +19,14 @@ type ResultsWorkspacePanelProps = {
   onSelectedReportAgeChange: MainPanelProps["onSelectedReportAgeChange"];
   taxParams: TaxPanelProps["taxParams"];
   onTaxParamChange: TaxPanelProps["onTaxParamChange"];
+  monthlyNetFlow: number;
+  realRetireFundPv: number;
+  isFullWidth?: boolean;
 };
 
 export function ResultsWorkspacePanel({
   activeTab,
+  onActiveTabChange,
   simulationResult,
   currentAge,
   lifeExpectancy,
@@ -29,9 +35,25 @@ export function ResultsWorkspacePanel({
   onSelectedReportAgeChange,
   taxParams,
   onTaxParamChange,
+  monthlyNetFlow,
+  realRetireFundPv,
+  isFullWidth = false,
 }: ResultsWorkspacePanelProps) {
   return (
-    <div className="xl:col-span-8 space-y-8">
+    <div className={`${isFullWidth ? "xl:col-span-12" : "xl:col-span-8"} space-y-8`}>
+      {activeTab === "client" && (
+        <ClientDemoPanel
+          simulationResult={simulationResult}
+          currentAge={currentAge}
+          lifeExpectancy={lifeExpectancy}
+          selectedReportAge={selectedReportAge}
+          snapReport={snapReport}
+          monthlyNetFlow={monthlyNetFlow}
+          realRetireFundPv={realRetireFundPv}
+          onNavigate={onActiveTabChange}
+        />
+      )}
+
       {activeTab === "main" && (
         <MainResultsPanel
           simulationResult={simulationResult}

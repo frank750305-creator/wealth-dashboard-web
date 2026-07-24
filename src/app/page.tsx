@@ -19,7 +19,7 @@ import type { DashboardSection, DashboardTab } from "@/types/dashboard";
 
 export default function Home() {
   const [activeSection, setActiveSection] = useState<DashboardSection>("timeline");
-  const [activeTab, setActiveTab] = useState<DashboardTab>("main");
+  const [activeTab, setActiveTab] = useState<DashboardTab>("client");
 
   // --- 1. 全局時間軸與精算參數 ---
   const {
@@ -100,38 +100,41 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-slate-950 text-white p-4 md:p-8 font-sans overflow-x-hidden">
       <div className="max-w-[1750px] mx-auto">
-        <DashboardHeader />
+        <DashboardHeader activeTab={activeTab} />
 
         <DashboardTabs activeTab={activeTab} onActiveTabChange={setActiveTab} />
 
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
-          <ControlCenterPanel
-            activeSection={activeSection}
-            onActiveSectionChange={setActiveSection}
-            timelinePanelProps={timelinePanelProps}
-            incomeExpensePanelProps={incomeExpensePanelProps}
-            assetPoolPanelProps={assetPoolPanelProps}
-            pensionPanelProps={pensionPanelProps}
-            futureEventsPanelProps={futureEventsPanelProps}
-            liabilitiesPanelProps={liabilitiesPanelProps}
-            familyPanelProps={familyPanelProps}
-            insurancePanelProps={insurancePanelProps}
-            mainSalary={mainSalary}
-            pensionInfo={pensionInfo}
-            realRetireFundPv={realRetireFundPv}
-            serverLoan={serverLoan}
-            serverTax={serverTax}
-            monthlyNetFlow={monthlyNetFlow}
-            isLoading={isLoading}
-            assets={assets}
-            futureExpensesList={futureExpensesList}
-            currentAge={currentAge}
-            familyOptions={familyOptions}
-            onSimulate={handleSimulate}
-          />
+          {activeTab !== "client" && (
+            <ControlCenterPanel
+              activeSection={activeSection}
+              onActiveSectionChange={setActiveSection}
+              timelinePanelProps={timelinePanelProps}
+              incomeExpensePanelProps={incomeExpensePanelProps}
+              assetPoolPanelProps={assetPoolPanelProps}
+              pensionPanelProps={pensionPanelProps}
+              futureEventsPanelProps={futureEventsPanelProps}
+              liabilitiesPanelProps={liabilitiesPanelProps}
+              familyPanelProps={familyPanelProps}
+              insurancePanelProps={insurancePanelProps}
+              mainSalary={mainSalary}
+              pensionInfo={pensionInfo}
+              realRetireFundPv={realRetireFundPv}
+              serverLoan={serverLoan}
+              serverTax={serverTax}
+              monthlyNetFlow={monthlyNetFlow}
+              isLoading={isLoading}
+              assets={assets}
+              futureExpensesList={futureExpensesList}
+              currentAge={currentAge}
+              familyOptions={familyOptions}
+              onSimulate={handleSimulate}
+            />
+          )}
 
           <ResultsWorkspacePanel
             activeTab={activeTab}
+            onActiveTabChange={setActiveTab}
             simulationResult={simulationResult}
             currentAge={currentAge}
             lifeExpectancy={lifeExpectancy}
@@ -140,6 +143,9 @@ export default function Home() {
             onSelectedReportAgeChange={onSelectedReportAgeChange}
             taxParams={taxParams}
             onTaxParamChange={updateTaxParam}
+            monthlyNetFlow={monthlyNetFlow}
+            realRetireFundPv={realRetireFundPv}
+            isFullWidth={activeTab === "client"}
           />
         </div>
       </div>
