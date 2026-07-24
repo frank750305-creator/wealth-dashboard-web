@@ -71,6 +71,7 @@ export function ResultsWorkspacePanel({
           snapReport={snapReport}
           selectedReportAge={selectedReportAge}
           onTaxParamChange={onTaxParamChange}
+          onNavigate={onActiveTabChange}
         />
       )}
 

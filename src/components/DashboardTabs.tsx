@@ -7,8 +7,8 @@ type DashboardTabsProps = {
 
 const tabs: { id: DashboardTab; label: string }[] = [
   { id: "client", label: "客戶展示版" },
-  { id: "main", label: "現金流與資產傳承" },
-  { id: "tax", label: "所得稅與 AMT 精算" },
+  { id: "main", label: "財富精算工作台" },
+  { id: "tax", label: "稅務規則設定" },
   { id: "market", label: "市場資料平台" },
 ];
 
