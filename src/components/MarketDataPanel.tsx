@@ -585,6 +585,8 @@ function combinedExecutionStatus(statuses: ExecutionReviewStatus[]): ExecutionRe
   return "pass";
 }
 
+type MarketDataWorkspace = "overview" | "assets" | "portfolio" | "operations" | "backoffice";
+
 export function MarketDataPanel() {
   const {
     data,
@@ -727,6 +729,7 @@ export function MarketDataPanel() {
   const [marketAlertAuditMessage, setMarketAlertAuditMessage] = useState("");
   const [marketAlertAuditRecords, setMarketAlertAuditRecords] = useState<MarketAlertWarehouseAuditRecord[]>([]);
   const [watchlistMemoCopyStatus, setWatchlistMemoCopyStatus] = useState<"idle" | "copied">("idle");
+  const [activeMarketWorkspace, setActiveMarketWorkspace] = useState<MarketDataWorkspace>("overview");
   const [activeCommandAreaId, setActiveCommandAreaId] = useState<PlatformCommandProductNavigatorActiveArea>("all");
   const sources = data?.sources ?? [];
   const securedCount = sources.filter((source) => source.status !== "needs_secret").length;
@@ -3883,6 +3886,48 @@ export function MarketDataPanel() {
       return nextPresets;
     });
   };
+  const isOverviewWorkspace = activeMarketWorkspace === "overview";
+  const isAssetsWorkspace = activeMarketWorkspace === "assets";
+  const isPortfolioWorkspace = activeMarketWorkspace === "portfolio";
+  const isOperationsWorkspace = activeMarketWorkspace === "operations";
+  const isBackofficeWorkspace = activeMarketWorkspace === "backoffice";
+  const marketWorkspaceItems: Array<{
+    id: MarketDataWorkspace;
+    label: string;
+    description: string;
+    metric: string;
+  }> = [
+    {
+      id: "overview",
+      label: "總覽",
+      description: "連線、資料新鮮度、覆蓋率與下一步",
+      metric: bigQueryDiagnostics ? `${platformCommandLaunchReadinessSummary.platformCompletion}% ready` : bigQueryBadge,
+    },
+    {
+      id: "assets",
+      label: "資產分析",
+      description: "單一商品查詢、歷史價格與研究摘要",
+      metric: assetProfile?.symbol ?? assetQuery,
+    },
+    {
+      id: "portfolio",
+      label: "投組交易",
+      description: "Watchlist、配置、再平衡、交易與投組引擎",
+      metric: `${visibleComparisonRows.length} 檔`,
+    },
+    {
+      id: "operations",
+      label: "資料營運",
+      description: "BigQuery 管線、SLO、狀態頁、來源清單",
+      metric: `${sources.length} sources`,
+    },
+    {
+      id: "backoffice",
+      label: "公司後台",
+      description: "Command、商業化、收入、SLA 與管理層輸出",
+      metric: `${platformCommandProductNavigatorSummary.moduleCount} modules`,
+    },
+  ];
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -3897,13 +3942,54 @@ export function MarketDataPanel() {
           onReload={reload}
         />
 
-        <BigQueryConnectionSection
+        <section className="rounded-lg border border-slate-800 bg-slate-950 p-4 space-y-3">
+          <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-3">
+            <div>
+              <p className="text-[10px] font-mono text-slate-600">MARKET DATA WORKSPACE</p>
+              <h3 className="mt-1 text-sm font-bold text-slate-100">市場資料平台工作區</h3>
+              <p className="mt-1 text-xs text-slate-500">
+                預設只看總覽；需要操作時再進入資產、投組、資料營運或公司後台，避免一次展開全部模組。
+              </p>
+            </div>
+            <div className="rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-right">
+              <p className="text-[10px] text-slate-600">Current</p>
+              <p className="mt-0.5 text-xs font-bold text-cyan-100">
+                {marketWorkspaceItems.find((item) => item.id === activeMarketWorkspace)?.label}
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-2">
+            {marketWorkspaceItems.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setActiveMarketWorkspace(item.id)}
+                className={`rounded-md border p-3 text-left transition-colors ${
+                  activeMarketWorkspace === item.id
+                    ? "border-cyan-500 bg-cyan-500/10 text-cyan-100"
+                    : "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700 hover:text-slate-100"
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-xs font-bold">{item.label}</p>
+                  <span className="rounded bg-slate-950 px-2 py-0.5 text-[10px] font-mono text-slate-400">
+                    {item.metric}
+                  </span>
+                </div>
+                <p className="mt-1 text-[11px] leading-5 text-slate-500">{item.description}</p>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {(isOverviewWorkspace || isOperationsWorkspace) && <BigQueryConnectionSection
           bigQueryStatus={bigQueryStatus}
           bigQueryError={bigQueryError}
           hasBigQueryCredentials={hasBigQueryCredentials}
           bigQueryBadge={bigQueryBadge}
-        />
+        />}
 
+        {(isOverviewWorkspace || isOperationsWorkspace || isBackofficeWorkspace) && (
         <section className="bg-slate-950 border border-slate-800 rounded-lg p-4 space-y-3">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
             <div>
@@ -3939,12 +4025,18 @@ export function MarketDataPanel() {
             </div>
           ) : bigQueryDiagnostics ? (
             <div className="space-y-4">
+              {(isOverviewWorkspace || isOperationsWorkspace) && (
+              <>
               <BigQueryQualityCardGrid
                 qualityCards={qualityCards}
                 issueCards={issueCards}
               />
               <BigQueryQualityScorecard scorecard={bigQueryDiagnostics.qualityScorecard} />
+              </>
+              )}
 
+              {isOperationsWorkspace && (
+              <>
               <DataOperationsSection
                 dataPipelineDecision={dataPipelineDecision}
                 dataPipelineBlockCount={dataPipelineBlockCount}
@@ -3998,6 +4090,10 @@ export function MarketDataPanel() {
                 items={dataProductClientImpactItems}
                 onExportCsv={handleExportDataProductClientImpactCsv}
               />
+              </>
+              )}
+              {isBackofficeWorkspace && (
+              <>
               <AccountHealthSection
                 summary={accountHealthSummary}
                 items={accountHealthItems}
@@ -4322,12 +4418,16 @@ export function MarketDataPanel() {
                 revenueForecastItems={revenueForecastItems}
                 onExportRevenueForecastCsv={handleExportRevenueForecastCsv}
               />
+              </>
+              )}
+              {(isOverviewWorkspace || isOperationsWorkspace) && (
               <BigQueryWarehouseSnapshotSection
                 bigQueryDiagnostics={bigQueryDiagnostics}
                 fxFreshnessDays={fxFreshnessDays}
                 staleSymbols={staleSymbols}
                 fxCurrencies={fxCurrencies}
               />
+              )}
             </div>
           ) : (
             <div className="border border-dashed border-slate-800 rounded-lg p-4 text-xs text-slate-500">
@@ -4335,7 +4435,9 @@ export function MarketDataPanel() {
             </div>
           )}
         </section>
+        )}
 
+        {isAssetsWorkspace && (
         <AssetProfileSection
           assetQuery={assetQuery}
           onAssetQueryChange={setAssetQuery}
@@ -4360,6 +4462,8 @@ export function MarketDataPanel() {
           onExportAssetProfileCsv={handleExportAssetProfileCsv}
           onExportAssetResearchReport={handleExportAssetResearchReport}
         />
+        )}
+        {isPortfolioWorkspace && (
         <section className="bg-slate-950 border border-slate-800 rounded-lg p-4 space-y-4">
           <WatchlistControlsSection
             comparisonRows={comparisonRows}
@@ -4784,13 +4888,16 @@ export function MarketDataPanel() {
             </div>
           )}
         </section>
+        )}
 
+        {isOperationsWorkspace && (
         <MarketSourceInventorySection sources={sources} isLoading={isLoading} error={error} />
+        )}
       </section>
 
-      <SecurityNotesSection notes={data?.securityNotes ?? []} />
+      {isOperationsWorkspace && <SecurityNotesSection notes={data?.securityNotes ?? []} />}
 
-      <BigQueryPortfolioPanel hasBigQueryCredentials={hasBigQueryCredentials} />
+      {isPortfolioWorkspace && <BigQueryPortfolioPanel hasBigQueryCredentials={hasBigQueryCredentials} />}
     </div>
   );
 }
