@@ -14,6 +14,7 @@ import {
   coverageStatus,
   daysSinceDate,
   formatCount,
+  formatPrice,
   freshnessStatus,
   parseSymbolList,
   sortComparisonRows,
@@ -585,7 +586,29 @@ function combinedExecutionStatus(statuses: ExecutionReviewStatus[]): ExecutionRe
   return "pass";
 }
 
-type MarketDataWorkspace = "overview" | "assets" | "portfolio" | "operations" | "backoffice";
+type MarketDataWorkspace = "quotes" | "portfolio";
+
+type DailyMarketQuoteRow = {
+  symbol: string;
+  latestDate: string | null;
+  latestPrice: number | null;
+  dailyReturn: number | null;
+  priceBasis: "adjusted" | "raw";
+};
+
+function formatSignedPercent(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "--";
+  const percent = value * 100;
+  const sign = percent > 0 ? "+" : "";
+  return `${sign}${percent.toFixed(2)}%`;
+}
+
+function dailyReturnTextClass(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "text-slate-400";
+  if (value > 0) return "text-emerald-200";
+  if (value < 0) return "text-rose-200";
+  return "text-slate-300";
+}
 
 export function MarketDataPanel() {
   const {
@@ -729,7 +752,11 @@ export function MarketDataPanel() {
   const [marketAlertAuditMessage, setMarketAlertAuditMessage] = useState("");
   const [marketAlertAuditRecords, setMarketAlertAuditRecords] = useState<MarketAlertWarehouseAuditRecord[]>([]);
   const [watchlistMemoCopyStatus, setWatchlistMemoCopyStatus] = useState<"idle" | "copied">("idle");
-  const [activeMarketWorkspace, setActiveMarketWorkspace] = useState<MarketDataWorkspace>("overview");
+  const [activeMarketWorkspace, setActiveMarketWorkspace] = useState<MarketDataWorkspace>("quotes");
+  const [dailyQuoteSymbolsText, setDailyQuoteSymbolsText] = useState("0050.TW 0056.TW 2330.TW SPY QQQ");
+  const [dailyQuoteRows, setDailyQuoteRows] = useState<DailyMarketQuoteRow[]>([]);
+  const [dailyQuoteStatus, setDailyQuoteStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  const [dailyQuoteError, setDailyQuoteError] = useState("");
   const [activeCommandAreaId, setActiveCommandAreaId] = useState<PlatformCommandProductNavigatorActiveArea>("all");
   const sources = data?.sources ?? [];
   const securedCount = sources.filter((source) => source.status !== "needs_secret").length;
@@ -3886,11 +3913,42 @@ export function MarketDataPanel() {
       return nextPresets;
     });
   };
-  const isOverviewWorkspace = activeMarketWorkspace === "overview";
-  const isAssetsWorkspace = activeMarketWorkspace === "assets";
+  const handleLoadDailyQuotes = async () => {
+    const symbols = parseSymbolList(dailyQuoteSymbolsText);
+    if (!symbols.length) {
+      setDailyQuoteError("請至少輸入一個商品代號。");
+      setDailyQuoteStatus("error");
+      return;
+    }
+
+    setDailyQuoteStatus("loading");
+    setDailyQuoteError("");
+
+    try {
+      const rows = await Promise.all(
+        symbols.map(async (symbol): Promise<DailyMarketQuoteRow> => {
+          const profile = await fetchBigQueryAssetProfile(symbol, assetPriceBasis);
+          return {
+            symbol: profile.symbol,
+            latestDate: profile.summary.latest_date,
+            latestPrice: profile.metrics.latestPrice,
+            dailyReturn: profile.metrics.latestDailyReturn,
+            priceBasis: profile.priceBasis,
+          };
+        }),
+      );
+      setDailyQuoteRows(rows);
+      setDailyQuoteStatus("loaded");
+    } catch (err: unknown) {
+      setDailyQuoteError(err instanceof Error ? err.message : String(err));
+      setDailyQuoteStatus("error");
+    }
+  };
+  const isOverviewWorkspace = activeMarketWorkspace === "quotes";
+  const isAssetsWorkspace = activeMarketWorkspace === "portfolio";
   const isPortfolioWorkspace = activeMarketWorkspace === "portfolio";
-  const isOperationsWorkspace = activeMarketWorkspace === "operations";
-  const isBackofficeWorkspace = activeMarketWorkspace === "backoffice";
+  const isOperationsWorkspace = false;
+  const isBackofficeWorkspace = false;
   const marketWorkspaceItems: Array<{
     id: MarketDataWorkspace;
     label: string;
@@ -3898,34 +3956,16 @@ export function MarketDataPanel() {
     metric: string;
   }> = [
     {
-      id: "overview",
-      label: "總覽",
-      description: "連線、資料新鮮度、覆蓋率與下一步",
-      metric: bigQueryDiagnostics ? `${platformCommandLaunchReadinessSummary.platformCompletion}% ready` : bigQueryBadge,
-    },
-    {
-      id: "assets",
-      label: "資產分析",
-      description: "單一商品查詢、歷史價格與研究摘要",
-      metric: assetProfile?.symbol ?? assetQuery,
+      id: "quotes",
+      label: "今日行情",
+      description: "當日價格、漲跌幅、資料日期與資料品質",
+      metric: dailyQuoteRows.length ? `${dailyQuoteRows.length} 檔` : bigQueryBadge,
     },
     {
       id: "portfolio",
-      label: "投組交易",
-      description: "Watchlist、配置、再平衡、交易與投組引擎",
-      metric: `${visibleComparisonRows.length} 檔`,
-    },
-    {
-      id: "operations",
-      label: "資料營運",
-      description: "BigQuery 管線、SLO、狀態頁、來源清單",
-      metric: `${sources.length} sources`,
-    },
-    {
-      id: "backoffice",
-      label: "公司後台",
-      description: "Command、商業化、收入、SLA 與管理層輸出",
-      metric: `${platformCommandProductNavigatorSummary.moduleCount} modules`,
+      label: "投資組合分析",
+      description: "選取投資標的，建立 watchlist、配置、再平衡與投組分析",
+      metric: visibleComparisonRows.length ? `${visibleComparisonRows.length} 檔` : assetProfile?.symbol ?? assetQuery,
     },
   ];
 
@@ -3948,7 +3988,7 @@ export function MarketDataPanel() {
               <p className="text-[10px] font-mono text-slate-600">MARKET DATA WORKSPACE</p>
               <h3 className="mt-1 text-sm font-bold text-slate-100">市場資料平台工作區</h3>
               <p className="mt-1 text-xs text-slate-500">
-                預設只看總覽；需要操作時再進入資產、投組、資料營運或公司後台，避免一次展開全部模組。
+                市場平台分成兩件事：先看今日行情，再選取標的做投資組合分析。
               </p>
             </div>
             <div className="rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-right">
@@ -3958,7 +3998,7 @@ export function MarketDataPanel() {
               </p>
             </div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-2">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
             {marketWorkspaceItems.map((item) => (
               <button
                 key={item.id}
@@ -3988,6 +4028,87 @@ export function MarketDataPanel() {
           hasBigQueryCredentials={hasBigQueryCredentials}
           bigQueryBadge={bigQueryBadge}
         />}
+
+        {isOverviewWorkspace && (
+        <section className="bg-slate-950 border border-slate-800 rounded-lg p-4 space-y-4">
+          <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-bold text-slate-100">今日行情與漲跌幅</h3>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                輸入想追蹤的標的，系統會讀取 BigQuery 最新價格與最近一日報酬率。
+              </p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_110px_auto] gap-2 text-xs xl:min-w-[720px]">
+              <input
+                value={dailyQuoteSymbolsText}
+                onChange={(event) => setDailyQuoteSymbolsText(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    void handleLoadDailyQuotes();
+                  }
+                }}
+                placeholder="0050.TW 0056.TW 2330.TW SPY QQQ"
+                className="min-w-0 bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-slate-100 font-mono outline-none focus:border-cyan-600"
+              />
+              <select
+                value={assetPriceBasis}
+                onChange={(event) => setAssetPriceBasis(event.target.value as "adjusted" | "raw")}
+                className="bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-slate-100"
+              >
+                <option value="adjusted">Adj</option>
+                <option value="raw">Raw</option>
+              </select>
+              <button
+                type="button"
+                onClick={() => void handleLoadDailyQuotes()}
+                disabled={!hasBigQueryCredentials || dailyQuoteStatus === "loading"}
+                className="px-3 py-2 rounded-md bg-cyan-700 hover:bg-cyan-600 text-white font-bold disabled:cursor-not-allowed disabled:bg-slate-900 disabled:text-slate-600"
+              >
+                {dailyQuoteStatus === "loading" ? "讀取中" : "讀取今日行情"}
+              </button>
+            </div>
+          </div>
+
+          {dailyQuoteError ? (
+            <div className="border border-red-900/60 bg-red-950/30 rounded-lg p-3 text-xs text-red-300 whitespace-pre-wrap">
+              {dailyQuoteError}
+            </div>
+          ) : null}
+
+          {dailyQuoteRows.length ? (
+            <div className="overflow-x-auto rounded-lg border border-slate-800">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-900 text-slate-500">
+                  <tr>
+                    <th className="px-3 py-2 font-bold">標的</th>
+                    <th className="px-3 py-2 text-right font-bold">最新價格</th>
+                    <th className="px-3 py-2 text-right font-bold">日漲跌幅</th>
+                    <th className="px-3 py-2 text-right font-bold">資料日</th>
+                    <th className="px-3 py-2 text-right font-bold">價格口徑</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800 bg-slate-950/70">
+                  {dailyQuoteRows.map((row) => (
+                    <tr key={row.symbol} className="hover:bg-slate-900/70">
+                      <td className="px-3 py-2 font-mono font-bold text-cyan-100">{row.symbol}</td>
+                      <td className="px-3 py-2 text-right font-mono text-slate-100">{formatPrice(row.latestPrice)}</td>
+                      <td className={`px-3 py-2 text-right font-mono font-bold ${dailyReturnTextClass(row.dailyReturn)}`}>
+                        {formatSignedPercent(row.dailyReturn)}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono text-slate-400">{row.latestDate ?? "--"}</td>
+                      <td className="px-3 py-2 text-right text-slate-500">{row.priceBasis === "raw" ? "Raw" : "Adjusted"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-dashed border-slate-800 bg-slate-900/40 p-4 text-xs text-slate-500">
+              尚未讀取行情。確認 Vercel 已設定 BigQuery 憑證後，按「讀取今日行情」即可看到最新價與日漲跌幅。
+            </div>
+          )}
+        </section>
+        )}
 
         {(isOverviewWorkspace || isOperationsWorkspace || isBackofficeWorkspace) && (
         <section className="bg-slate-950 border border-slate-800 rounded-lg p-4 space-y-3">
