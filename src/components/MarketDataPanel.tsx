@@ -594,6 +594,10 @@ type DailyMarketQuoteRow = {
   latestPrice: number | null;
   dailyReturn: number | null;
   priceBasis: "adjusted" | "raw";
+  rowCount: number | null;
+  selectedPriceRows: number | null;
+  status: "loaded" | "error";
+  errorMessage?: string;
 };
 
 function formatSignedPercent(value: number | null | undefined) {
@@ -3924,9 +3928,9 @@ export function MarketDataPanel() {
     setDailyQuoteStatus("loading");
     setDailyQuoteError("");
 
-    try {
-      const rows = await Promise.all(
-        symbols.map(async (symbol): Promise<DailyMarketQuoteRow> => {
+    const rows = await Promise.all(
+      symbols.map(async (symbol): Promise<DailyMarketQuoteRow> => {
+        try {
           const profile = await fetchBigQueryAssetProfile(symbol, assetPriceBasis);
           return {
             symbol: profile.symbol,
@@ -3934,21 +3938,38 @@ export function MarketDataPanel() {
             latestPrice: profile.metrics.latestPrice,
             dailyReturn: profile.metrics.latestDailyReturn,
             priceBasis: profile.priceBasis,
+            rowCount: profile.summary.row_count,
+            selectedPriceRows: profile.summary.selected_price_rows,
+            status: "loaded",
           };
-        }),
-      );
-      setDailyQuoteRows(rows);
-      setDailyQuoteStatus("loaded");
-    } catch (err: unknown) {
-      setDailyQuoteError(err instanceof Error ? err.message : String(err));
-      setDailyQuoteStatus("error");
-    }
+        } catch (err: unknown) {
+          return {
+            symbol,
+            latestDate: null,
+            latestPrice: null,
+            dailyReturn: null,
+            priceBasis: assetPriceBasis,
+            rowCount: null,
+            selectedPriceRows: null,
+            status: "error",
+            errorMessage: err instanceof Error ? err.message : String(err),
+          };
+        }
+      }),
+    );
+    const loadedCount = rows.filter((row) => row.status === "loaded").length;
+    const errorCount = rows.length - loadedCount;
+    setDailyQuoteRows(rows);
+    setDailyQuoteError(errorCount ? `${errorCount} 檔標的沒有可用資料，已在下方以缺資料卡標示。` : "");
+    setDailyQuoteStatus(loadedCount ? "loaded" : "error");
   };
   const isOverviewWorkspace = activeMarketWorkspace === "quotes";
   const isAssetsWorkspace = activeMarketWorkspace === "portfolio";
   const isPortfolioWorkspace = activeMarketWorkspace === "portfolio";
   const isOperationsWorkspace = false;
   const isBackofficeWorkspace = false;
+  const loadedDailyQuoteRows = dailyQuoteRows.filter((row) => row.status === "loaded");
+  const failedDailyQuoteRows = dailyQuoteRows.filter((row) => row.status === "error");
   const marketWorkspaceItems: Array<{
     id: MarketDataWorkspace;
     label: string;
@@ -3959,7 +3980,7 @@ export function MarketDataPanel() {
       id: "quotes",
       label: "今日行情",
       description: "當日價格、漲跌幅、資料日期與資料品質",
-      metric: dailyQuoteRows.length ? `${dailyQuoteRows.length} 檔` : bigQueryBadge,
+      metric: dailyQuoteRows.length ? `${loadedDailyQuoteRows.length}/${dailyQuoteRows.length} 檔` : bigQueryBadge,
     },
     {
       id: "portfolio",
@@ -3972,7 +3993,7 @@ export function MarketDataPanel() {
     {
       label: "行情狀態",
       value: dailyQuoteStatus === "loaded" ? "已載入" : hasBigQueryCredentials ? "可讀取" : "待設定",
-      note: dailyQuoteStatus === "loaded" ? `${dailyQuoteRows.length} 檔標的` : bigQueryBadge,
+      note: dailyQuoteRows.length ? `成功 ${loadedDailyQuoteRows.length}，缺資料 ${failedDailyQuoteRows.length}` : bigQueryBadge,
     },
     {
       label: "最新資料日",
@@ -4068,7 +4089,7 @@ export function MarketDataPanel() {
               <p className="text-[10px] font-mono text-cyan-300">DAILY MARKET</p>
               <h3 className="mt-1 text-base font-bold text-slate-100">今日行情</h3>
               <p className="text-[11px] text-slate-500 mt-0.5">
-                看最新價格、日漲跌幅與資料日；需要深入分析時，再切到投資組合分析。
+                每個代號以獨立資料卡顯示；有資料先顯示，缺資料另外標示。
               </p>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-[1fr_110px_auto] gap-2 text-xs xl:min-w-[720px]">
@@ -4113,37 +4134,82 @@ export function MarketDataPanel() {
           </div>
 
           {dailyQuoteError ? (
-            <div className="border border-red-900/60 bg-red-950/30 rounded-lg p-3 text-xs text-red-300 whitespace-pre-wrap">
+            <div className={`rounded-lg border p-3 text-xs whitespace-pre-wrap ${
+              loadedDailyQuoteRows.length
+                ? "border-amber-900/60 bg-amber-950/20 text-amber-200"
+                : "border-red-900/60 bg-red-950/30 text-red-300"
+            }`}>
               {dailyQuoteError}
             </div>
           ) : null}
 
           {dailyQuoteRows.length ? (
-            <div className="overflow-x-auto rounded-lg border border-slate-800">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-900 text-slate-500">
-                  <tr>
-                    <th className="px-3 py-2 font-bold">標的</th>
-                    <th className="px-3 py-2 text-right font-bold">最新價格</th>
-                    <th className="px-3 py-2 text-right font-bold">日漲跌幅</th>
-                    <th className="px-3 py-2 text-right font-bold">資料日</th>
-                    <th className="px-3 py-2 text-right font-bold">價格口徑</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800 bg-slate-950/70">
-                  {dailyQuoteRows.map((row) => (
-                    <tr key={row.symbol} className="hover:bg-slate-900/70">
-                      <td className="px-3 py-2 font-mono font-bold text-cyan-100">{row.symbol}</td>
-                      <td className="px-3 py-2 text-right font-mono text-slate-100">{formatPrice(row.latestPrice)}</td>
-                      <td className={`px-3 py-2 text-right font-mono font-bold ${dailyReturnTextClass(row.dailyReturn)}`}>
-                        {formatSignedPercent(row.dailyReturn)}
-                      </td>
-                      <td className="px-3 py-2 text-right font-mono text-slate-400">{row.latestDate ?? "--"}</td>
-                      <td className="px-3 py-2 text-right text-slate-500">{row.priceBasis === "raw" ? "Raw" : "Adjusted"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-3">
+              {dailyQuoteRows.map((row) => {
+                const isLoaded = row.status === "loaded";
+                return (
+                  <article
+                    key={`${row.symbol}-${row.priceBasis}`}
+                    className={`rounded-lg border p-4 ${
+                      isLoaded
+                        ? "border-slate-800 bg-slate-900/80"
+                        : "border-amber-900/60 bg-amber-950/10"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-mono text-sm font-bold text-cyan-100">{row.symbol}</p>
+                        <p className="mt-1 text-[11px] text-slate-500">
+                          {row.priceBasis === "raw" ? "Raw price" : "Adjusted price"}
+                        </p>
+                      </div>
+                      <span className={`rounded px-2 py-1 text-[10px] font-bold ${
+                        isLoaded ? "bg-emerald-500/15 text-emerald-200" : "bg-amber-500/15 text-amber-200"
+                      }`}>
+                        {isLoaded ? "有資料" : "缺資料"}
+                      </span>
+                    </div>
+
+                    {isLoaded ? (
+                      <>
+                        <div className="mt-4 grid grid-cols-2 gap-3">
+                          <div>
+                            <p className="text-[10px] text-slate-500">最新價格</p>
+                            <p className="mt-1 text-2xl font-bold font-mono text-slate-100">
+                              {formatPrice(row.latestPrice)}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-[10px] text-slate-500">日漲跌幅</p>
+                            <p className={`mt-1 text-2xl font-bold font-mono ${dailyReturnTextClass(row.dailyReturn)}`}>
+                              {formatSignedPercent(row.dailyReturn)}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="mt-4 grid grid-cols-3 gap-2 text-[11px]">
+                          <div className="rounded-md border border-slate-800 bg-slate-950/60 p-2">
+                            <p className="text-slate-600">資料日</p>
+                            <p className="mt-1 font-mono text-slate-300">{row.latestDate ?? "--"}</p>
+                          </div>
+                          <div className="rounded-md border border-slate-800 bg-slate-950/60 p-2">
+                            <p className="text-slate-600">總筆數</p>
+                            <p className="mt-1 font-mono text-slate-300">{formatCount(row.rowCount)}</p>
+                          </div>
+                          <div className="rounded-md border border-slate-800 bg-slate-950/60 p-2">
+                            <p className="text-slate-600">有效價</p>
+                            <p className="mt-1 font-mono text-slate-300">{formatCount(row.selectedPriceRows)}</p>
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="mt-4 rounded-md border border-amber-900/40 bg-slate-950/50 p-3 text-[11px] text-amber-100">
+                        <p className="font-bold">BigQuery 目前沒有這個口徑的可用價格。</p>
+                        <p className="mt-2 break-words text-amber-200/70">{row.errorMessage}</p>
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
             </div>
           ) : (
             <div className="rounded-lg border border-dashed border-cyan-900/60 bg-cyan-950/10 p-5 text-xs text-slate-400">
