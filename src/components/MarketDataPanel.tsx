@@ -3968,6 +3968,28 @@ export function MarketDataPanel() {
       metric: visibleComparisonRows.length ? `${visibleComparisonRows.length} 檔` : assetProfile?.symbol ?? assetQuery,
     },
   ];
+  const dailyMarketSummaryCards = [
+    {
+      label: "行情狀態",
+      value: dailyQuoteStatus === "loaded" ? "已載入" : hasBigQueryCredentials ? "可讀取" : "待設定",
+      note: dailyQuoteStatus === "loaded" ? `${dailyQuoteRows.length} 檔標的` : bigQueryBadge,
+    },
+    {
+      label: "最新資料日",
+      value: bigQueryDiagnostics?.priceSummary.latest_date ?? "--",
+      note: "daily_prices 最新日期",
+    },
+    {
+      label: "可查商品",
+      value: `${formatCount(bigQueryDiagnostics?.priceSummary.symbol_count)} 檔`,
+      note: "BigQuery 商品覆蓋",
+    },
+    {
+      label: "資料筆數",
+      value: `${formatCount(bigQueryDiagnostics?.priceSummary.row_count)} 筆`,
+      note: "歷史價格深度",
+    },
+  ];
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -3982,23 +4004,33 @@ export function MarketDataPanel() {
           onReload={reload}
         />
 
-        <section className="rounded-lg border border-slate-800 bg-slate-950 p-4 space-y-3">
-          <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-3">
+        <section className="rounded-lg border border-slate-800 bg-slate-950 p-4 space-y-4">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
             <div>
-              <p className="text-[10px] font-mono text-slate-600">MARKET DATA WORKSPACE</p>
-              <h3 className="mt-1 text-sm font-bold text-slate-100">市場資料平台工作區</h3>
+              <p className="text-[10px] font-mono text-cyan-300">MARKET PLATFORM</p>
+              <h3 className="mt-1 text-base font-bold text-slate-100">市場資料平台</h3>
               <p className="mt-1 text-xs text-slate-500">
                 市場平台分成兩件事：先看今日行情，再選取標的做投資組合分析。
               </p>
             </div>
-            <div className="rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-right">
-              <p className="text-[10px] text-slate-600">Current</p>
-              <p className="mt-0.5 text-xs font-bold text-cyan-100">
-                {marketWorkspaceItems.find((item) => item.id === activeMarketWorkspace)?.label}
-              </p>
+            <div className="inline-grid grid-cols-2 rounded-lg border border-slate-800 bg-slate-900 p-1 text-xs">
+              {marketWorkspaceItems.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setActiveMarketWorkspace(item.id)}
+                  className={`rounded-md px-4 py-2 font-bold transition-colors ${
+                    activeMarketWorkspace === item.id
+                      ? "bg-cyan-600 text-white"
+                      : "text-slate-400 hover:bg-slate-800 hover:text-slate-100"
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
             </div>
           </div>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
             {marketWorkspaceItems.map((item) => (
               <button
                 key={item.id}
@@ -4006,7 +4038,7 @@ export function MarketDataPanel() {
                 onClick={() => setActiveMarketWorkspace(item.id)}
                 className={`rounded-md border p-3 text-left transition-colors ${
                   activeMarketWorkspace === item.id
-                    ? "border-cyan-500 bg-cyan-500/10 text-cyan-100"
+                    ? "border-cyan-500 bg-cyan-500/10 text-cyan-100 shadow-[inset_0_0_0_1px_rgba(34,211,238,0.15)]"
                     : "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700 hover:text-slate-100"
                 }`}
               >
@@ -4022,7 +4054,7 @@ export function MarketDataPanel() {
           </div>
         </section>
 
-        {(isOverviewWorkspace || isOperationsWorkspace) && <BigQueryConnectionSection
+        {isOperationsWorkspace && <BigQueryConnectionSection
           bigQueryStatus={bigQueryStatus}
           bigQueryError={bigQueryError}
           hasBigQueryCredentials={hasBigQueryCredentials}
@@ -4030,12 +4062,13 @@ export function MarketDataPanel() {
         />}
 
         {isOverviewWorkspace && (
-        <section className="bg-slate-950 border border-slate-800 rounded-lg p-4 space-y-4">
+        <section className="bg-slate-950 border border-cyan-900/50 rounded-lg p-4 space-y-4">
           <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-3">
             <div>
-              <h3 className="text-sm font-bold text-slate-100">今日行情與漲跌幅</h3>
+              <p className="text-[10px] font-mono text-cyan-300">DAILY MARKET</p>
+              <h3 className="mt-1 text-base font-bold text-slate-100">今日行情</h3>
               <p className="text-[11px] text-slate-500 mt-0.5">
-                輸入想追蹤的標的，系統會讀取 BigQuery 最新價格與最近一日報酬率。
+                看最新價格、日漲跌幅與資料日；需要深入分析時，再切到投資組合分析。
               </p>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-[1fr_110px_auto] gap-2 text-xs xl:min-w-[720px]">
@@ -4067,6 +4100,16 @@ export function MarketDataPanel() {
                 {dailyQuoteStatus === "loading" ? "讀取中" : "讀取今日行情"}
               </button>
             </div>
+          </div>
+
+          <div className="grid grid-cols-2 xl:grid-cols-4 gap-2">
+            {dailyMarketSummaryCards.map((card) => (
+              <div key={card.label} className="rounded-md border border-slate-800 bg-slate-900/70 p-3">
+                <p className="text-[10px] text-slate-500">{card.label}</p>
+                <p className="mt-1 text-lg font-bold font-mono text-slate-100">{card.value}</p>
+                <p className="mt-1 text-[11px] text-slate-600">{card.note}</p>
+              </div>
+            ))}
           </div>
 
           {dailyQuoteError ? (
@@ -4103,14 +4146,14 @@ export function MarketDataPanel() {
               </table>
             </div>
           ) : (
-            <div className="rounded-lg border border-dashed border-slate-800 bg-slate-900/40 p-4 text-xs text-slate-500">
-              尚未讀取行情。確認 Vercel 已設定 BigQuery 憑證後，按「讀取今日行情」即可看到最新價與日漲跌幅。
+            <div className="rounded-lg border border-dashed border-cyan-900/60 bg-cyan-950/10 p-5 text-xs text-slate-400">
+              輸入代號後按「讀取今日行情」，這裡會顯示最新價、日漲跌幅與資料日。
             </div>
           )}
         </section>
         )}
 
-        {(isOverviewWorkspace || isOperationsWorkspace || isBackofficeWorkspace) && (
+        {(isOperationsWorkspace || isBackofficeWorkspace) && (
         <section className="bg-slate-950 border border-slate-800 rounded-lg p-4 space-y-3">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
             <div>
