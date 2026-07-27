@@ -22,6 +22,7 @@ type AssetProfileSectionProps = {
   onLoadAssetProfile: (symbol?: string) => void | Promise<void>;
   assetPanelError: string | null;
   assetSuggestions: BigQueryAsset[];
+  onAddAssetToComparison: (symbol: string) => void;
   assetProfile: BigQueryAssetProfileResponse | null;
   assetHistory: BigQueryAssetHistoryResponse | null;
   assetHistoryStartDate: string;
@@ -51,6 +52,7 @@ export function AssetProfileSection({
   onLoadAssetProfile: handleLoadAssetProfile,
   assetPanelError,
   assetSuggestions,
+  onAddAssetToComparison,
   assetProfile,
   assetHistory,
   assetHistoryStartDate,
@@ -72,7 +74,7 @@ export function AssetProfileSection({
                 單一商品價格、報酬、波動、回撤與資料完整度
               </p>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-[1fr_110px_140px_140px_110px_auto_auto] gap-2 text-xs xl:min-w-[980px]">
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_110px_140px_140px_110px_auto_auto] gap-2 text-xs xl:min-w-[1120px]">
               <input
                 value={assetQuery}
                 onChange={(event) => setAssetQuery(event.target.value)}
@@ -84,6 +86,24 @@ export function AssetProfileSection({
                 placeholder="0050.TW"
                 className="min-w-0 bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-slate-100 font-mono outline-none focus:border-cyan-600"
               />
+              <select
+                value=""
+                onChange={(event) => {
+                  const symbol = event.target.value;
+                  if (!symbol) return;
+                  setAssetQuery(symbol);
+                  void handleLoadAssetProfile(symbol);
+                }}
+                disabled={!assetSuggestions.length}
+                className="min-w-0 bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-slate-100 disabled:cursor-not-allowed disabled:text-slate-600"
+              >
+                <option value="">從搜尋結果選擇</option>
+                {assetSuggestions.map((asset) => (
+                  <option key={asset.symbol} value={asset.symbol}>
+                    {asset.symbol} · {asset.latest_date ?? "--"} · {formatCount(asset.row_count)} 筆
+                  </option>
+                ))}
+              </select>
               <select
                 value={assetPriceBasis}
                 onChange={(event) => setAssetPriceBasis(event.target.value as "adjusted" | "raw")}
@@ -151,6 +171,29 @@ export function AssetProfileSection({
                   </span>
                 </button>
               ))}
+            </div>
+          ) : null}
+
+          {assetSuggestions.length ? (
+            <div className="rounded-lg border border-slate-800 bg-slate-900/50 p-3 text-xs">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
+                <div>
+                  <p className="font-bold text-slate-200">快速加入投資組合分析</p>
+                  <p className="mt-1 text-[11px] text-slate-500">搜尋結果可直接加入 watchlist，保留手動輸入。</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {assetSuggestions.slice(0, 6).map((asset) => (
+                    <button
+                      key={`add-${asset.symbol}`}
+                      type="button"
+                      onClick={() => onAddAssetToComparison(asset.symbol)}
+                      className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 font-mono font-bold text-cyan-100 hover:border-cyan-600"
+                    >
+                      + {asset.symbol}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           ) : null}
 

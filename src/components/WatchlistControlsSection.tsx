@@ -4,6 +4,7 @@ import {
   type AssetComparisonSortKey,
   type AssetDecisionSignal,
 } from "@/lib/assetResearchWorkflow";
+import type { BigQueryAsset } from "@/types/market";
 
 type AssetPriceBasis = "adjusted" | "raw";
 
@@ -23,6 +24,12 @@ type WatchlistControlsSectionProps = {
   onCompareAssets: () => void | Promise<void>;
   hasBigQueryCredentials: boolean;
   isLoadingComparison: boolean;
+  isSearchingAssets: boolean;
+  assetQuery: string;
+  onAssetQueryChange: (value: string) => void;
+  assetSuggestions: BigQueryAsset[];
+  onSearchAssets: () => void | Promise<void>;
+  onAppendComparisonSymbol: (symbol: string) => void;
   comparisonSymbols: string;
   onComparisonSymbolsChange: (value: string) => void;
   assetPriceBasis: AssetPriceBasis;
@@ -53,6 +60,12 @@ export function WatchlistControlsSection({
   onCompareAssets,
   hasBigQueryCredentials,
   isLoadingComparison,
+  isSearchingAssets,
+  assetQuery,
+  onAssetQueryChange,
+  assetSuggestions,
+  onSearchAssets,
+  onAppendComparisonSymbol,
   comparisonSymbols,
   onComparisonSymbolsChange,
   assetPriceBasis,
@@ -114,6 +127,62 @@ export function WatchlistControlsSection({
             className="px-3 py-2 text-xs font-bold rounded-md bg-cyan-700 hover:bg-cyan-600 text-white disabled:cursor-not-allowed disabled:bg-slate-900 disabled:text-slate-600"
           >
             {isLoadingComparison ? "比較中" : "比較商品"}
+          </button>
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-cyan-900/40 bg-cyan-950/10 p-3 space-y-2">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
+          <div>
+            <p className="text-xs font-bold text-cyan-100">選擇投資標的</p>
+            <p className="mt-0.5 text-[11px] text-slate-500">可手動輸入，也可搜尋 BigQuery 後用下拉加入。</p>
+          </div>
+          <span className="rounded bg-slate-950 px-2 py-1 text-[10px] font-mono text-slate-400">
+            {symbolCount}/12 symbols
+          </span>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto_auto] gap-2 text-xs">
+          <input
+            value={assetQuery}
+            onChange={(event) => onAssetQueryChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                onAppendComparisonSymbol(assetQuery);
+              }
+            }}
+            placeholder="輸入代號，例如 0050.TW"
+            className="min-w-0 rounded-md border border-slate-800 bg-slate-950 px-3 py-2 font-mono text-slate-100 outline-none placeholder:text-slate-700 focus:border-cyan-600"
+          />
+          <select
+            value=""
+            onChange={(event) => {
+              if (event.target.value) onAppendComparisonSymbol(event.target.value);
+            }}
+            disabled={!assetSuggestions.length}
+            className="min-w-0 rounded-md border border-slate-800 bg-slate-950 px-3 py-2 text-slate-100 disabled:cursor-not-allowed disabled:text-slate-600"
+          >
+            <option value="">從搜尋結果加入</option>
+            {assetSuggestions.map((asset) => (
+              <option key={asset.symbol} value={asset.symbol}>
+                {asset.symbol} · {asset.latest_date ?? "--"} · {asset.row_count.toLocaleString("zh-TW")} 筆
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => void onSearchAssets()}
+            disabled={!hasBigQueryCredentials || isSearchingAssets || !assetQuery.trim()}
+            className="rounded-md bg-slate-800 px-3 py-2 font-bold text-slate-100 hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-900 disabled:text-slate-600"
+          >
+            {isSearchingAssets ? "搜尋中" : "搜尋"}
+          </button>
+          <button
+            type="button"
+            onClick={() => onAppendComparisonSymbol(assetQuery)}
+            disabled={!assetQuery.trim() || symbolCount >= 12}
+            className="rounded-md bg-cyan-700 px-3 py-2 font-bold text-white hover:bg-cyan-600 disabled:cursor-not-allowed disabled:bg-slate-900 disabled:text-slate-600"
+          >
+            加入
           </button>
         </div>
       </div>

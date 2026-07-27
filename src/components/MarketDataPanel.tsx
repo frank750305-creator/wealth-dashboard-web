@@ -2720,6 +2720,16 @@ export function MarketDataPanel() {
       setIsLoadingComparison(false);
     }
   };
+  const handleAppendComparisonSymbol = (symbol: string) => {
+    const cleanSymbol = symbol.trim();
+    if (!cleanSymbol) return;
+
+    const symbols = parseSymbolList(comparisonSymbols);
+    const hasSymbol = symbols.some((item) => item.toUpperCase() === cleanSymbol.toUpperCase());
+    const nextSymbols = hasSymbol ? symbols : [...symbols, cleanSymbol].slice(0, 12);
+    setComparisonSymbols(nextSymbols.join(" "));
+    setAssetQuery(cleanSymbol);
+  };
   const handleExportAssetComparisonCsv = () => {
     if (!visibleComparisonRows.length) return;
 
@@ -4680,6 +4690,7 @@ export function MarketDataPanel() {
           onLoadAssetProfile={handleLoadAssetProfile}
           assetPanelError={assetPanelError}
           assetSuggestions={assetSuggestions}
+          onAddAssetToComparison={handleAppendComparisonSymbol}
           assetProfile={assetProfile}
           assetHistory={assetHistory}
           assetHistoryStartDate={assetHistoryStartDate}
@@ -4705,6 +4716,12 @@ export function MarketDataPanel() {
             onCompareAssets={handleCompareAssets}
             hasBigQueryCredentials={hasBigQueryCredentials}
             isLoadingComparison={isLoadingComparison}
+            isSearchingAssets={isSearchingAssets}
+            assetQuery={assetQuery}
+            onAssetQueryChange={setAssetQuery}
+            assetSuggestions={assetSuggestions}
+            onSearchAssets={handleSearchAssets}
+            onAppendComparisonSymbol={handleAppendComparisonSymbol}
             comparisonSymbols={comparisonSymbols}
             onComparisonSymbolsChange={setComparisonSymbols}
             assetPriceBasis={assetPriceBasis}
