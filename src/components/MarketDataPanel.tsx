@@ -593,6 +593,11 @@ type DailyMarketQuoteRow = {
   latestDate: string | null;
   latestPrice: number | null;
   dailyReturn: number | null;
+  dailyPriceChange: number | null;
+  ytdReturn: number | null;
+  ytdPriceChange: number | null;
+  ytdStartDate: string | null;
+  ytdStartPrice: number | null;
   priceBasis: "adjusted" | "raw";
   rowCount: number | null;
   selectedPriceRows: number | null;
@@ -605,6 +610,25 @@ function formatSignedPercent(value: number | null | undefined) {
   const percent = value * 100;
   const sign = percent > 0 ? "+" : "";
   return `${sign}${percent.toFixed(2)}%`;
+}
+
+function formatSignedPrice(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "--";
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${formatPrice(value)}`;
+}
+
+function priceChangeFromReturn(latestPrice: number | null | undefined, periodReturn: number | null | undefined) {
+  if (
+    typeof latestPrice !== "number" ||
+    !Number.isFinite(latestPrice) ||
+    typeof periodReturn !== "number" ||
+    !Number.isFinite(periodReturn) ||
+    periodReturn <= -1
+  ) {
+    return null;
+  }
+  return latestPrice - latestPrice / (1 + periodReturn);
 }
 
 function dailyReturnTextClass(value: number | null | undefined) {
@@ -3942,11 +3966,47 @@ export function MarketDataPanel() {
       symbols.map(async (symbol): Promise<DailyMarketQuoteRow> => {
         try {
           const profile = await fetchBigQueryAssetProfile(symbol, assetPriceBasis);
+          const latestYear = profile.summary.latest_date
+            ? profile.summary.latest_date.slice(0, 4)
+            : String(new Date().getFullYear());
+          let ytdReturn: number | null = null;
+          let ytdPriceChange: number | null = null;
+          let ytdStartDate: string | null = null;
+          let ytdStartPrice: number | null = null;
+
+          try {
+            const ytdHistory = await fetchBigQueryAssetHistory(profile.symbol, assetPriceBasis, {
+              startDate: `${latestYear}-01-01`,
+              endDate: profile.summary.latest_date || undefined,
+              limit: 400,
+            });
+            ytdReturn = ytdHistory.metrics.totalReturn;
+            ytdStartDate = ytdHistory.summary.first_date;
+            ytdStartPrice = ytdHistory.metrics.firstPrice;
+            ytdPriceChange =
+              typeof ytdHistory.metrics.latestPrice === "number" &&
+              Number.isFinite(ytdHistory.metrics.latestPrice) &&
+              typeof ytdHistory.metrics.firstPrice === "number" &&
+              Number.isFinite(ytdHistory.metrics.firstPrice)
+                ? ytdHistory.metrics.latestPrice - ytdHistory.metrics.firstPrice
+                : null;
+          } catch {
+            ytdReturn = null;
+            ytdPriceChange = null;
+            ytdStartDate = null;
+            ytdStartPrice = null;
+          }
+
           return {
             symbol: profile.symbol,
             latestDate: profile.summary.latest_date,
             latestPrice: profile.metrics.latestPrice,
             dailyReturn: profile.metrics.latestDailyReturn,
+            dailyPriceChange: priceChangeFromReturn(profile.metrics.latestPrice, profile.metrics.latestDailyReturn),
+            ytdReturn,
+            ytdPriceChange,
+            ytdStartDate,
+            ytdStartPrice,
             priceBasis: profile.priceBasis,
             rowCount: profile.summary.row_count,
             selectedPriceRows: profile.summary.selected_price_rows,
@@ -3958,6 +4018,11 @@ export function MarketDataPanel() {
             latestDate: null,
             latestPrice: null,
             dailyReturn: null,
+            dailyPriceChange: null,
+            ytdReturn: null,
+            ytdPriceChange: null,
+            ytdStartDate: null,
+            ytdStartPrice: null,
             priceBasis: assetPriceBasis,
             rowCount: null,
             selectedPriceRows: null,
@@ -4006,19 +4071,19 @@ export function MarketDataPanel() {
       note: dailyQuoteRows.length ? `成功 ${loadedDailyQuoteRows.length}，缺資料 ${failedDailyQuoteRows.length}` : bigQueryBadge,
     },
     {
+      label: "顯示標的",
+      value: dailyQuoteRows.length ? `${loadedDailyQuoteRows.length}/${dailyQuoteRows.length}` : "--",
+      note: "成功載入 / 輸入標的",
+    },
+    {
       label: "最新資料日",
-      value: bigQueryDiagnostics?.priceSummary.latest_date ?? "--",
-      note: "daily_prices 最新日期",
+      value: loadedDailyQuoteRows[0]?.latestDate ?? bigQueryDiagnostics?.priceSummary.latest_date ?? "--",
+      note: "最新交易日",
     },
     {
-      label: "可查商品",
-      value: `${formatCount(bigQueryDiagnostics?.priceSummary.symbol_count)} 檔`,
-      note: "BigQuery 商品覆蓋",
-    },
-    {
-      label: "資料筆數",
-      value: `${formatCount(bigQueryDiagnostics?.priceSummary.row_count)} 筆`,
-      note: "歷史價格深度",
+      label: "價格口徑",
+      value: assetPriceBasis === "raw" ? "Raw" : "Adjusted",
+      note: "可切換 Adj / Raw",
     },
   ];
 
@@ -4182,32 +4247,49 @@ export function MarketDataPanel() {
 
                     {isLoaded ? (
                       <>
-                        <div className="mt-4 grid grid-cols-2 gap-3">
-                          <div>
-                            <p className="text-[10px] text-slate-500">最新價格</p>
+                        <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3">
+                            <p className="text-[10px] text-slate-500">今日價格</p>
                             <p className="mt-1 text-2xl font-bold font-mono text-slate-100">
                               {formatPrice(row.latestPrice)}
                             </p>
+                            <p className="mt-1 text-[11px] text-slate-600">{row.latestDate ?? "--"}</p>
                           </div>
-                          <div className="text-right">
-                            <p className="text-[10px] text-slate-500">日漲跌幅</p>
+                          <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3">
+                            <p className="text-[10px] text-slate-500">前日漲跌</p>
                             <p className={`mt-1 text-2xl font-bold font-mono ${dailyReturnTextClass(row.dailyReturn)}`}>
                               {formatSignedPercent(row.dailyReturn)}
                             </p>
+                            <p className={`mt-1 text-[11px] font-mono ${dailyReturnTextClass(row.dailyReturn)}`}>
+                              {formatSignedPrice(row.dailyPriceChange)}
+                            </p>
+                          </div>
+                          <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3">
+                            <p className="text-[10px] text-slate-500">今年漲跌</p>
+                            <p className={`mt-1 text-2xl font-bold font-mono ${dailyReturnTextClass(row.ytdReturn)}`}>
+                              {formatSignedPercent(row.ytdReturn)}
+                            </p>
+                            <p className={`mt-1 text-[11px] font-mono ${dailyReturnTextClass(row.ytdReturn)}`}>
+                              {formatSignedPrice(row.ytdPriceChange)}
+                            </p>
                           </div>
                         </div>
-                        <div className="mt-4 grid grid-cols-3 gap-2 text-[11px]">
+                        <div className="mt-4 grid grid-cols-2 lg:grid-cols-4 gap-2 text-[11px]">
                           <div className="rounded-md border border-slate-800 bg-slate-950/60 p-2">
                             <p className="text-slate-600">資料日</p>
                             <p className="mt-1 font-mono text-slate-300">{row.latestDate ?? "--"}</p>
                           </div>
                           <div className="rounded-md border border-slate-800 bg-slate-950/60 p-2">
-                            <p className="text-slate-600">總筆數</p>
-                            <p className="mt-1 font-mono text-slate-300">{formatCount(row.rowCount)}</p>
+                            <p className="text-slate-600">YTD 起日</p>
+                            <p className="mt-1 font-mono text-slate-300">{row.ytdStartDate ?? "--"}</p>
                           </div>
                           <div className="rounded-md border border-slate-800 bg-slate-950/60 p-2">
-                            <p className="text-slate-600">有效價</p>
-                            <p className="mt-1 font-mono text-slate-300">{formatCount(row.selectedPriceRows)}</p>
+                            <p className="text-slate-600">YTD 起價</p>
+                            <p className="mt-1 font-mono text-slate-300">{formatPrice(row.ytdStartPrice)}</p>
+                          </div>
+                          <div className="rounded-md border border-slate-800 bg-slate-950/60 p-2">
+                            <p className="text-slate-600">價格口徑</p>
+                            <p className="mt-1 font-mono text-slate-300">{row.priceBasis === "raw" ? "Raw" : "Adj"}</p>
                           </div>
                         </div>
                       </>
@@ -4223,7 +4305,7 @@ export function MarketDataPanel() {
             </div>
           ) : (
             <div className="rounded-lg border border-dashed border-cyan-900/60 bg-cyan-950/10 p-5 text-xs text-slate-400">
-              輸入代號後按「讀取今日行情」，這裡會顯示最新價、日漲跌幅與資料日。
+              輸入代號後按「讀取今日行情」，這裡會顯示今日價格、前日漲跌與今年漲跌。
             </div>
           )}
         </section>
