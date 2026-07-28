@@ -38,7 +38,6 @@ import {
   fetchBigQueryAssetHistory,
   fetchBigQueryAssetProfile,
   fetchBigQueryAssets,
-  fetchBigQueryQuoteCards,
   fetchLatestDecisionFunnelFromBigQuery,
   fetchLatestExecutionFillsFromBigQuery,
   fetchMarketAlertWarehouseAudit,
@@ -464,7 +463,6 @@ import type {
   BigQueryAsset,
   BigQueryAssetHistoryResponse,
   BigQueryAssetProfileResponse,
-  BigQueryQuoteCard,
   ResearchTaskWarehouseAuditRecord,
   ResearchTaskWarehouseStatus,
 } from "@/types/market";
@@ -607,29 +605,6 @@ type DailyMarketQuoteRow = {
   errorMessage?: string;
 };
 
-function dailyQuoteRowFromBigQueryQuote(
-  quote: BigQueryQuoteCard,
-  priceBasis: "adjusted" | "raw",
-): DailyMarketQuoteRow {
-  const hasPrice = typeof quote.latest_price === "number" && Number.isFinite(quote.latest_price);
-  return {
-    symbol: quote.symbol,
-    latestDate: quote.latest_date,
-    latestPrice: quote.latest_price,
-    dailyReturn: quote.daily_return,
-    dailyPriceChange: quote.daily_price_change,
-    ytdReturn: quote.ytd_return,
-    ytdPriceChange: quote.ytd_price_change,
-    ytdStartDate: quote.ytd_start_date,
-    ytdStartPrice: quote.ytd_start_price,
-    priceBasis,
-    rowCount: quote.row_count,
-    selectedPriceRows: quote.selected_price_rows,
-    status: hasPrice ? "loaded" : "error",
-    errorMessage: hasPrice ? undefined : "BigQuery 目前沒有這個價格口徑的可用行情。",
-  };
-}
-
 function finiteMarketNumber(value: number | null | undefined) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
@@ -701,7 +676,7 @@ async function loadDailyRowsFromHistoryFallback(
   const settledRows = await Promise.allSettled(
     uniqueSymbols.map((symbol) =>
       withClientTimeout(
-        fetchBigQueryAssetHistory(symbol, priceBasis, { limit: 2000 }),
+        fetchBigQueryAssetHistory(symbol, priceBasis, { limit: 400 }),
         15000,
         `BigQuery ${symbol} 歷史資料讀取逾時：15 秒內沒有收到回應。`,
       ),
@@ -4079,63 +4054,16 @@ export function MarketDataPanel() {
     const requestedSymbols = parseSymbolList(symbols.join(" "));
 
     try {
-      const response = await withClientTimeout(
-        fetchBigQueryQuoteCards(assetPriceBasis, 500),
-        12000,
-        "BigQuery 全部行情讀取逾時：前端 12 秒內沒有收到回應。",
-      );
-      const quoteBySymbol = new Map(response.quotes.map((quote) => [quote.symbol.toUpperCase(), quote]));
-      const rows = requestedSymbols.map((symbol): DailyMarketQuoteRow => {
-        const quote = quoteBySymbol.get(symbol.toUpperCase());
-        if (quote) return dailyQuoteRowFromBigQueryQuote(quote, response.priceBasis);
-        return {
-          symbol,
-          latestDate: null,
-          latestPrice: null,
-          dailyReturn: null,
-          dailyPriceChange: null,
-          ytdReturn: null,
-          ytdPriceChange: null,
-          ytdStartDate: null,
-          ytdStartPrice: null,
-          priceBasis: response.priceBasis,
-          rowCount: null,
-          selectedPriceRows: null,
-          status: "error",
-          errorMessage: "BigQuery daily_prices 未找到此標的。",
-        };
-      });
+      const rows = await loadDailyRowsFromHistoryFallback(requestedSymbols, assetPriceBasis);
       const loadedCount = rows.filter((row) => row.status === "loaded").length;
       const errorCount = rows.length - loadedCount;
       setDailyQuoteRows(rows);
       setDailyQuoteError(errorCount ? `${errorCount} 檔標的沒有可用資料，已在下方以缺資料卡標示。` : "");
       setDailyQuoteStatus(loadedCount ? "loaded" : "error");
     } catch (err: unknown) {
-      const primaryError = err instanceof Error ? err.message : String(err);
-      try {
-        const fallbackRows = await loadDailyRowsFromHistoryFallback(requestedSymbols, assetPriceBasis);
-        const loadedCount = fallbackRows.filter((row) => row.status === "loaded").length;
-        const errorCount = fallbackRows.length - loadedCount;
-        setDailyQuoteRows(fallbackRows);
-        setDailyQuoteError(
-          [
-            `批次行情 API 未成功，已改用單檔歷史資料備援。`,
-            primaryError,
-            errorCount ? `${errorCount} 檔標的仍沒有可用資料，已在下方以缺資料卡標示。` : "",
-          ].filter(Boolean).join("\n"),
-        );
-        setDailyQuoteStatus(loadedCount ? "loaded" : "error");
-      } catch (fallbackErr: unknown) {
-        setDailyQuoteRows([]);
-        setDailyQuoteError(
-          [
-            primaryError,
-            "備援讀取也失敗：",
-            fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr),
-          ].join("\n"),
-        );
-        setDailyQuoteStatus("error");
-      }
+      setDailyQuoteRows([]);
+      setDailyQuoteError(err instanceof Error ? err.message : String(err));
+      setDailyQuoteStatus("error");
     }
   }, [assetPriceBasis]);
   const handleLoadDailyQuotes = async () => {
@@ -4149,14 +4077,14 @@ export function MarketDataPanel() {
     async function loadAllStoredQuotes() {
       setDailyQuoteAutoLoadStatus("loading");
       try {
-        const response = await withClientTimeout(
-          fetchBigQueryQuoteCards(assetPriceBasis, 500),
-          12000,
-          "BigQuery 全部行情讀取逾時：前端 12 秒內沒有收到回應。",
+        const assetResponse = await withClientTimeout(
+          fetchBigQueryAssets("", 500),
+          10000,
+          "BigQuery 商品清單讀取逾時：前端 10 秒內沒有收到回應。",
         );
         if (ignore) return;
 
-        const symbols = response.quotes.map((quote) => quote.symbol).filter(Boolean);
+        const symbols = assetResponse.assets.map((asset) => asset.symbol).filter(Boolean);
         if (!symbols.length) {
           setDailyQuoteError("BigQuery daily_prices 目前沒有可顯示標的。");
           setDailyQuoteStatus("error");
@@ -4165,7 +4093,8 @@ export function MarketDataPanel() {
         }
 
         setDailyQuoteSymbolsText(symbols.join(" "));
-        const rows = response.quotes.map((quote) => dailyQuoteRowFromBigQueryQuote(quote, response.priceBasis));
+        const rows = await loadDailyRowsFromHistoryFallback(symbols, assetPriceBasis);
+        if (ignore) return;
         const loadedCount = rows.filter((row) => row.status === "loaded").length;
         const errorCount = rows.length - loadedCount;
         setDailyQuoteRows(rows);
@@ -4174,54 +4103,9 @@ export function MarketDataPanel() {
         setDailyQuoteAutoLoadStatus("done");
       } catch (err: unknown) {
         if (ignore) return;
-        const primaryError = err instanceof Error ? err.message : String(err);
-        try {
-          const assetResponse = await withClientTimeout(
-            fetchBigQueryAssets("", 500),
-            10000,
-            "BigQuery 商品清單讀取逾時：前端 10 秒內沒有收到回應。",
-          );
-          if (ignore) return;
-          const symbols = assetResponse.assets.map((asset) => asset.symbol).filter(Boolean);
-          if (!symbols.length) {
-            setDailyQuoteError(
-              [
-                "批次行情 API 未成功，且 BigQuery 商品清單目前沒有可顯示標的。",
-                primaryError,
-              ].join("\n"),
-            );
-            setDailyQuoteStatus("error");
-            setDailyQuoteAutoLoadStatus("done");
-            return;
-          }
-
-          const fallbackRows = await loadDailyRowsFromHistoryFallback(symbols, assetPriceBasis);
-          if (ignore) return;
-          const loadedCount = fallbackRows.filter((row) => row.status === "loaded").length;
-          const errorCount = fallbackRows.length - loadedCount;
-          setDailyQuoteSymbolsText(symbols.join(" "));
-          setDailyQuoteRows(fallbackRows);
-          setDailyQuoteError(
-            [
-              `批次行情 API 未成功，已改用單檔歷史資料備援。`,
-              primaryError,
-              errorCount ? `${errorCount} 檔標的仍沒有可用資料，已在下方以缺資料卡標示。` : "",
-            ].filter(Boolean).join("\n"),
-          );
-          setDailyQuoteStatus(loadedCount ? "loaded" : "error");
-          setDailyQuoteAutoLoadStatus("done");
-        } catch (fallbackErr: unknown) {
-          if (ignore) return;
-          setDailyQuoteError(
-            [
-              primaryError,
-              "備援讀取也失敗：",
-              fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr),
-            ].join("\n"),
-          );
-          setDailyQuoteStatus("error");
-          setDailyQuoteAutoLoadStatus("done");
-        }
+        setDailyQuoteError(err instanceof Error ? err.message : String(err));
+        setDailyQuoteStatus("error");
+        setDailyQuoteAutoLoadStatus("done");
       }
     }
 
@@ -4265,10 +4149,14 @@ export function MarketDataPanel() {
           ? "自動載入中"
           : dailyQuoteStatus === "loaded"
             ? "已載入"
-            : hasBigQueryCredentials
-              ? "可讀取"
-              : "待設定",
-      note: dailyQuoteRows.length ? `成功 ${loadedDailyQuoteRows.length}，缺資料 ${failedDailyQuoteRows.length}` : bigQueryBadge,
+              : hasBigQueryCredentials
+                ? "可讀取"
+                : "待設定",
+      note: dailyQuoteRows.length
+        ? `成功 ${loadedDailyQuoteRows.length}，缺資料 ${failedDailyQuoteRows.length}`
+        : dailyQuoteAutoLoadStatus === "loading"
+          ? "清單載入模式，逾時保護已啟用"
+          : bigQueryBadge,
     },
     {
       label: "BigQuery 標的",
@@ -4508,7 +4396,7 @@ export function MarketDataPanel() {
               {dailyQuoteStatus === "error"
                 ? "目前沒有可顯示的行情卡。上方錯誤訊息會說明是 API 逾時、查詢失敗，或 BigQuery 沒有可用價格。"
                 : dailyQuoteAutoLoadStatus === "loading" || dailyQuoteStatus === "loading"
-                  ? "正在從 BigQuery 載入全部標的；載入後會顯示今日價格、前日漲跌與今年漲跌。"
+                  ? "正在從 BigQuery 商品清單載入每一檔資料；載入後會顯示今日價格、前日漲跌與今年漲跌。"
                   : "尚未載入行情。按「重新讀取」後會從 BigQuery 讀取全部或指定標的。"}
             </div>
           )}
