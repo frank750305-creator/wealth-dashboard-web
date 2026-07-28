@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useMarketSources } from "@/hooks/useMarketSources";
 import { assetComparisonMemo } from "@/lib/watchlistMemo";
 import {
@@ -785,6 +785,7 @@ export function MarketDataPanel() {
   const [dailyQuoteRows, setDailyQuoteRows] = useState<DailyMarketQuoteRow[]>([]);
   const [dailyQuoteStatus, setDailyQuoteStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [dailyQuoteError, setDailyQuoteError] = useState("");
+  const [dailyQuoteAutoLoadStatus, setDailyQuoteAutoLoadStatus] = useState<"idle" | "loading" | "done">("idle");
   const [activeCommandAreaId, setActiveCommandAreaId] = useState<PlatformCommandProductNavigatorActiveArea>("all");
   const sources = data?.sources ?? [];
   const securedCount = sources.filter((source) => source.status !== "needs_secret").length;
@@ -3951,8 +3952,7 @@ export function MarketDataPanel() {
       return nextPresets;
     });
   };
-  const handleLoadDailyQuotes = async () => {
-    const symbols = parseSymbolList(dailyQuoteSymbolsText);
+  const loadDailyQuoteSymbols = useCallback(async (symbols: string[]) => {
     if (!symbols.length) {
       setDailyQuoteError("請至少輸入一個商品代號。");
       setDailyQuoteStatus("error");
@@ -4037,7 +4037,46 @@ export function MarketDataPanel() {
     setDailyQuoteRows(rows);
     setDailyQuoteError(errorCount ? `${errorCount} 檔標的沒有可用資料，已在下方以缺資料卡標示。` : "");
     setDailyQuoteStatus(loadedCount ? "loaded" : "error");
+  }, [assetPriceBasis]);
+  const handleLoadDailyQuotes = async () => {
+    await loadDailyQuoteSymbols(parseSymbolList(dailyQuoteSymbolsText));
   };
+  useEffect(() => {
+    if (!hasBigQueryCredentials || dailyQuoteAutoLoadStatus !== "idle") return;
+
+    let ignore = false;
+
+    async function loadAllStoredQuotes() {
+      setDailyQuoteAutoLoadStatus("loading");
+      try {
+        const response = await fetchBigQueryAssets("", 500);
+        if (ignore) return;
+
+        const symbols = response.assets.map((asset) => asset.symbol).filter(Boolean);
+        if (!symbols.length) {
+          setDailyQuoteError("BigQuery daily_prices 目前沒有可顯示標的。");
+          setDailyQuoteStatus("error");
+          setDailyQuoteAutoLoadStatus("done");
+          return;
+        }
+
+        setDailyQuoteSymbolsText(symbols.join(" "));
+        await loadDailyQuoteSymbols(symbols);
+        if (!ignore) setDailyQuoteAutoLoadStatus("done");
+      } catch (err: unknown) {
+        if (ignore) return;
+        setDailyQuoteError(err instanceof Error ? err.message : String(err));
+        setDailyQuoteStatus("error");
+        setDailyQuoteAutoLoadStatus("done");
+      }
+    }
+
+    void loadAllStoredQuotes();
+
+    return () => {
+      ignore = true;
+    };
+  }, [hasBigQueryCredentials, dailyQuoteAutoLoadStatus, loadDailyQuoteSymbols]);
   const isOverviewWorkspace = activeMarketWorkspace === "quotes";
   const isAssetsWorkspace = activeMarketWorkspace === "portfolio";
   const isPortfolioWorkspace = activeMarketWorkspace === "portfolio";
@@ -4067,13 +4106,20 @@ export function MarketDataPanel() {
   const dailyMarketSummaryCards = [
     {
       label: "行情狀態",
-      value: dailyQuoteStatus === "loaded" ? "已載入" : hasBigQueryCredentials ? "可讀取" : "待設定",
+      value:
+        dailyQuoteAutoLoadStatus === "loading"
+          ? "自動載入中"
+          : dailyQuoteStatus === "loaded"
+            ? "已載入"
+            : hasBigQueryCredentials
+              ? "可讀取"
+              : "待設定",
       note: dailyQuoteRows.length ? `成功 ${loadedDailyQuoteRows.length}，缺資料 ${failedDailyQuoteRows.length}` : bigQueryBadge,
     },
     {
-      label: "顯示標的",
+      label: "BigQuery 標的",
       value: dailyQuoteRows.length ? `${loadedDailyQuoteRows.length}/${dailyQuoteRows.length}` : "--",
-      note: "成功載入 / 輸入標的",
+      note: `資料庫共 ${formatCount(bigQueryDiagnostics?.priceSummary.symbol_count)} 檔`,
     },
     {
       label: "最新資料日",
@@ -4164,7 +4210,7 @@ export function MarketDataPanel() {
               <p className="text-[10px] font-mono text-cyan-300">DAILY MARKET</p>
               <h3 className="mt-1 text-base font-bold text-slate-100">今日行情</h3>
               <p className="text-[11px] text-slate-500 mt-0.5">
-                每個代號以獨立資料卡顯示；有資料先顯示，缺資料另外標示。
+                進入畫面會自動載入 BigQuery 全部標的；每張卡顯示今日價格、前日漲跌與今年漲跌。
               </p>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-[1fr_110px_auto] gap-2 text-xs xl:min-w-[720px]">
@@ -4193,7 +4239,7 @@ export function MarketDataPanel() {
                 disabled={!hasBigQueryCredentials || dailyQuoteStatus === "loading"}
                 className="px-3 py-2 rounded-md bg-cyan-700 hover:bg-cyan-600 text-white font-bold disabled:cursor-not-allowed disabled:bg-slate-900 disabled:text-slate-600"
               >
-                {dailyQuoteStatus === "loading" ? "讀取中" : "讀取今日行情"}
+                {dailyQuoteStatus === "loading" ? "讀取中" : "重新讀取"}
               </button>
             </div>
           </div>
@@ -4305,7 +4351,7 @@ export function MarketDataPanel() {
             </div>
           ) : (
             <div className="rounded-lg border border-dashed border-cyan-900/60 bg-cyan-950/10 p-5 text-xs text-slate-400">
-              輸入代號後按「讀取今日行情」，這裡會顯示今日價格、前日漲跌與今年漲跌。
+              正在準備從 BigQuery 載入全部標的；載入後會顯示今日價格、前日漲跌與今年漲跌。
             </div>
           )}
         </section>

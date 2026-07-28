@@ -185,7 +185,7 @@ def search_bigquery_assets(*, query: Optional[str] = None, limit: int = 20) -> D
     client = _bigquery_client(bigquery)
     price_table = _table_path("BIGQUERY_PRICE_TABLE", DEFAULT_PRICE_TABLE)
     clean_query = (query or "").strip().lower()
-    bounded_limit = max(1, min(int(limit or 20), 50))
+    bounded_limit = max(1, min(int(limit or 20), 500))
 
     where_clause = ""
     query_parameters = [
