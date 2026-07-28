@@ -54,6 +54,38 @@ import type {
   TradeTicketWarehouseSyncResponse,
 } from "@/types/market";
 
+async function fetchJsonWithTimeout<T>(
+  url: string,
+  errorPrefix: string,
+  timeoutMs = 20000,
+): Promise<T> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`${errorPrefix} (代碼: ${response.status})\n${errText}`);
+    }
+
+    return response.json();
+  } catch (err: unknown) {
+    const errorName = err instanceof Error ? err.name : "";
+    if (errorName === "AbortError") {
+      throw new Error(`${errorPrefix}逾時：${Math.round(timeoutMs / 1000)} 秒內沒有收到 Vercel API 回應，請稍後重試或檢查部署 Logs。`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 export async function fetchMarketSources(): Promise<MarketSourcesResponse> {
   const response = await fetch("/api/v1/market/sources", {
     method: "GET",
@@ -787,17 +819,11 @@ export async function fetchBigQueryAssets(query = "", limit = 20): Promise<BigQu
     params.set("q", query.trim());
   }
 
-  const response = await fetch(`/api/v1/market/bigquery/assets?${params.toString()}`, {
-    method: "GET",
-    headers: { "Content-Type": "application/json" },
-  });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`BigQuery 商品搜尋異常 (代碼: ${response.status})\n${errText}`);
-  }
-
-  return response.json();
+  return fetchJsonWithTimeout<BigQueryAssetSearchResponse>(
+    `/api/v1/market/bigquery/assets?${params.toString()}`,
+    "BigQuery 商品搜尋異常",
+    10000,
+  );
 }
 
 export async function fetchBigQueryQuoteCards(
@@ -809,17 +835,11 @@ export async function fetchBigQueryQuoteCards(
     limit: String(limit),
   });
 
-  const response = await fetch(`/api/v1/market/bigquery/quotes?${params.toString()}`, {
-    method: "GET",
-    headers: { "Content-Type": "application/json" },
-  });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`BigQuery 全部行情讀取異常 (代碼: ${response.status})\n${errText}`);
-  }
-
-  return response.json();
+  return fetchJsonWithTimeout<BigQueryQuoteCardsResponse>(
+    `/api/v1/market/bigquery/quotes?${params.toString()}`,
+    "BigQuery 全部行情讀取異常",
+    12000,
+  );
 }
 
 export async function fetchBigQueryAssetProfile(
@@ -832,17 +852,11 @@ export async function fetchBigQueryAssetProfile(
     recent_limit: "30",
   });
 
-  const response = await fetch(`/api/v1/market/bigquery/assets/${encodeURIComponent(cleanSymbol)}?${params.toString()}`, {
-    method: "GET",
-    headers: { "Content-Type": "application/json" },
-  });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`BigQuery 商品詳情讀取異常 (代碼: ${response.status})\n${errText}`);
-  }
-
-  return response.json();
+  return fetchJsonWithTimeout<BigQueryAssetProfileResponse>(
+    `/api/v1/market/bigquery/assets/${encodeURIComponent(cleanSymbol)}?${params.toString()}`,
+    "BigQuery 商品詳情讀取異常",
+    15000,
+  );
 }
 
 export async function fetchBigQueryAssetHistory(
@@ -862,17 +876,11 @@ export async function fetchBigQueryAssetHistory(
     params.set("end_date", options.endDate);
   }
 
-  const response = await fetch(`/api/v1/market/bigquery/assets/${encodeURIComponent(cleanSymbol)}/history?${params.toString()}`, {
-    method: "GET",
-    headers: { "Content-Type": "application/json" },
-  });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`BigQuery 歷史資料讀取異常 (代碼: ${response.status})\n${errText}`);
-  }
-
-  return response.json();
+  return fetchJsonWithTimeout<BigQueryAssetHistoryResponse>(
+    `/api/v1/market/bigquery/assets/${encodeURIComponent(cleanSymbol)}/history?${params.toString()}`,
+    "BigQuery 歷史資料讀取異常",
+    15000,
+  );
 }
 
 export async function analyzePortfolioFromBigQuery(

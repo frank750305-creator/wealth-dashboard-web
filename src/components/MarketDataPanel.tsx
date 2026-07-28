@@ -630,6 +630,86 @@ function dailyQuoteRowFromBigQueryQuote(
   };
 }
 
+function finiteMarketNumber(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function dailyQuoteRowFromHistory(
+  symbol: string,
+  history: BigQueryAssetHistoryResponse,
+  priceBasis: "adjusted" | "raw",
+): DailyMarketQuoteRow {
+  const validPrices = history.prices
+    .filter((point) => point.date && finiteMarketNumber(point.selected_price) !== null && Number(point.selected_price) > 0)
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const latest = validPrices[validPrices.length - 1];
+  const previous = validPrices[validPrices.length - 2];
+  const latestPrice = finiteMarketNumber(latest?.selected_price);
+  const previousPrice = finiteMarketNumber(previous?.selected_price);
+  const latestYear = latest?.date?.slice(0, 4) ?? "";
+  const ytdStart = validPrices.find((point) => point.date?.startsWith(latestYear));
+  const ytdStartPrice = finiteMarketNumber(ytdStart?.selected_price);
+  const dailyReturn =
+    latestPrice !== null && previousPrice !== null && previousPrice > 0
+      ? latestPrice / previousPrice - 1
+      : finiteMarketNumber(latest?.daily_return);
+  const ytdReturn =
+    latestPrice !== null && ytdStartPrice !== null && ytdStartPrice > 0
+      ? latestPrice / ytdStartPrice - 1
+      : null;
+
+  return {
+    symbol: history.symbol || symbol,
+    latestDate: latest?.date ?? history.summary.latest_date,
+    latestPrice,
+    dailyReturn,
+    dailyPriceChange: latestPrice !== null && previousPrice !== null ? latestPrice - previousPrice : null,
+    ytdReturn,
+    ytdPriceChange: latestPrice !== null && ytdStartPrice !== null ? latestPrice - ytdStartPrice : null,
+    ytdStartDate: ytdStart?.date ?? null,
+    ytdStartPrice,
+    priceBasis,
+    rowCount: history.summary.row_count,
+    selectedPriceRows: history.summary.selected_price_rows,
+    status: latestPrice !== null ? "loaded" : "error",
+    errorMessage: latestPrice !== null ? undefined : "BigQuery 歷史資料沒有可用價格。",
+  };
+}
+
+async function loadDailyRowsFromHistoryFallback(
+  symbols: string[],
+  priceBasis: "adjusted" | "raw",
+): Promise<DailyMarketQuoteRow[]> {
+  const uniqueSymbols = parseSymbolList(symbols.join(" ")).slice(0, 500);
+  const settledRows = await Promise.allSettled(
+    uniqueSymbols.map((symbol) => fetchBigQueryAssetHistory(symbol, priceBasis, { limit: 2000 })),
+  );
+
+  return uniqueSymbols.map((symbol, index) => {
+    const result = settledRows[index];
+    if (result.status === "fulfilled") {
+      return dailyQuoteRowFromHistory(symbol, result.value, priceBasis);
+    }
+
+    return {
+      symbol,
+      latestDate: null,
+      latestPrice: null,
+      dailyReturn: null,
+      dailyPriceChange: null,
+      ytdReturn: null,
+      ytdPriceChange: null,
+      ytdStartDate: null,
+      ytdStartPrice: null,
+      priceBasis,
+      rowCount: null,
+      selectedPriceRows: null,
+      status: "error",
+      errorMessage: result.reason instanceof Error ? result.reason.message : String(result.reason),
+    };
+  });
+}
+
 function formatSignedPercent(value: number | null | undefined) {
   if (typeof value !== "number" || !Number.isFinite(value)) return "--";
   const percent = value * 100;
@@ -3973,10 +4053,10 @@ export function MarketDataPanel() {
 
     setDailyQuoteStatus("loading");
     setDailyQuoteError("");
+    const requestedSymbols = parseSymbolList(symbols.join(" "));
 
     try {
       const response = await fetchBigQueryQuoteCards(assetPriceBasis, 500);
-      const requestedSymbols = parseSymbolList(symbols.join(" "));
       const quoteBySymbol = new Map(response.quotes.map((quote) => [quote.symbol.toUpperCase(), quote]));
       const rows = requestedSymbols.map((symbol): DailyMarketQuoteRow => {
         const quote = quoteBySymbol.get(symbol.toUpperCase());
@@ -4004,9 +4084,31 @@ export function MarketDataPanel() {
       setDailyQuoteError(errorCount ? `${errorCount} 檔標的沒有可用資料，已在下方以缺資料卡標示。` : "");
       setDailyQuoteStatus(loadedCount ? "loaded" : "error");
     } catch (err: unknown) {
-      setDailyQuoteRows([]);
-      setDailyQuoteError(err instanceof Error ? err.message : String(err));
-      setDailyQuoteStatus("error");
+      const primaryError = err instanceof Error ? err.message : String(err);
+      try {
+        const fallbackRows = await loadDailyRowsFromHistoryFallback(requestedSymbols, assetPriceBasis);
+        const loadedCount = fallbackRows.filter((row) => row.status === "loaded").length;
+        const errorCount = fallbackRows.length - loadedCount;
+        setDailyQuoteRows(fallbackRows);
+        setDailyQuoteError(
+          [
+            `批次行情 API 未成功，已改用單檔歷史資料備援。`,
+            primaryError,
+            errorCount ? `${errorCount} 檔標的仍沒有可用資料，已在下方以缺資料卡標示。` : "",
+          ].filter(Boolean).join("\n"),
+        );
+        setDailyQuoteStatus(loadedCount ? "loaded" : "error");
+      } catch (fallbackErr: unknown) {
+        setDailyQuoteRows([]);
+        setDailyQuoteError(
+          [
+            primaryError,
+            "備援讀取也失敗：",
+            fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr),
+          ].join("\n"),
+        );
+        setDailyQuoteStatus("error");
+      }
     }
   }, [assetPriceBasis]);
   const handleLoadDailyQuotes = async () => {
@@ -4041,9 +4143,50 @@ export function MarketDataPanel() {
         setDailyQuoteAutoLoadStatus("done");
       } catch (err: unknown) {
         if (ignore) return;
-        setDailyQuoteError(err instanceof Error ? err.message : String(err));
-        setDailyQuoteStatus("error");
-        setDailyQuoteAutoLoadStatus("done");
+        const primaryError = err instanceof Error ? err.message : String(err);
+        try {
+          const assetResponse = await fetchBigQueryAssets("", 500);
+          if (ignore) return;
+          const symbols = assetResponse.assets.map((asset) => asset.symbol).filter(Boolean);
+          if (!symbols.length) {
+            setDailyQuoteError(
+              [
+                "批次行情 API 未成功，且 BigQuery 商品清單目前沒有可顯示標的。",
+                primaryError,
+              ].join("\n"),
+            );
+            setDailyQuoteStatus("error");
+            setDailyQuoteAutoLoadStatus("done");
+            return;
+          }
+
+          const fallbackRows = await loadDailyRowsFromHistoryFallback(symbols, assetPriceBasis);
+          if (ignore) return;
+          const loadedCount = fallbackRows.filter((row) => row.status === "loaded").length;
+          const errorCount = fallbackRows.length - loadedCount;
+          setDailyQuoteSymbolsText(symbols.join(" "));
+          setDailyQuoteRows(fallbackRows);
+          setDailyQuoteError(
+            [
+              `批次行情 API 未成功，已改用單檔歷史資料備援。`,
+              primaryError,
+              errorCount ? `${errorCount} 檔標的仍沒有可用資料，已在下方以缺資料卡標示。` : "",
+            ].filter(Boolean).join("\n"),
+          );
+          setDailyQuoteStatus(loadedCount ? "loaded" : "error");
+          setDailyQuoteAutoLoadStatus("done");
+        } catch (fallbackErr: unknown) {
+          if (ignore) return;
+          setDailyQuoteError(
+            [
+              primaryError,
+              "備援讀取也失敗：",
+              fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr),
+            ].join("\n"),
+          );
+          setDailyQuoteStatus("error");
+          setDailyQuoteAutoLoadStatus("done");
+        }
       }
     }
 
@@ -4327,7 +4470,11 @@ export function MarketDataPanel() {
             </div>
           ) : (
             <div className="rounded-lg border border-dashed border-cyan-900/60 bg-cyan-950/10 p-5 text-xs text-slate-400">
-              正在準備從 BigQuery 載入全部標的；載入後會顯示今日價格、前日漲跌與今年漲跌。
+              {dailyQuoteStatus === "error"
+                ? "目前沒有可顯示的行情卡。上方錯誤訊息會說明是 API 逾時、查詢失敗，或 BigQuery 沒有可用價格。"
+                : dailyQuoteAutoLoadStatus === "loading" || dailyQuoteStatus === "loading"
+                  ? "正在從 BigQuery 載入全部標的；載入後會顯示今日價格、前日漲跌與今年漲跌。"
+                  : "尚未載入行情。按「重新讀取」後會從 BigQuery 讀取全部或指定標的。"}
             </div>
           )}
         </section>
