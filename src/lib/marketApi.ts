@@ -60,9 +60,8 @@ async function fetchJsonWithTimeout<T>(
   timeoutMs = 20000,
 ): Promise<T> {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const requestPromise = async () => {
     const response = await fetch(url, {
       method: "GET",
       headers: { "Content-Type": "application/json" },
@@ -75,14 +74,22 @@ async function fetchJsonWithTimeout<T>(
     }
 
     return response.json();
-  } catch (err: unknown) {
-    const errorName = err instanceof Error ? err.name : "";
-    if (errorName === "AbortError") {
-      throw new Error(`${errorPrefix}逾時：${Math.round(timeoutMs / 1000)} 秒內沒有收到 Vercel API 回應，請稍後重試或檢查部署 Logs。`);
-    }
-    throw err;
+  };
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      controller.abort();
+      reject(
+        new Error(
+          `${errorPrefix}逾時：${Math.round(timeoutMs / 1000)} 秒內沒有收到 Vercel API 回應，請稍後重試或檢查部署 Logs。`,
+        ),
+      );
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([requestPromise(), timeoutPromise]);
   } finally {
-    clearTimeout(timeoutId);
+    if (timeoutId) clearTimeout(timeoutId);
   }
 }
 
