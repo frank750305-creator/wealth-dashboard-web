@@ -120,6 +120,32 @@ export type BigQueryAssetSearchResponse = {
   assets: BigQueryAsset[];
 };
 
+export type BigQueryQuoteCard = {
+  symbol: string;
+  first_date: string | null;
+  latest_any_date: string | null;
+  latest_date: string | null;
+  latest_price: number | null;
+  previous_date: string | null;
+  previous_price: number | null;
+  daily_return: number | null;
+  daily_price_change: number | null;
+  ytd_start_date: string | null;
+  ytd_start_price: number | null;
+  ytd_return: number | null;
+  ytd_price_change: number | null;
+  row_count: number;
+  selected_price_rows: number;
+};
+
+export type BigQueryQuoteCardsResponse = {
+  generatedAt: string;
+  status: Omit<BigQueryMarketStatus, "generatedAt">;
+  priceBasis: "adjusted" | "raw";
+  limit: number;
+  quotes: BigQueryQuoteCard[];
+};
+
 export type BigQueryAssetProfileSummary = {
   first_date: string | null;
   latest_date: string | null;

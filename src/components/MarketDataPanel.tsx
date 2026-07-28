@@ -38,6 +38,7 @@ import {
   fetchBigQueryAssetHistory,
   fetchBigQueryAssetProfile,
   fetchBigQueryAssets,
+  fetchBigQueryQuoteCards,
   fetchLatestDecisionFunnelFromBigQuery,
   fetchLatestExecutionFillsFromBigQuery,
   fetchMarketAlertWarehouseAudit,
@@ -463,6 +464,7 @@ import type {
   BigQueryAsset,
   BigQueryAssetHistoryResponse,
   BigQueryAssetProfileResponse,
+  BigQueryQuoteCard,
   ResearchTaskWarehouseAuditRecord,
   ResearchTaskWarehouseStatus,
 } from "@/types/market";
@@ -605,6 +607,29 @@ type DailyMarketQuoteRow = {
   errorMessage?: string;
 };
 
+function dailyQuoteRowFromBigQueryQuote(
+  quote: BigQueryQuoteCard,
+  priceBasis: "adjusted" | "raw",
+): DailyMarketQuoteRow {
+  const hasPrice = typeof quote.latest_price === "number" && Number.isFinite(quote.latest_price);
+  return {
+    symbol: quote.symbol,
+    latestDate: quote.latest_date,
+    latestPrice: quote.latest_price,
+    dailyReturn: quote.daily_return,
+    dailyPriceChange: quote.daily_price_change,
+    ytdReturn: quote.ytd_return,
+    ytdPriceChange: quote.ytd_price_change,
+    ytdStartDate: quote.ytd_start_date,
+    ytdStartPrice: quote.ytd_start_price,
+    priceBasis,
+    rowCount: quote.row_count,
+    selectedPriceRows: quote.selected_price_rows,
+    status: hasPrice ? "loaded" : "error",
+    errorMessage: hasPrice ? undefined : "BigQuery 目前沒有這個價格口徑的可用行情。",
+  };
+}
+
 function formatSignedPercent(value: number | null | undefined) {
   if (typeof value !== "number" || !Number.isFinite(value)) return "--";
   const percent = value * 100;
@@ -616,19 +641,6 @@ function formatSignedPrice(value: number | null | undefined) {
   if (typeof value !== "number" || !Number.isFinite(value)) return "--";
   const sign = value > 0 ? "+" : "";
   return `${sign}${formatPrice(value)}`;
-}
-
-function priceChangeFromReturn(latestPrice: number | null | undefined, periodReturn: number | null | undefined) {
-  if (
-    typeof latestPrice !== "number" ||
-    !Number.isFinite(latestPrice) ||
-    typeof periodReturn !== "number" ||
-    !Number.isFinite(periodReturn) ||
-    periodReturn <= -1
-  ) {
-    return null;
-  }
-  return latestPrice - latestPrice / (1 + periodReturn);
 }
 
 function dailyReturnTextClass(value: number | null | undefined) {
@@ -3962,81 +3974,40 @@ export function MarketDataPanel() {
     setDailyQuoteStatus("loading");
     setDailyQuoteError("");
 
-    const rows = await Promise.all(
-      symbols.map(async (symbol): Promise<DailyMarketQuoteRow> => {
-        try {
-          const profile = await fetchBigQueryAssetProfile(symbol, assetPriceBasis);
-          const latestYear = profile.summary.latest_date
-            ? profile.summary.latest_date.slice(0, 4)
-            : String(new Date().getFullYear());
-          let ytdReturn: number | null = null;
-          let ytdPriceChange: number | null = null;
-          let ytdStartDate: string | null = null;
-          let ytdStartPrice: number | null = null;
-
-          try {
-            const ytdHistory = await fetchBigQueryAssetHistory(profile.symbol, assetPriceBasis, {
-              startDate: `${latestYear}-01-01`,
-              endDate: profile.summary.latest_date || undefined,
-              limit: 400,
-            });
-            ytdReturn = ytdHistory.metrics.totalReturn;
-            ytdStartDate = ytdHistory.summary.first_date;
-            ytdStartPrice = ytdHistory.metrics.firstPrice;
-            ytdPriceChange =
-              typeof ytdHistory.metrics.latestPrice === "number" &&
-              Number.isFinite(ytdHistory.metrics.latestPrice) &&
-              typeof ytdHistory.metrics.firstPrice === "number" &&
-              Number.isFinite(ytdHistory.metrics.firstPrice)
-                ? ytdHistory.metrics.latestPrice - ytdHistory.metrics.firstPrice
-                : null;
-          } catch {
-            ytdReturn = null;
-            ytdPriceChange = null;
-            ytdStartDate = null;
-            ytdStartPrice = null;
-          }
-
-          return {
-            symbol: profile.symbol,
-            latestDate: profile.summary.latest_date,
-            latestPrice: profile.metrics.latestPrice,
-            dailyReturn: profile.metrics.latestDailyReturn,
-            dailyPriceChange: priceChangeFromReturn(profile.metrics.latestPrice, profile.metrics.latestDailyReturn),
-            ytdReturn,
-            ytdPriceChange,
-            ytdStartDate,
-            ytdStartPrice,
-            priceBasis: profile.priceBasis,
-            rowCount: profile.summary.row_count,
-            selectedPriceRows: profile.summary.selected_price_rows,
-            status: "loaded",
-          };
-        } catch (err: unknown) {
-          return {
-            symbol,
-            latestDate: null,
-            latestPrice: null,
-            dailyReturn: null,
-            dailyPriceChange: null,
-            ytdReturn: null,
-            ytdPriceChange: null,
-            ytdStartDate: null,
-            ytdStartPrice: null,
-            priceBasis: assetPriceBasis,
-            rowCount: null,
-            selectedPriceRows: null,
-            status: "error",
-            errorMessage: err instanceof Error ? err.message : String(err),
-          };
-        }
-      }),
-    );
-    const loadedCount = rows.filter((row) => row.status === "loaded").length;
-    const errorCount = rows.length - loadedCount;
-    setDailyQuoteRows(rows);
-    setDailyQuoteError(errorCount ? `${errorCount} 檔標的沒有可用資料，已在下方以缺資料卡標示。` : "");
-    setDailyQuoteStatus(loadedCount ? "loaded" : "error");
+    try {
+      const response = await fetchBigQueryQuoteCards(assetPriceBasis, 500);
+      const requestedSymbols = parseSymbolList(symbols.join(" "));
+      const quoteBySymbol = new Map(response.quotes.map((quote) => [quote.symbol.toUpperCase(), quote]));
+      const rows = requestedSymbols.map((symbol): DailyMarketQuoteRow => {
+        const quote = quoteBySymbol.get(symbol.toUpperCase());
+        if (quote) return dailyQuoteRowFromBigQueryQuote(quote, response.priceBasis);
+        return {
+          symbol,
+          latestDate: null,
+          latestPrice: null,
+          dailyReturn: null,
+          dailyPriceChange: null,
+          ytdReturn: null,
+          ytdPriceChange: null,
+          ytdStartDate: null,
+          ytdStartPrice: null,
+          priceBasis: response.priceBasis,
+          rowCount: null,
+          selectedPriceRows: null,
+          status: "error",
+          errorMessage: "BigQuery daily_prices 未找到此標的。",
+        };
+      });
+      const loadedCount = rows.filter((row) => row.status === "loaded").length;
+      const errorCount = rows.length - loadedCount;
+      setDailyQuoteRows(rows);
+      setDailyQuoteError(errorCount ? `${errorCount} 檔標的沒有可用資料，已在下方以缺資料卡標示。` : "");
+      setDailyQuoteStatus(loadedCount ? "loaded" : "error");
+    } catch (err: unknown) {
+      setDailyQuoteRows([]);
+      setDailyQuoteError(err instanceof Error ? err.message : String(err));
+      setDailyQuoteStatus("error");
+    }
   }, [assetPriceBasis]);
   const handleLoadDailyQuotes = async () => {
     await loadDailyQuoteSymbols(parseSymbolList(dailyQuoteSymbolsText));
@@ -4049,10 +4020,10 @@ export function MarketDataPanel() {
     async function loadAllStoredQuotes() {
       setDailyQuoteAutoLoadStatus("loading");
       try {
-        const response = await fetchBigQueryAssets("", 500);
+        const response = await fetchBigQueryQuoteCards(assetPriceBasis, 500);
         if (ignore) return;
 
-        const symbols = response.assets.map((asset) => asset.symbol).filter(Boolean);
+        const symbols = response.quotes.map((quote) => quote.symbol).filter(Boolean);
         if (!symbols.length) {
           setDailyQuoteError("BigQuery daily_prices 目前沒有可顯示標的。");
           setDailyQuoteStatus("error");
@@ -4061,8 +4032,13 @@ export function MarketDataPanel() {
         }
 
         setDailyQuoteSymbolsText(symbols.join(" "));
-        await loadDailyQuoteSymbols(symbols);
-        if (!ignore) setDailyQuoteAutoLoadStatus("done");
+        const rows = response.quotes.map((quote) => dailyQuoteRowFromBigQueryQuote(quote, response.priceBasis));
+        const loadedCount = rows.filter((row) => row.status === "loaded").length;
+        const errorCount = rows.length - loadedCount;
+        setDailyQuoteRows(rows);
+        setDailyQuoteError(errorCount ? `${errorCount} 檔標的沒有可用資料，已在下方以缺資料卡標示。` : "");
+        setDailyQuoteStatus(loadedCount ? "loaded" : "error");
+        setDailyQuoteAutoLoadStatus("done");
       } catch (err: unknown) {
         if (ignore) return;
         setDailyQuoteError(err instanceof Error ? err.message : String(err));
@@ -4076,7 +4052,7 @@ export function MarketDataPanel() {
     return () => {
       ignore = true;
     };
-  }, [hasBigQueryCredentials, dailyQuoteAutoLoadStatus, loadDailyQuoteSymbols]);
+  }, [hasBigQueryCredentials, dailyQuoteAutoLoadStatus, assetPriceBasis]);
   const isOverviewWorkspace = activeMarketWorkspace === "quotes";
   const isAssetsWorkspace = activeMarketWorkspace === "portfolio";
   const isPortfolioWorkspace = activeMarketWorkspace === "portfolio";

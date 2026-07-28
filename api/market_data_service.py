@@ -249,6 +249,137 @@ def search_bigquery_assets(*, query: Optional[str] = None, limit: int = 20) -> D
     }
 
 
+def load_bigquery_quote_cards(*, price_basis: str = "adjusted", limit: int = 500) -> Dict:
+    bigquery = _bigquery_module()
+    client = _bigquery_client(bigquery)
+    selected_price_column = _price_column(price_basis)
+    normalized_price_basis = _normalize_price_basis(price_basis)
+    price_table = _table_path("BIGQUERY_PRICE_TABLE", DEFAULT_PRICE_TABLE)
+    bounded_limit = max(1, min(int(limit or 500), 500))
+
+    query = f"""
+    WITH base AS (
+        SELECT
+            symbol,
+            DATE(date) AS price_date,
+            SAFE_CAST({selected_price_column} AS FLOAT64) AS selected_price
+        FROM {price_table}
+    ),
+    symbol_stats AS (
+        SELECT
+            symbol,
+            MIN(price_date) AS first_date,
+            MAX(price_date) AS latest_any_date,
+            COUNT(1) AS row_count,
+            COUNTIF(selected_price > 0) AS selected_price_rows
+        FROM base
+        GROUP BY symbol
+    ),
+    valid_prices AS (
+        SELECT
+            symbol,
+            price_date,
+            selected_price
+        FROM base
+        WHERE selected_price IS NOT NULL
+          AND selected_price > 0
+    ),
+    ranked_recent AS (
+        SELECT
+            symbol,
+            price_date,
+            selected_price,
+            ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY price_date DESC) AS recent_rank
+        FROM valid_prices
+    ),
+    latest AS (
+        SELECT
+            symbol,
+            price_date AS latest_date,
+            selected_price AS latest_price,
+            EXTRACT(YEAR FROM price_date) AS latest_year
+        FROM ranked_recent
+        WHERE recent_rank = 1
+    ),
+    previous AS (
+        SELECT
+            symbol,
+            price_date AS previous_date,
+            selected_price AS previous_price
+        FROM ranked_recent
+        WHERE recent_rank = 2
+    ),
+    ytd_candidates AS (
+        SELECT
+            valid_prices.symbol,
+            valid_prices.price_date,
+            valid_prices.selected_price,
+            ROW_NUMBER() OVER (PARTITION BY valid_prices.symbol ORDER BY valid_prices.price_date ASC) AS ytd_rank
+        FROM valid_prices
+        JOIN latest USING (symbol)
+        WHERE EXTRACT(YEAR FROM valid_prices.price_date) = latest.latest_year
+          AND valid_prices.price_date <= latest.latest_date
+    ),
+    ytd_start AS (
+        SELECT
+            symbol,
+            price_date AS ytd_start_date,
+            selected_price AS ytd_start_price
+        FROM ytd_candidates
+        WHERE ytd_rank = 1
+    )
+    SELECT
+        symbol_stats.symbol,
+        symbol_stats.first_date,
+        symbol_stats.latest_any_date,
+        latest.latest_date,
+        latest.latest_price,
+        previous.previous_date,
+        previous.previous_price,
+        SAFE_DIVIDE(latest.latest_price, previous.previous_price) - 1 AS daily_return,
+        latest.latest_price - previous.previous_price AS daily_price_change,
+        ytd_start.ytd_start_date,
+        ytd_start.ytd_start_price,
+        SAFE_DIVIDE(latest.latest_price, ytd_start.ytd_start_price) - 1 AS ytd_return,
+        latest.latest_price - ytd_start.ytd_start_price AS ytd_price_change,
+        symbol_stats.row_count,
+        symbol_stats.selected_price_rows
+    FROM symbol_stats
+    LEFT JOIN latest USING (symbol)
+    LEFT JOIN previous USING (symbol)
+    LEFT JOIN ytd_start USING (symbol)
+    ORDER BY latest.latest_date DESC, symbol_stats.row_count DESC, symbol_stats.symbol
+    LIMIT @limit
+    """
+
+    try:
+        rows = list(
+            client.query(
+                query,
+                job_config=bigquery.QueryJobConfig(
+                    query_parameters=[
+                        bigquery.ScalarQueryParameter("limit", "INT64", bounded_limit),
+                    ]
+                ),
+            ).result()
+        )
+    except Exception as exc:
+        raise MarketDataQueryError(f"BigQuery quote cards query failed: {exc}") from exc
+
+    return {
+        "status": bigquery_market_status(),
+        "priceBasis": normalized_price_basis,
+        "limit": bounded_limit,
+        "quotes": [
+            _summary_row_to_dict(
+                row,
+                date_fields=("first_date", "latest_any_date", "latest_date", "previous_date", "ytd_start_date"),
+            )
+            for row in rows
+        ],
+    }
+
+
 def load_bigquery_asset_profile(*, symbol: str, price_basis: str = "adjusted", recent_limit: int = 30) -> Dict:
     clean_symbol = (symbol or "").strip()
     if not clean_symbol:

@@ -13,6 +13,7 @@ try:
         load_bigquery_asset_history,
         load_bigquery_asset_profile,
         load_bigquery_market_diagnostics,
+        load_bigquery_quote_cards,
         load_portfolio_return_input,
         search_bigquery_assets,
     )
@@ -79,6 +80,7 @@ except ImportError:
         load_bigquery_asset_history,
         load_bigquery_asset_profile,
         load_bigquery_market_diagnostics,
+        load_bigquery_quote_cards,
         load_portfolio_return_input,
         search_bigquery_assets,
     )
@@ -1526,6 +1528,16 @@ async def market_bigquery_assets(q: Optional[str] = None, limit: int = 20):
         return {
             "generatedAt": datetime.now(timezone.utc).isoformat(),
             **search_bigquery_assets(query=q, limit=limit),
+        }
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+@app.get("/api/v1/market/bigquery/quotes")
+async def market_bigquery_quote_cards(price_basis: str = "adjusted", limit: int = 500):
+    try:
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            **load_bigquery_quote_cards(price_basis=price_basis, limit=limit),
         }
     except MarketDataError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc))
