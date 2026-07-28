@@ -634,6 +634,23 @@ function finiteMarketNumber(value: number | null | undefined) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+async function withClientTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
 function dailyQuoteRowFromHistory(
   symbol: string,
   history: BigQueryAssetHistoryResponse,
@@ -682,7 +699,13 @@ async function loadDailyRowsFromHistoryFallback(
 ): Promise<DailyMarketQuoteRow[]> {
   const uniqueSymbols = parseSymbolList(symbols.join(" ")).slice(0, 500);
   const settledRows = await Promise.allSettled(
-    uniqueSymbols.map((symbol) => fetchBigQueryAssetHistory(symbol, priceBasis, { limit: 2000 })),
+    uniqueSymbols.map((symbol) =>
+      withClientTimeout(
+        fetchBigQueryAssetHistory(symbol, priceBasis, { limit: 2000 }),
+        15000,
+        `BigQuery ${symbol} 歷史資料讀取逾時：15 秒內沒有收到回應。`,
+      ),
+    ),
   );
 
   return uniqueSymbols.map((symbol, index) => {
@@ -4056,7 +4079,11 @@ export function MarketDataPanel() {
     const requestedSymbols = parseSymbolList(symbols.join(" "));
 
     try {
-      const response = await fetchBigQueryQuoteCards(assetPriceBasis, 500);
+      const response = await withClientTimeout(
+        fetchBigQueryQuoteCards(assetPriceBasis, 500),
+        12000,
+        "BigQuery 全部行情讀取逾時：前端 12 秒內沒有收到回應。",
+      );
       const quoteBySymbol = new Map(response.quotes.map((quote) => [quote.symbol.toUpperCase(), quote]));
       const rows = requestedSymbols.map((symbol): DailyMarketQuoteRow => {
         const quote = quoteBySymbol.get(symbol.toUpperCase());
@@ -4122,7 +4149,11 @@ export function MarketDataPanel() {
     async function loadAllStoredQuotes() {
       setDailyQuoteAutoLoadStatus("loading");
       try {
-        const response = await fetchBigQueryQuoteCards(assetPriceBasis, 500);
+        const response = await withClientTimeout(
+          fetchBigQueryQuoteCards(assetPriceBasis, 500),
+          12000,
+          "BigQuery 全部行情讀取逾時：前端 12 秒內沒有收到回應。",
+        );
         if (ignore) return;
 
         const symbols = response.quotes.map((quote) => quote.symbol).filter(Boolean);
@@ -4145,7 +4176,11 @@ export function MarketDataPanel() {
         if (ignore) return;
         const primaryError = err instanceof Error ? err.message : String(err);
         try {
-          const assetResponse = await fetchBigQueryAssets("", 500);
+          const assetResponse = await withClientTimeout(
+            fetchBigQueryAssets("", 500),
+            10000,
+            "BigQuery 商品清單讀取逾時：前端 10 秒內沒有收到回應。",
+          );
           if (ignore) return;
           const symbols = assetResponse.assets.map((asset) => asset.symbol).filter(Boolean);
           if (!symbols.length) {
