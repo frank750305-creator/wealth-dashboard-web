@@ -609,6 +609,21 @@ function finiteMarketNumber(value: number | null | undefined) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function parseDailyQuoteSymbols(input: string, limit = 500) {
+  const seenSymbols = new Set<string>();
+  return input
+    .split(/[\s,，、]+/)
+    .map((symbol) => symbol.trim())
+    .filter(Boolean)
+    .filter((symbol) => {
+      const normalizedSymbol = symbol.toUpperCase();
+      if (seenSymbols.has(normalizedSymbol)) return false;
+      seenSymbols.add(normalizedSymbol);
+      return true;
+    })
+    .slice(0, limit);
+}
+
 async function withClientTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
@@ -672,7 +687,7 @@ async function loadDailyRowsFromHistoryFallback(
   symbols: string[],
   priceBasis: "adjusted" | "raw",
 ): Promise<DailyMarketQuoteRow[]> {
-  const uniqueSymbols = parseSymbolList(symbols.join(" ")).slice(0, 500);
+  const uniqueSymbols = parseDailyQuoteSymbols(symbols.join(" "), 500);
   const settledRows = await Promise.allSettled(
     uniqueSymbols.map((symbol) =>
       withClientTimeout(
@@ -4052,7 +4067,7 @@ export function MarketDataPanel() {
 
     setDailyQuoteStatus("loading");
     setDailyQuoteError("");
-    const requestedSymbols = parseSymbolList(symbols.join(" "));
+    const requestedSymbols = parseDailyQuoteSymbols(symbols.join(" "), 500);
 
     try {
       const rows = await loadDailyRowsFromHistoryFallback(requestedSymbols, assetPriceBasis);
@@ -4068,7 +4083,7 @@ export function MarketDataPanel() {
     }
   }, [assetPriceBasis]);
   const handleLoadDailyQuotes = async () => {
-    await loadDailyQuoteSymbols(parseSymbolList(dailyQuoteSymbolsText));
+    await loadDailyQuoteSymbols(parseDailyQuoteSymbols(dailyQuoteSymbolsText, 500));
   };
   useEffect(() => {
     if (!hasBigQueryCredentials) return;
