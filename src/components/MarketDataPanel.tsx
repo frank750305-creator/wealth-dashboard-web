@@ -610,9 +610,12 @@ function finiteMarketNumber(value: number | null | undefined) {
 }
 
 function parseDailyQuoteSymbols(input: string, limit = 500) {
+  return dedupeDailyQuoteSymbols(input.split(/[\s,，、]+/), limit);
+}
+
+function dedupeDailyQuoteSymbols(symbols: string[], limit = 500) {
   const seenSymbols = new Set<string>();
-  return input
-    .split(/[\s,，、]+/)
+  return symbols
     .map((symbol) => symbol.trim())
     .filter(Boolean)
     .filter((symbol) => {
@@ -687,7 +690,7 @@ async function loadDailyRowsFromHistoryFallback(
   symbols: string[],
   priceBasis: "adjusted" | "raw",
 ): Promise<DailyMarketQuoteRow[]> {
-  const uniqueSymbols = parseDailyQuoteSymbols(symbols.join(" "), 500);
+  const uniqueSymbols = dedupeDailyQuoteSymbols(symbols, 500);
   const settledRows = await Promise.allSettled(
     uniqueSymbols.map((symbol) =>
       withClientTimeout(
