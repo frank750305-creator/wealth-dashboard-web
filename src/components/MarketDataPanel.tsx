@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useMarketSources } from "@/hooks/useMarketSources";
 import { assetComparisonMemo } from "@/lib/watchlistMemo";
 import {
@@ -876,6 +876,7 @@ export function MarketDataPanel() {
   const [dailyQuoteStatus, setDailyQuoteStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [dailyQuoteError, setDailyQuoteError] = useState("");
   const [dailyQuoteAutoLoadStatus, setDailyQuoteAutoLoadStatus] = useState<"idle" | "loading" | "done">("idle");
+  const dailyQuoteAutoLoadKeyRef = useRef("");
   const [activeCommandAreaId, setActiveCommandAreaId] = useState<PlatformCommandProductNavigatorActiveArea>("all");
   const sources = data?.sources ?? [];
   const securedCount = sources.filter((source) => source.status !== "needs_secret").length;
@@ -4070,7 +4071,11 @@ export function MarketDataPanel() {
     await loadDailyQuoteSymbols(parseSymbolList(dailyQuoteSymbolsText));
   };
   useEffect(() => {
-    if (!hasBigQueryCredentials || dailyQuoteAutoLoadStatus !== "idle") return;
+    if (!hasBigQueryCredentials) return;
+
+    const autoLoadKey = assetPriceBasis;
+    if (dailyQuoteAutoLoadKeyRef.current === autoLoadKey) return;
+    dailyQuoteAutoLoadKeyRef.current = autoLoadKey;
 
     let ignore = false;
 
@@ -4114,7 +4119,7 @@ export function MarketDataPanel() {
     return () => {
       ignore = true;
     };
-  }, [hasBigQueryCredentials, dailyQuoteAutoLoadStatus, assetPriceBasis]);
+  }, [hasBigQueryCredentials, assetPriceBasis]);
   const isOverviewWorkspace = activeMarketWorkspace === "quotes";
   const isAssetsWorkspace = activeMarketWorkspace === "portfolio";
   const isPortfolioWorkspace = activeMarketWorkspace === "portfolio";
