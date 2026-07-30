@@ -608,10 +608,22 @@ type DailyMarketQuoteRow = {
   selectedPriceRows: number | null;
   status: "loaded" | "error";
   errorMessage?: string;
+  alternatePriceBasis?: "adjusted" | "raw";
+  alternateLatestDate?: string | null;
+  alternateLatestPrice?: number | null;
+  alternateSelectedPriceRows?: number | null;
 };
 
 function finiteMarketNumber(value: number | null | undefined) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function priceBasisLabel(priceBasis: "adjusted" | "raw") {
+  return priceBasis === "raw" ? "Raw" : "Adj";
+}
+
+function priceBasisColumnName(priceBasis: "adjusted" | "raw") {
+  return priceBasis === "raw" ? "raw_price" : "adj_price";
 }
 
 function parseDailyQuoteSymbols(input: string, limit = 500) {
@@ -728,8 +740,36 @@ function dailyQuoteRowFromQuoteCard(
     status: latestPrice !== null ? "loaded" : "error",
     errorMessage: latestPrice !== null
       ? undefined
-      : `BigQuery 有 ${quote.row_count.toLocaleString()} 筆資料，但 ${priceBasis === "raw" ? "raw_price" : "adj_price"} 沒有可用價格。`,
+      : `BigQuery 有 ${quote.row_count.toLocaleString()} 筆資料，但 ${priceBasisColumnName(priceBasis)} 沒有可用價格。`,
   };
+}
+
+function annotateDailyRowsWithAlternateQuoteCards(
+  rows: DailyMarketQuoteRow[],
+  alternateQuotes: BigQueryQuoteCard[],
+  alternatePriceBasis: "adjusted" | "raw",
+) {
+  const alternateQuoteBySymbol = new Map(
+    alternateQuotes.map((quote) => [quote.symbol.toUpperCase(), quote]),
+  );
+
+  return rows.map((row) => {
+    if (row.status === "loaded") return row;
+
+    const alternateQuote = alternateQuoteBySymbol.get(row.symbol.toUpperCase());
+    const alternateLatestPrice = finiteMarketNumber(alternateQuote?.latest_price);
+    if (!alternateQuote || alternateLatestPrice === null) return row;
+
+    const alternateLatestDate = alternateQuote.latest_date ?? alternateQuote.latest_any_date;
+    return {
+      ...row,
+      alternatePriceBasis,
+      alternateLatestDate,
+      alternateLatestPrice,
+      alternateSelectedPriceRows: alternateQuote.selected_price_rows,
+      errorMessage: `${priceBasisLabel(row.priceBasis)} 缺可用價格；${priceBasisLabel(alternatePriceBasis)} 可用 ${alternateLatestDate ?? "--"} / ${formatPrice(alternateLatestPrice)}。`,
+    };
+  });
 }
 
 async function loadDailyRowsFromQuoteCards(
@@ -742,7 +782,24 @@ async function loadDailyRowsFromQuoteCards(
     "BigQuery 全部行情讀取逾時：前端 15 秒內沒有收到回應。",
   );
 
-  return response.quotes.map((quote) => dailyQuoteRowFromQuoteCard(quote, priceBasis));
+  const rows = response.quotes.map((quote) => dailyQuoteRowFromQuoteCard(quote, priceBasis));
+  if (!rows.some((row) => row.status === "error")) return rows;
+
+  const alternatePriceBasis = priceBasis === "adjusted" ? "raw" : "adjusted";
+  try {
+    const alternateResponse = await withClientTimeout(
+      fetchBigQueryQuoteCards(alternatePriceBasis, limit),
+      8000,
+      `BigQuery ${priceBasisLabel(alternatePriceBasis)} 備用行情讀取逾時。`,
+    );
+    return annotateDailyRowsWithAlternateQuoteCards(
+      rows,
+      alternateResponse.quotes,
+      alternatePriceBasis,
+    );
+  } catch {
+    return rows;
+  }
 }
 
 async function loadDailyRowsForSymbols(
@@ -861,6 +918,21 @@ function sortDailyQuoteRows(
     }
     return String(leftValue).localeCompare(String(rightValue)) * directionFactor;
   });
+}
+
+function dailyQuoteIssueSummary(rows: DailyMarketQuoteRow[]) {
+  const issueRows = rows.filter((row) => row.status === "error");
+  if (!issueRows.length) return "";
+
+  const switchableRows = issueRows.filter((row) => row.alternatePriceBasis);
+  const switchableBasisText = Array.from(
+    new Set(switchableRows.map((row) => priceBasisLabel(row.alternatePriceBasis!))),
+  ).join(" / ");
+  const switchableText = switchableRows.length
+    ? `，其中 ${switchableRows.length} 檔可切 ${switchableBasisText} 顯示`
+    : "";
+
+  return `${issueRows.length} 檔標的目前 ${priceBasisLabel(issueRows[0].priceBasis)} 沒有可用價格${switchableText}。`;
 }
 
 export function MarketDataPanel() {
@@ -4196,9 +4268,8 @@ export function MarketDataPanel() {
     try {
       const rows = await loadDailyRowsForSymbols(requestedSymbols, assetPriceBasis);
       const loadedCount = rows.filter((row) => row.status === "loaded").length;
-      const errorCount = rows.length - loadedCount;
       setDailyQuoteRows(rows);
-      setDailyQuoteError(errorCount ? `${errorCount} 檔標的沒有可用資料，已在下方以缺資料卡標示。` : "");
+      setDailyQuoteError(dailyQuoteIssueSummary(rows));
       setDailyQuoteStatus(loadedCount ? "loaded" : "error");
     } catch (err: unknown) {
       setDailyQuoteRows([]);
@@ -4233,9 +4304,8 @@ export function MarketDataPanel() {
 
         setDailyQuoteSymbolsText(rows.map((row) => row.symbol).join("\n"));
         const loadedCount = rows.filter((row) => row.status === "loaded").length;
-        const errorCount = rows.length - loadedCount;
         setDailyQuoteRows(rows);
-        setDailyQuoteError(errorCount ? `${errorCount} 檔標的沒有可用資料，已在下方以缺資料卡標示。` : "");
+        setDailyQuoteError(dailyQuoteIssueSummary(rows));
         setDailyQuoteStatus(loadedCount ? "loaded" : "error");
         setDailyQuoteAutoLoadStatus("done");
       } catch (err: unknown) {
@@ -4565,11 +4635,12 @@ export function MarketDataPanel() {
                     {filteredDailyQuoteRows.length ? filteredDailyQuoteRows.map((row) => {
                       const isLoaded = row.status === "loaded";
                       const canAddToPortfolio = isLoaded && !/\s/.test(row.symbol);
+                      const canSwitchPriceBasis = Boolean(row.alternatePriceBasis);
                       return (
                         <tr key={`${row.symbol}-${row.priceBasis}`} className="border-b border-slate-800/70 bg-slate-950/60 hover:bg-slate-900">
                           <td className="px-3 py-3">
                             <p className="font-mono font-bold text-cyan-100">{row.symbol}</p>
-                            <p className="mt-0.5 text-[10px] text-slate-600">{row.priceBasis === "raw" ? "Raw" : "Adj"}</p>
+                            <p className="mt-0.5 text-[10px] text-slate-600">{priceBasisLabel(row.priceBasis)}</p>
                           </td>
                           <td className="px-3 py-3 font-mono text-slate-300">{row.latestDate ?? "--"}</td>
                           <td className="px-3 py-3 font-mono text-slate-100">{formatPrice(row.latestPrice)}</td>
@@ -4591,24 +4662,43 @@ export function MarketDataPanel() {
                           </td>
                           <td className="px-3 py-3">
                             <span className={`rounded px-2 py-1 text-[10px] font-bold ${
-                              isLoaded ? "bg-emerald-500/15 text-emerald-200" : "bg-amber-500/15 text-amber-200"
+                              isLoaded
+                                ? "bg-emerald-500/15 text-emerald-200"
+                                : canSwitchPriceBasis
+                                  ? "bg-cyan-500/15 text-cyan-200"
+                                  : "bg-amber-500/15 text-amber-200"
                             }`}>
-                              {isLoaded ? "有資料" : "缺資料"}
+                              {isLoaded
+                                ? "有資料"
+                                : canSwitchPriceBasis
+                                  ? `${priceBasisLabel(row.priceBasis)} 缺 / ${priceBasisLabel(row.alternatePriceBasis!)} 可用`
+                                  : "缺資料"}
                             </span>
                           </td>
                           <td className="px-3 py-3 font-mono text-slate-400">
                             {row.selectedPriceRows === null ? "--" : row.selectedPriceRows.toLocaleString("zh-TW")}
                           </td>
                           <td className="px-3 py-3">
-                            <button
-                              type="button"
-                              onClick={() => handleAddDailyQuoteToPortfolio(row)}
-                              disabled={!canAddToPortfolio}
-                              title={canAddToPortfolio ? "加入投資組合分析" : "缺資料或代號含空格，暫不加入投組分析"}
-                              className="rounded-md border border-cyan-800 bg-cyan-950/40 px-2 py-1 text-[10px] font-bold text-cyan-100 hover:bg-cyan-900 disabled:cursor-not-allowed disabled:border-slate-800 disabled:bg-slate-900 disabled:text-slate-600"
-                            >
-                              加入分析
-                            </button>
+                            {canSwitchPriceBasis ? (
+                              <button
+                                type="button"
+                                onClick={() => setAssetPriceBasis(row.alternatePriceBasis!)}
+                                title={`切到 ${priceBasisLabel(row.alternatePriceBasis!)} 查看 ${row.symbol}`}
+                                className="rounded-md border border-cyan-800 bg-cyan-950/40 px-2 py-1 text-[10px] font-bold text-cyan-100 hover:bg-cyan-900"
+                              >
+                                切 {priceBasisLabel(row.alternatePriceBasis!)}
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleAddDailyQuoteToPortfolio(row)}
+                                disabled={!canAddToPortfolio}
+                                title={canAddToPortfolio ? "加入投資組合分析" : "缺資料或代號含空格，暫不加入投組分析"}
+                                className="rounded-md border border-cyan-800 bg-cyan-950/40 px-2 py-1 text-[10px] font-bold text-cyan-100 hover:bg-cyan-900 disabled:cursor-not-allowed disabled:border-slate-800 disabled:bg-slate-900 disabled:text-slate-600"
+                              >
+                                加入分析
+                              </button>
+                            )}
                           </td>
                         </tr>
                       );
@@ -4629,8 +4719,25 @@ export function MarketDataPanel() {
                   <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
                     {failedDailyQuoteRows.map((row) => (
                       <div key={`${row.symbol}-missing`} className="rounded-md border border-amber-900/40 bg-slate-950/60 p-2">
-                        <p className="font-mono font-bold text-amber-100">{row.symbol}</p>
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="font-mono font-bold text-amber-100">{row.symbol}</p>
+                          {row.alternatePriceBasis ? (
+                            <button
+                              type="button"
+                              onClick={() => setAssetPriceBasis(row.alternatePriceBasis!)}
+                              className="shrink-0 rounded border border-cyan-800 bg-cyan-950/40 px-2 py-1 text-[10px] font-bold text-cyan-100 hover:bg-cyan-900"
+                            >
+                              切 {priceBasisLabel(row.alternatePriceBasis)}
+                            </button>
+                          ) : null}
+                        </div>
                         <p className="mt-1 break-words text-[11px] text-amber-200/70">{row.errorMessage}</p>
+                        {row.alternatePriceBasis ? (
+                          <p className="mt-1 text-[10px] text-slate-500">
+                            {priceBasisLabel(row.alternatePriceBasis)} 資料筆數：
+                            {row.alternateSelectedPriceRows?.toLocaleString("zh-TW") ?? "--"}
+                          </p>
+                        ) : null}
                       </div>
                     ))}
                   </div>
