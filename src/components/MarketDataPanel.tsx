@@ -1022,6 +1022,7 @@ export function MarketDataPanel() {
   } = useMarketSources();
   const [assetQuery, setAssetQuery] = useState("0050.TW");
   const [assetPriceBasis, setAssetPriceBasis] = useState<"adjusted" | "raw">("adjusted");
+  const [dailyQuotePriceBasis, setDailyQuotePriceBasis] = useState<"adjusted" | "raw">("raw");
   const [assetSuggestions, setAssetSuggestions] = useState<BigQueryAsset[]>([]);
   const [assetProfile, setAssetProfile] = useState<BigQueryAssetProfileResponse | null>(null);
   const [assetHistory, setAssetHistory] = useState<BigQueryAssetHistoryResponse | null>(null);
@@ -4354,7 +4355,7 @@ export function MarketDataPanel() {
     const requestedSymbols = dedupeDailyQuoteSymbols(symbols, 500);
 
     try {
-      const rows = await loadDailyRowsForSymbols(requestedSymbols, assetPriceBasis);
+      const rows = await loadDailyRowsForSymbols(requestedSymbols, dailyQuotePriceBasis);
       const loadedCount = rows.filter((row) => row.status === "loaded").length;
       setDailyQuoteRows(rows);
       setDailyQuoteError(dailyQuoteIssueSummary(rows));
@@ -4364,23 +4365,23 @@ export function MarketDataPanel() {
       setDailyQuoteError(err instanceof Error ? err.message : String(err));
       setDailyQuoteStatus("error");
     }
-  }, [assetPriceBasis]);
+  }, [dailyQuotePriceBasis]);
   const handleLoadDailyQuotes = async () => {
     await loadDailyQuoteSymbols(parseDailyQuoteSymbols(dailyQuoteSymbolsText, 500));
   };
   const handleDailyQuotePriceBasisChange = (nextPriceBasis: "adjusted" | "raw") => {
-    if (nextPriceBasis === assetPriceBasis) return;
+    if (nextPriceBasis === dailyQuotePriceBasis) return;
 
     setDailyQuoteRows([]);
     setDailyQuoteError("");
     setDailyQuoteStatus("loading");
     setDailyQuoteAutoLoadStatus("loading");
-    setAssetPriceBasis(nextPriceBasis);
+    setDailyQuotePriceBasis(nextPriceBasis);
   };
   useEffect(() => {
     if (!hasBigQueryCredentials) return;
 
-    const autoLoadKey = assetPriceBasis;
+    const autoLoadKey = dailyQuotePriceBasis;
     if (dailyQuoteAutoLoadKeyRef.current === autoLoadKey) return;
     dailyQuoteAutoLoadKeyRef.current = autoLoadKey;
 
@@ -4392,7 +4393,7 @@ export function MarketDataPanel() {
       setDailyQuoteError("");
       setDailyQuoteRows([]);
       try {
-        const rows = await loadDailyRowsFromQuoteCards(assetPriceBasis, 500);
+        const rows = await loadDailyRowsFromQuoteCards(dailyQuotePriceBasis, 500);
         if (ignore) return;
 
         if (!rows.length) {
@@ -4421,7 +4422,7 @@ export function MarketDataPanel() {
     return () => {
       ignore = true;
     };
-  }, [hasBigQueryCredentials, assetPriceBasis]);
+  }, [hasBigQueryCredentials, dailyQuotePriceBasis]);
   const isOverviewWorkspace = activeMarketWorkspace === "quotes";
   const isAssetsWorkspace = activeMarketWorkspace === "portfolio";
   const isPortfolioWorkspace = activeMarketWorkspace === "portfolio";
@@ -4527,8 +4528,8 @@ export function MarketDataPanel() {
     },
     {
       label: "價格口徑",
-      value: assetPriceBasis === "raw" ? "Raw" : "Adjusted",
-      note: "可切換 Adj / Raw",
+      value: dailyQuotePriceBasis === "raw" ? "Raw" : "Adjusted",
+      note: "今日行情獨立於投組分析口徑",
     },
     {
       label: "資料品質",
@@ -4632,10 +4633,10 @@ export function MarketDataPanel() {
               <p className="text-[10px] font-mono text-cyan-300">DAILY MARKET</p>
               <h3 className="mt-1 text-base font-bold text-slate-100">今日行情</h3>
               <p className="text-[11px] text-slate-500 mt-0.5">
-                進入畫面會自動載入 BigQuery 全部標的；表格列出今日價格、前日漲跌與今年漲跌。
+                進入畫面會用 Raw 載入 BigQuery 全部標的；表格列出最新價格、前日漲跌與今年漲跌。
               </p>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-[1fr_110px_auto] gap-2 text-xs xl:min-w-[720px]">
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_150px_auto] gap-2 text-xs xl:min-w-[760px]">
               <input
                 value={dailyQuoteSymbolsText}
                 onChange={(event) => setDailyQuoteSymbolsText(event.target.value)}
@@ -4648,12 +4649,12 @@ export function MarketDataPanel() {
                 className="min-w-0 bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-slate-100 font-mono outline-none focus:border-cyan-600"
               />
               <select
-                value={assetPriceBasis}
+                value={dailyQuotePriceBasis}
                 onChange={(event) => handleDailyQuotePriceBasisChange(event.target.value as "adjusted" | "raw")}
                 className="bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-slate-100"
               >
-                <option value="adjusted">Adj</option>
-                <option value="raw">Raw</option>
+                <option value="raw">Raw 最新價</option>
+                <option value="adjusted">Adj 報酬</option>
               </select>
               <button
                 type="button"
@@ -4691,7 +4692,7 @@ export function MarketDataPanel() {
               <p className="font-bold">資料品質提醒</p>
               <p className="mt-1 text-amber-200/80">
                 目前有 {dailyQuoteQualitySummary.watchCount} 檔觀察、{dailyQuoteQualitySummary.riskCount} 檔風險。
-                {assetPriceBasis === "raw"
+                {dailyQuotePriceBasis === "raw"
                   ? " Raw 可用來查最新價，但報酬率可能受單位、配息或拆分影響；正式投組分析建議優先核對 Adj。"
                   : " Adj 較適合報酬分析；若資料日落後，請先依品質欄處理。"}
                 {dailyQuoteQualitySummary.riskExamples.length
