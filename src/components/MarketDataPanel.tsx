@@ -38,6 +38,7 @@ import {
   fetchBigQueryAssetHistory,
   fetchBigQueryAssetProfile,
   fetchBigQueryAssets,
+  fetchBigQueryQuoteCards,
   fetchLatestDecisionFunnelFromBigQuery,
   fetchLatestExecutionFillsFromBigQuery,
   fetchMarketAlertWarehouseAudit,
@@ -463,6 +464,7 @@ import type {
   BigQueryAsset,
   BigQueryAssetHistoryResponse,
   BigQueryAssetProfileResponse,
+  BigQueryQuoteCard,
   ResearchTaskWarehouseAuditRecord,
   ResearchTaskWarehouseStatus,
 } from "@/types/market";
@@ -613,7 +615,19 @@ function finiteMarketNumber(value: number | null | undefined) {
 }
 
 function parseDailyQuoteSymbols(input: string, limit = 500) {
-  return dedupeDailyQuoteSymbols(input.split(/[\s,，、]+/), limit);
+  const rawParts = input
+    .split(/[\n,，、;；]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const symbols = rawParts.flatMap((part) => {
+    const tokens = part.split(/\s+/).filter(Boolean);
+    const looksLikeTickerList =
+      tokens.length > 1 &&
+      tokens.every((token) => /^[A-Za-z0-9.^=_-]+$/.test(token));
+    return looksLikeTickerList ? tokens : [part];
+  });
+
+  return dedupeDailyQuoteSymbols(symbols, limit);
 }
 
 function dedupeDailyQuoteSymbols(symbols: string[], limit = 500) {
@@ -687,6 +701,79 @@ function dailyQuoteRowFromHistory(
     status: latestPrice !== null ? "loaded" : "error",
     errorMessage: latestPrice !== null ? undefined : "BigQuery 歷史資料沒有可用價格。",
   };
+}
+
+function dailyQuoteRowFromQuoteCard(
+  quote: BigQueryQuoteCard,
+  priceBasis: "adjusted" | "raw",
+): DailyMarketQuoteRow {
+  const latestPrice = finiteMarketNumber(quote.latest_price);
+  const ytdStartPrice = finiteMarketNumber(quote.ytd_start_price);
+  const dailyReturn = finiteMarketNumber(quote.daily_return);
+  const ytdReturn = finiteMarketNumber(quote.ytd_return);
+
+  return {
+    symbol: quote.symbol,
+    latestDate: quote.latest_date ?? quote.latest_any_date,
+    latestPrice,
+    dailyReturn,
+    dailyPriceChange: finiteMarketNumber(quote.daily_price_change),
+    ytdReturn,
+    ytdPriceChange: finiteMarketNumber(quote.ytd_price_change),
+    ytdStartDate: quote.ytd_start_date,
+    ytdStartPrice,
+    priceBasis,
+    rowCount: quote.row_count,
+    selectedPriceRows: quote.selected_price_rows,
+    status: latestPrice !== null ? "loaded" : "error",
+    errorMessage: latestPrice !== null
+      ? undefined
+      : `BigQuery 有 ${quote.row_count.toLocaleString()} 筆資料，但 ${priceBasis === "raw" ? "raw_price" : "adj_price"} 沒有可用價格。`,
+  };
+}
+
+async function loadDailyRowsFromQuoteCards(
+  priceBasis: "adjusted" | "raw",
+  limit = 500,
+): Promise<DailyMarketQuoteRow[]> {
+  const response = await withClientTimeout(
+    fetchBigQueryQuoteCards(priceBasis, limit),
+    15000,
+    "BigQuery 全部行情讀取逾時：前端 15 秒內沒有收到回應。",
+  );
+
+  return response.quotes.map((quote) => dailyQuoteRowFromQuoteCard(quote, priceBasis));
+}
+
+async function loadDailyRowsForSymbols(
+  symbols: string[],
+  priceBasis: "adjusted" | "raw",
+): Promise<DailyMarketQuoteRow[]> {
+  const uniqueSymbols = dedupeDailyQuoteSymbols(symbols, 500);
+  let quoteRows: DailyMarketQuoteRow[];
+  try {
+    quoteRows = await loadDailyRowsFromQuoteCards(priceBasis, Math.max(500, uniqueSymbols.length));
+  } catch {
+    return loadDailyRowsFromHistoryFallback(uniqueSymbols, priceBasis);
+  }
+  const rowsBySymbol = new Map(quoteRows.map((row) => [row.symbol.toUpperCase(), row]));
+
+  return uniqueSymbols.map((symbol) => rowsBySymbol.get(symbol.toUpperCase()) ?? {
+    symbol,
+    latestDate: null,
+    latestPrice: null,
+    dailyReturn: null,
+    dailyPriceChange: null,
+    ytdReturn: null,
+    ytdPriceChange: null,
+    ytdStartDate: null,
+    ytdStartPrice: null,
+    priceBasis,
+    rowCount: null,
+    selectedPriceRows: null,
+    status: "error",
+    errorMessage: "BigQuery 全部行情清單沒有找到這個標的。",
+  });
 }
 
 async function loadDailyRowsFromHistoryFallback(
@@ -4104,10 +4191,10 @@ export function MarketDataPanel() {
 
     setDailyQuoteStatus("loading");
     setDailyQuoteError("");
-    const requestedSymbols = parseDailyQuoteSymbols(symbols.join(" "), 500);
+    const requestedSymbols = dedupeDailyQuoteSymbols(symbols, 500);
 
     try {
-      const rows = await loadDailyRowsFromHistoryFallback(requestedSymbols, assetPriceBasis);
+      const rows = await loadDailyRowsForSymbols(requestedSymbols, assetPriceBasis);
       const loadedCount = rows.filter((row) => row.status === "loaded").length;
       const errorCount = rows.length - loadedCount;
       setDailyQuoteRows(rows);
@@ -4134,24 +4221,17 @@ export function MarketDataPanel() {
     async function loadAllStoredQuotes() {
       setDailyQuoteAutoLoadStatus("loading");
       try {
-        const assetResponse = await withClientTimeout(
-          fetchBigQueryAssets("", 500),
-          10000,
-          "BigQuery 商品清單讀取逾時：前端 10 秒內沒有收到回應。",
-        );
+        const rows = await loadDailyRowsFromQuoteCards(assetPriceBasis, 500);
         if (ignore) return;
 
-        const symbols = assetResponse.assets.map((asset) => asset.symbol).filter(Boolean);
-        if (!symbols.length) {
+        if (!rows.length) {
           setDailyQuoteError("BigQuery daily_prices 目前沒有可顯示標的。");
           setDailyQuoteStatus("error");
           setDailyQuoteAutoLoadStatus("done");
           return;
         }
 
-        setDailyQuoteSymbolsText(symbols.join(" "));
-        const rows = await loadDailyRowsFromHistoryFallback(symbols, assetPriceBasis);
-        if (ignore) return;
+        setDailyQuoteSymbolsText(rows.map((row) => row.symbol).join("\n"));
         const loadedCount = rows.filter((row) => row.status === "loaded").length;
         const errorCount = rows.length - loadedCount;
         setDailyQuoteRows(rows);
@@ -4236,7 +4316,7 @@ export function MarketDataPanel() {
       note: dailyQuoteRows.length
         ? `成功 ${loadedDailyQuoteRows.length}，缺資料 ${failedDailyQuoteRows.length}`
         : dailyQuoteAutoLoadStatus === "loading"
-          ? "清單載入模式，逾時保護已啟用"
+          ? "一次讀取 BigQuery 行情摘要，逾時保護已啟用"
           : bigQueryBadge,
     },
     {
@@ -4349,7 +4429,7 @@ export function MarketDataPanel() {
               <p className="text-[10px] font-mono text-cyan-300">DAILY MARKET</p>
               <h3 className="mt-1 text-base font-bold text-slate-100">今日行情</h3>
               <p className="text-[11px] text-slate-500 mt-0.5">
-                進入畫面會自動載入 BigQuery 全部標的；每張卡顯示今日價格、前日漲跌與今年漲跌。
+                進入畫面會自動載入 BigQuery 全部標的；表格列出今日價格、前日漲跌與今年漲跌。
               </p>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-[1fr_110px_auto] gap-2 text-xs xl:min-w-[720px]">
