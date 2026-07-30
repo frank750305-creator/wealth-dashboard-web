@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMarketSources } from "@/hooks/useMarketSources";
 import { assetComparisonMemo } from "@/lib/watchlistMemo";
 import {
@@ -587,6 +587,9 @@ function combinedExecutionStatus(statuses: ExecutionReviewStatus[]): ExecutionRe
 }
 
 type MarketDataWorkspace = "quotes" | "portfolio";
+type DailyQuoteFilter = "all" | "loaded" | "error";
+type DailyQuoteSortKey = "symbol" | "latestDate" | "latestPrice" | "dailyReturn" | "ytdReturn" | "status";
+type SortDirection = "asc" | "desc";
 
 type DailyMarketQuoteRow = {
   symbol: string;
@@ -746,6 +749,33 @@ function dailyReturnTextClass(value: number | null | undefined) {
   return "text-slate-300";
 }
 
+function dailyQuoteSortValue(row: DailyMarketQuoteRow, sortKey: DailyQuoteSortKey) {
+  if (sortKey === "symbol") return row.symbol;
+  if (sortKey === "latestDate") return row.latestDate;
+  if (sortKey === "latestPrice") return row.latestPrice;
+  if (sortKey === "dailyReturn") return row.dailyReturn;
+  if (sortKey === "ytdReturn") return row.ytdReturn;
+  return row.status;
+}
+
+function sortDailyQuoteRows(
+  rows: DailyMarketQuoteRow[],
+  sortKey: DailyQuoteSortKey,
+  direction: SortDirection,
+) {
+  const directionFactor = direction === "asc" ? 1 : -1;
+  return [...rows].sort((left, right) => {
+    const leftValue = dailyQuoteSortValue(left, sortKey);
+    const rightValue = dailyQuoteSortValue(right, sortKey);
+    if (leftValue === null || leftValue === undefined) return 1;
+    if (rightValue === null || rightValue === undefined) return -1;
+    if (typeof leftValue === "number" && typeof rightValue === "number") {
+      return (leftValue - rightValue) * directionFactor;
+    }
+    return String(leftValue).localeCompare(String(rightValue)) * directionFactor;
+  });
+}
+
 export function MarketDataPanel() {
   const {
     data,
@@ -894,6 +924,10 @@ export function MarketDataPanel() {
   const [dailyQuoteStatus, setDailyQuoteStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [dailyQuoteError, setDailyQuoteError] = useState("");
   const [dailyQuoteAutoLoadStatus, setDailyQuoteAutoLoadStatus] = useState<"idle" | "loading" | "done">("idle");
+  const [dailyQuoteSearch, setDailyQuoteSearch] = useState("");
+  const [dailyQuoteFilter, setDailyQuoteFilter] = useState<DailyQuoteFilter>("all");
+  const [dailyQuoteSortKey, setDailyQuoteSortKey] = useState<DailyQuoteSortKey>("symbol");
+  const [dailyQuoteSortDirection, setDailyQuoteSortDirection] = useState<SortDirection>("asc");
   const dailyQuoteAutoLoadKeyRef = useRef("");
   const [activeCommandAreaId, setActiveCommandAreaId] = useState<PlatformCommandProductNavigatorActiveArea>("all");
   const sources = data?.sources ?? [];
@@ -4145,6 +4179,30 @@ export function MarketDataPanel() {
   const isBackofficeWorkspace = false;
   const loadedDailyQuoteRows = dailyQuoteRows.filter((row) => row.status === "loaded");
   const failedDailyQuoteRows = dailyQuoteRows.filter((row) => row.status === "error");
+  const filteredDailyQuoteRows = useMemo(() => {
+    const cleanSearch = dailyQuoteSearch.trim().toLowerCase();
+    const matchingRows = dailyQuoteRows.filter((row) => {
+      const matchesFilter = dailyQuoteFilter === "all" || row.status === dailyQuoteFilter;
+      const matchesSearch =
+        !cleanSearch ||
+        row.symbol.toLowerCase().includes(cleanSearch) ||
+        (row.latestDate ?? "").includes(cleanSearch);
+      return matchesFilter && matchesSearch;
+    });
+    return sortDailyQuoteRows(matchingRows, dailyQuoteSortKey, dailyQuoteSortDirection);
+  }, [dailyQuoteRows, dailyQuoteSearch, dailyQuoteFilter, dailyQuoteSortKey, dailyQuoteSortDirection]);
+  const positiveDailyQuoteCount = loadedDailyQuoteRows.filter((row) => typeof row.dailyReturn === "number" && row.dailyReturn > 0).length;
+  const negativeDailyQuoteCount = loadedDailyQuoteRows.filter((row) => typeof row.dailyReturn === "number" && row.dailyReturn < 0).length;
+  const bestDailyQuoteRow = loadedDailyQuoteRows.reduce<DailyMarketQuoteRow | null>((bestRow, row) => {
+    if (typeof row.dailyReturn !== "number") return bestRow;
+    if (!bestRow || typeof bestRow.dailyReturn !== "number" || row.dailyReturn > bestRow.dailyReturn) return row;
+    return bestRow;
+  }, null);
+  const worstDailyQuoteRow = loadedDailyQuoteRows.reduce<DailyMarketQuoteRow | null>((worstRow, row) => {
+    if (typeof row.dailyReturn !== "number") return worstRow;
+    if (!worstRow || typeof worstRow.dailyReturn !== "number" || row.dailyReturn < worstRow.dailyReturn) return row;
+    return worstRow;
+  }, null);
   const marketWorkspaceItems: Array<{
     id: MarketDataWorkspace;
     label: string;
@@ -4197,6 +4255,22 @@ export function MarketDataPanel() {
       note: "可切換 Adj / Raw",
     },
   ];
+  const handleDailyQuoteSort = (sortKey: DailyQuoteSortKey) => {
+    setDailyQuoteSortDirection((currentDirection) => (
+      dailyQuoteSortKey === sortKey && currentDirection === "asc" ? "desc" : "asc"
+    ));
+    setDailyQuoteSortKey(sortKey);
+  };
+  const handleAddDailyQuoteToPortfolio = (row: DailyMarketQuoteRow) => {
+    if (row.status !== "loaded") return;
+    if (/\s/.test(row.symbol)) {
+      setDailyQuoteError(`「${row.symbol}」含有空格，目前投資組合分析會把空格視為分隔符；請先在 BigQuery master table 補一個不含空格的正式代號。`);
+      return;
+    }
+
+    handleAppendComparisonSymbol(row.symbol);
+    setActiveMarketWorkspace("portfolio");
+  };
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -4330,89 +4404,158 @@ export function MarketDataPanel() {
           ) : null}
 
           {dailyQuoteRows.length ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-3">
-              {dailyQuoteRows.map((row) => {
-                const isLoaded = row.status === "loaded";
-                return (
-                  <article
-                    key={`${row.symbol}-${row.priceBasis}`}
-                    className={`rounded-lg border p-4 ${
-                      isLoaded
-                        ? "border-slate-800 bg-slate-900/80"
-                        : "border-amber-900/60 bg-amber-950/10"
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="font-mono text-sm font-bold text-cyan-100">{row.symbol}</p>
-                        <p className="mt-1 text-[11px] text-slate-500">
-                          {row.priceBasis === "raw" ? "Raw price" : "Adjusted price"}
-                        </p>
-                      </div>
-                      <span className={`rounded px-2 py-1 text-[10px] font-bold ${
-                        isLoaded ? "bg-emerald-500/15 text-emerald-200" : "bg-amber-500/15 text-amber-200"
-                      }`}>
-                        {isLoaded ? "有資料" : "缺資料"}
-                      </span>
-                    </div>
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                <div className="rounded-md border border-slate-800 bg-slate-900/70 p-3">
+                  <p className="text-[10px] text-slate-500">漲跌分布</p>
+                  <p className="mt-1 text-lg font-bold font-mono text-slate-100">
+                    {positiveDailyQuoteCount} 上漲 / {negativeDailyQuoteCount} 下跌
+                  </p>
+                  <p className="mt-1 text-[11px] text-slate-600">以最新有效交易日計算前日漲跌</p>
+                </div>
+                <div className="rounded-md border border-slate-800 bg-slate-900/70 p-3">
+                  <p className="text-[10px] text-slate-500">前日最強</p>
+                  <p className="mt-1 text-lg font-bold font-mono text-emerald-200">
+                    {bestDailyQuoteRow?.symbol ?? "--"}
+                  </p>
+                  <p className="mt-1 text-[11px] font-mono text-emerald-200">
+                    {formatSignedPercent(bestDailyQuoteRow?.dailyReturn)}
+                  </p>
+                </div>
+                <div className="rounded-md border border-slate-800 bg-slate-900/70 p-3">
+                  <p className="text-[10px] text-slate-500">前日最弱</p>
+                  <p className="mt-1 text-lg font-bold font-mono text-rose-200">
+                    {worstDailyQuoteRow?.symbol ?? "--"}
+                  </p>
+                  <p className="mt-1 text-[11px] font-mono text-rose-200">
+                    {formatSignedPercent(worstDailyQuoteRow?.dailyReturn)}
+                  </p>
+                </div>
+              </div>
 
-                    {isLoaded ? (
-                      <>
-                        <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
-                          <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3">
-                            <p className="text-[10px] text-slate-500">今日價格</p>
-                            <p className="mt-1 text-2xl font-bold font-mono text-slate-100">
-                              {formatPrice(row.latestPrice)}
-                            </p>
-                            <p className="mt-1 text-[11px] text-slate-600">{row.latestDate ?? "--"}</p>
-                          </div>
-                          <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3">
-                            <p className="text-[10px] text-slate-500">前日漲跌</p>
-                            <p className={`mt-1 text-2xl font-bold font-mono ${dailyReturnTextClass(row.dailyReturn)}`}>
+              <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto_auto] gap-2 rounded-lg border border-slate-800 bg-slate-900/60 p-3 text-xs">
+                <input
+                  value={dailyQuoteSearch}
+                  onChange={(event) => setDailyQuoteSearch(event.target.value)}
+                  placeholder="搜尋標的或日期"
+                  className="min-w-0 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-slate-100 outline-none placeholder:text-slate-700 focus:border-cyan-600"
+                />
+                <select
+                  value={dailyQuoteFilter}
+                  onChange={(event) => setDailyQuoteFilter(event.target.value as DailyQuoteFilter)}
+                  className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100"
+                >
+                  <option value="all">全部標的</option>
+                  <option value="loaded">只看有資料</option>
+                  <option value="error">只看缺資料</option>
+                </select>
+                <div className="rounded-md border border-slate-800 bg-slate-950 px-3 py-2 text-slate-400">
+                  顯示 {filteredDailyQuoteRows.length} / {dailyQuoteRows.length} 檔
+                </div>
+              </div>
+
+              <div className="overflow-x-auto rounded-lg border border-slate-800">
+                <table className="min-w-[1040px] w-full border-collapse text-left text-xs">
+                  <thead className="bg-slate-900 text-slate-500">
+                    <tr>
+                      {[
+                        ["symbol", "標的"],
+                        ["latestDate", "資料日"],
+                        ["latestPrice", "價格"],
+                        ["dailyReturn", "前日漲跌"],
+                        ["ytdReturn", "今年漲跌"],
+                        ["status", "狀態"],
+                      ].map(([sortKey, label]) => (
+                        <th key={sortKey} className="border-b border-slate-800 px-3 py-2 font-medium">
+                          <button
+                            type="button"
+                            onClick={() => handleDailyQuoteSort(sortKey as DailyQuoteSortKey)}
+                            className="font-bold text-slate-300 hover:text-cyan-200"
+                          >
+                            {label}
+                            {dailyQuoteSortKey === sortKey ? ` ${dailyQuoteSortDirection.toUpperCase()}` : ""}
+                          </button>
+                        </th>
+                      ))}
+                      <th className="border-b border-slate-800 px-3 py-2 font-bold text-slate-300">資料量</th>
+                      <th className="border-b border-slate-800 px-3 py-2 font-bold text-slate-300">動作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredDailyQuoteRows.length ? filteredDailyQuoteRows.map((row) => {
+                      const isLoaded = row.status === "loaded";
+                      const canAddToPortfolio = isLoaded && !/\s/.test(row.symbol);
+                      return (
+                        <tr key={`${row.symbol}-${row.priceBasis}`} className="border-b border-slate-800/70 bg-slate-950/60 hover:bg-slate-900">
+                          <td className="px-3 py-3">
+                            <p className="font-mono font-bold text-cyan-100">{row.symbol}</p>
+                            <p className="mt-0.5 text-[10px] text-slate-600">{row.priceBasis === "raw" ? "Raw" : "Adj"}</p>
+                          </td>
+                          <td className="px-3 py-3 font-mono text-slate-300">{row.latestDate ?? "--"}</td>
+                          <td className="px-3 py-3 font-mono text-slate-100">{formatPrice(row.latestPrice)}</td>
+                          <td className="px-3 py-3">
+                            <p className={`font-mono font-bold ${dailyReturnTextClass(row.dailyReturn)}`}>
                               {formatSignedPercent(row.dailyReturn)}
                             </p>
-                            <p className={`mt-1 text-[11px] font-mono ${dailyReturnTextClass(row.dailyReturn)}`}>
+                            <p className={`mt-0.5 font-mono text-[10px] ${dailyReturnTextClass(row.dailyReturn)}`}>
                               {formatSignedPrice(row.dailyPriceChange)}
                             </p>
-                          </div>
-                          <div className="rounded-md border border-slate-800 bg-slate-950/60 p-3">
-                            <p className="text-[10px] text-slate-500">今年漲跌</p>
-                            <p className={`mt-1 text-2xl font-bold font-mono ${dailyReturnTextClass(row.ytdReturn)}`}>
+                          </td>
+                          <td className="px-3 py-3">
+                            <p className={`font-mono font-bold ${dailyReturnTextClass(row.ytdReturn)}`}>
                               {formatSignedPercent(row.ytdReturn)}
                             </p>
-                            <p className={`mt-1 text-[11px] font-mono ${dailyReturnTextClass(row.ytdReturn)}`}>
-                              {formatSignedPrice(row.ytdPriceChange)}
+                            <p className="mt-0.5 font-mono text-[10px] text-slate-600">
+                              起日 {row.ytdStartDate ?? "--"}
                             </p>
-                          </div>
-                        </div>
-                        <div className="mt-4 grid grid-cols-2 lg:grid-cols-4 gap-2 text-[11px]">
-                          <div className="rounded-md border border-slate-800 bg-slate-950/60 p-2">
-                            <p className="text-slate-600">資料日</p>
-                            <p className="mt-1 font-mono text-slate-300">{row.latestDate ?? "--"}</p>
-                          </div>
-                          <div className="rounded-md border border-slate-800 bg-slate-950/60 p-2">
-                            <p className="text-slate-600">YTD 起日</p>
-                            <p className="mt-1 font-mono text-slate-300">{row.ytdStartDate ?? "--"}</p>
-                          </div>
-                          <div className="rounded-md border border-slate-800 bg-slate-950/60 p-2">
-                            <p className="text-slate-600">YTD 起價</p>
-                            <p className="mt-1 font-mono text-slate-300">{formatPrice(row.ytdStartPrice)}</p>
-                          </div>
-                          <div className="rounded-md border border-slate-800 bg-slate-950/60 p-2">
-                            <p className="text-slate-600">價格口徑</p>
-                            <p className="mt-1 font-mono text-slate-300">{row.priceBasis === "raw" ? "Raw" : "Adj"}</p>
-                          </div>
-                        </div>
-                      </>
-                    ) : (
-                      <div className="mt-4 rounded-md border border-amber-900/40 bg-slate-950/50 p-3 text-[11px] text-amber-100">
-                        <p className="font-bold">BigQuery 目前沒有這個口徑的可用價格。</p>
-                        <p className="mt-2 break-words text-amber-200/70">{row.errorMessage}</p>
-                      </div>
+                          </td>
+                          <td className="px-3 py-3">
+                            <span className={`rounded px-2 py-1 text-[10px] font-bold ${
+                              isLoaded ? "bg-emerald-500/15 text-emerald-200" : "bg-amber-500/15 text-amber-200"
+                            }`}>
+                              {isLoaded ? "有資料" : "缺資料"}
+                            </span>
+                          </td>
+                          <td className="px-3 py-3 font-mono text-slate-400">
+                            {row.selectedPriceRows === null ? "--" : row.selectedPriceRows.toLocaleString("zh-TW")}
+                          </td>
+                          <td className="px-3 py-3">
+                            <button
+                              type="button"
+                              onClick={() => handleAddDailyQuoteToPortfolio(row)}
+                              disabled={!canAddToPortfolio}
+                              title={canAddToPortfolio ? "加入投資組合分析" : "缺資料或代號含空格，暫不加入投組分析"}
+                              className="rounded-md border border-cyan-800 bg-cyan-950/40 px-2 py-1 text-[10px] font-bold text-cyan-100 hover:bg-cyan-900 disabled:cursor-not-allowed disabled:border-slate-800 disabled:bg-slate-900 disabled:text-slate-600"
+                            >
+                              加入分析
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    }) : (
+                      <tr>
+                        <td colSpan={8} className="px-3 py-6 text-center text-slate-500">
+                          沒有符合條件的標的。
+                        </td>
+                      </tr>
                     )}
-                  </article>
-                );
-              })}
+                  </tbody>
+                </table>
+              </div>
+
+              {failedDailyQuoteRows.length ? (
+                <div className="rounded-lg border border-amber-900/50 bg-amber-950/10 p-3 text-xs">
+                  <p className="font-bold text-amber-200">缺資料標的</p>
+                  <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {failedDailyQuoteRows.map((row) => (
+                      <div key={`${row.symbol}-missing`} className="rounded-md border border-amber-900/40 bg-slate-950/60 p-2">
+                        <p className="font-mono font-bold text-amber-100">{row.symbol}</p>
+                        <p className="mt-1 break-words text-[11px] text-amber-200/70">{row.errorMessage}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
           ) : (
             <div className="rounded-lg border border-dashed border-cyan-900/60 bg-cyan-950/10 p-5 text-xs text-slate-400">
