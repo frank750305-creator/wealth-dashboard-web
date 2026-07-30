@@ -592,9 +592,11 @@ type MarketDataWorkspace = "quotes" | "portfolio";
 type DailyQuoteFilter = "all" | "loaded" | "error";
 type DailyQuoteSortKey = "symbol" | "latestDate" | "latestPrice" | "dailyReturn" | "ytdReturn" | "status";
 type SortDirection = "asc" | "desc";
+type DailyQuoteQualityLevel = "ready" | "watch" | "risk";
 
 type DailyMarketQuoteRow = {
   symbol: string;
+  latestAnyDate: string | null;
   latestDate: string | null;
   latestPrice: number | null;
   dailyReturn: number | null;
@@ -614,6 +616,12 @@ type DailyMarketQuoteRow = {
   alternateSelectedPriceRows?: number | null;
 };
 
+type DailyQuoteQuality = {
+  level: DailyQuoteQualityLevel;
+  label: string;
+  note: string;
+};
+
 function finiteMarketNumber(value: number | null | undefined) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
@@ -624,6 +632,14 @@ function priceBasisLabel(priceBasis: "adjusted" | "raw") {
 
 function priceBasisColumnName(priceBasis: "adjusted" | "raw") {
   return priceBasis === "raw" ? "raw_price" : "adj_price";
+}
+
+function daysBetweenIsoDates(laterDate: string | null | undefined, earlierDate: string | null | undefined) {
+  if (!laterDate || !earlierDate) return null;
+  const laterTime = Date.parse(laterDate);
+  const earlierTime = Date.parse(earlierDate);
+  if (!Number.isFinite(laterTime) || !Number.isFinite(earlierTime)) return null;
+  return Math.max(0, Math.round((laterTime - earlierTime) / 86400000));
 }
 
 function parseDailyQuoteSymbols(input: string, limit = 500) {
@@ -699,6 +715,7 @@ function dailyQuoteRowFromHistory(
 
   return {
     symbol: history.symbol || symbol,
+    latestAnyDate: history.summary.latest_date,
     latestDate: latest?.date ?? history.summary.latest_date,
     latestPrice,
     dailyReturn,
@@ -726,6 +743,7 @@ function dailyQuoteRowFromQuoteCard(
 
   return {
     symbol: quote.symbol,
+    latestAnyDate: quote.latest_any_date,
     latestDate: quote.latest_date ?? quote.latest_any_date,
     latestPrice,
     dailyReturn,
@@ -817,6 +835,7 @@ async function loadDailyRowsForSymbols(
 
   return uniqueSymbols.map((symbol) => rowsBySymbol.get(symbol.toUpperCase()) ?? {
     symbol,
+    latestAnyDate: null,
     latestDate: null,
     latestPrice: null,
     dailyReturn: null,
@@ -856,6 +875,7 @@ async function loadDailyRowsFromHistoryFallback(
 
     return {
       symbol,
+      latestAnyDate: null,
       latestDate: null,
       latestPrice: null,
       dailyReturn: null,
@@ -891,6 +911,60 @@ function dailyReturnTextClass(value: number | null | undefined) {
   if (value > 0) return "text-emerald-200";
   if (value < 0) return "text-rose-200";
   return "text-slate-300";
+}
+
+function dailyQuoteQuality(row: DailyMarketQuoteRow): DailyQuoteQuality {
+  if (row.status === "error") {
+    if (row.alternatePriceBasis) {
+      return {
+        level: "watch",
+        label: `${priceBasisLabel(row.priceBasis)} 缺`,
+        note: `可切 ${priceBasisLabel(row.alternatePriceBasis)} 查看價格`,
+      };
+    }
+    return {
+      level: "risk",
+      label: "不可用",
+      note: row.errorMessage || "BigQuery 沒有可用價格",
+    };
+  }
+
+  const lagDays = daysBetweenIsoDates(row.latestAnyDate, row.latestDate);
+  if (row.priceBasis === "adjusted" && lagDays !== null && lagDays >= 7) {
+    return {
+      level: lagDays >= 30 ? "risk" : "watch",
+      label: "Adj 延遲",
+      note: `晚於原始最新日 ${lagDays} 天`,
+    };
+  }
+
+  const absoluteYtdReturn = Math.abs(row.ytdReturn ?? 0);
+  if (row.priceBasis === "raw" && absoluteYtdReturn >= 1) {
+    return {
+      level: "risk",
+      label: "Raw 異常",
+      note: "報酬率可能受單位、配息或拆分影響",
+    };
+  }
+  if (row.priceBasis === "raw" && absoluteYtdReturn >= 0.5) {
+    return {
+      level: "watch",
+      label: "Raw 觀察",
+      note: "報酬率偏大，正式分析建議核對 Adj",
+    };
+  }
+
+  return {
+    level: "ready",
+    label: "可分析",
+    note: row.priceBasis === "raw" ? "Raw 可查價，投組分析仍建議核對 Adj" : "資料口徑可用",
+  };
+}
+
+function dailyQuoteQualityBadgeClass(level: DailyQuoteQualityLevel) {
+  if (level === "risk") return "bg-rose-500/15 text-rose-200";
+  if (level === "watch") return "bg-amber-500/15 text-amber-200";
+  return "bg-emerald-500/15 text-emerald-200";
 }
 
 function dailyQuoteSortValue(row: DailyMarketQuoteRow, sortKey: DailyQuoteSortKey) {
@@ -4342,6 +4416,32 @@ export function MarketDataPanel() {
   const isBackofficeWorkspace = false;
   const loadedDailyQuoteRows = dailyQuoteRows.filter((row) => row.status === "loaded");
   const failedDailyQuoteRows = dailyQuoteRows.filter((row) => row.status === "error");
+  const dailyQuoteQualitySummary = useMemo(() => {
+    const summary = {
+      readyCount: 0,
+      watchCount: 0,
+      riskCount: 0,
+      riskExamples: [] as string[],
+    };
+
+    dailyQuoteRows.forEach((row) => {
+      const quality = dailyQuoteQuality(row);
+      if (quality.level === "ready") {
+        summary.readyCount += 1;
+        return;
+      }
+      if (quality.level === "watch") {
+        summary.watchCount += 1;
+        return;
+      }
+      summary.riskCount += 1;
+      if (summary.riskExamples.length < 3) {
+        summary.riskExamples.push(row.symbol);
+      }
+    });
+
+    return summary;
+  }, [dailyQuoteRows]);
   const filteredDailyQuoteRows = useMemo(() => {
     const cleanSearch = dailyQuoteSearch.trim().toLowerCase();
     const matchingRows = dailyQuoteRows.filter((row) => {
@@ -4416,6 +4516,13 @@ export function MarketDataPanel() {
       label: "價格口徑",
       value: assetPriceBasis === "raw" ? "Raw" : "Adjusted",
       note: "可切換 Adj / Raw",
+    },
+    {
+      label: "資料品質",
+      value: dailyQuoteRows.length ? `${dailyQuoteQualitySummary.readyCount}/${dailyQuoteRows.length} 可分析` : "--",
+      note: dailyQuoteRows.length
+        ? `觀察 ${dailyQuoteQualitySummary.watchCount}，風險 ${dailyQuoteQualitySummary.riskCount}`
+        : "等待行情載入",
     },
   ];
   const handleDailyQuoteSort = (sortKey: DailyQuoteSortKey) => {
@@ -4546,7 +4653,7 @@ export function MarketDataPanel() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 xl:grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 xl:grid-cols-5 gap-2">
             {dailyMarketSummaryCards.map((card) => (
               <div key={card.label} className="rounded-md border border-slate-800 bg-slate-900/70 p-3">
                 <p className="text-[10px] text-slate-500">{card.label}</p>
@@ -4563,6 +4670,21 @@ export function MarketDataPanel() {
                 : "border-red-900/60 bg-red-950/30 text-red-300"
             }`}>
               {dailyQuoteError}
+            </div>
+          ) : null}
+
+          {dailyQuoteRows.length && (dailyQuoteQualitySummary.watchCount || dailyQuoteQualitySummary.riskCount) ? (
+            <div className="rounded-lg border border-amber-900/60 bg-amber-950/10 p-3 text-xs text-amber-100">
+              <p className="font-bold">資料品質提醒</p>
+              <p className="mt-1 text-amber-200/80">
+                目前有 {dailyQuoteQualitySummary.watchCount} 檔觀察、{dailyQuoteQualitySummary.riskCount} 檔風險。
+                {assetPriceBasis === "raw"
+                  ? " Raw 可用來查最新價，但報酬率可能受單位、配息或拆分影響；正式投組分析建議優先核對 Adj。"
+                  : " Adj 較適合報酬分析；若資料日落後，請先依品質欄處理。"}
+                {dailyQuoteQualitySummary.riskExamples.length
+                  ? ` 風險例：${dailyQuoteQualitySummary.riskExamples.join("、")}。`
+                  : ""}
+              </p>
             </div>
           ) : null}
 
@@ -4618,7 +4740,7 @@ export function MarketDataPanel() {
               </div>
 
               <div className="overflow-x-auto rounded-lg border border-slate-800">
-                <table className="min-w-[1040px] w-full border-collapse text-left text-xs">
+                <table className="min-w-[1180px] w-full border-collapse text-left text-xs">
                   <thead className="bg-slate-900 text-slate-500">
                     <tr>
                       {[
@@ -4640,6 +4762,7 @@ export function MarketDataPanel() {
                           </button>
                         </th>
                       ))}
+                      <th className="border-b border-slate-800 px-3 py-2 font-bold text-slate-300">品質</th>
                       <th className="border-b border-slate-800 px-3 py-2 font-bold text-slate-300">資料量</th>
                       <th className="border-b border-slate-800 px-3 py-2 font-bold text-slate-300">動作</th>
                     </tr>
@@ -4649,6 +4772,7 @@ export function MarketDataPanel() {
                       const isLoaded = row.status === "loaded";
                       const canAddToPortfolio = isLoaded && !/\s/.test(row.symbol);
                       const canSwitchPriceBasis = Boolean(row.alternatePriceBasis);
+                      const quality = dailyQuoteQuality(row);
                       return (
                         <tr key={`${row.symbol}-${row.priceBasis}`} className="border-b border-slate-800/70 bg-slate-950/60 hover:bg-slate-900">
                           <td className="px-3 py-3">
@@ -4688,6 +4812,14 @@ export function MarketDataPanel() {
                                   : "缺資料"}
                             </span>
                           </td>
+                          <td className="px-3 py-3">
+                            <span className={`rounded px-2 py-1 text-[10px] font-bold ${dailyQuoteQualityBadgeClass(quality.level)}`}>
+                              {quality.label}
+                            </span>
+                            <p className="mt-1 max-w-[180px] text-[10px] leading-4 text-slate-500">
+                              {quality.note}
+                            </p>
+                          </td>
                           <td className="px-3 py-3 font-mono text-slate-400">
                             {row.selectedPriceRows === null ? "--" : row.selectedPriceRows.toLocaleString("zh-TW")}
                           </td>
@@ -4717,7 +4849,7 @@ export function MarketDataPanel() {
                       );
                     }) : (
                       <tr>
-                        <td colSpan={8} className="px-3 py-6 text-center text-slate-500">
+                        <td colSpan={9} className="px-3 py-6 text-center text-slate-500">
                           沒有符合條件的標的。
                         </td>
                       </tr>
