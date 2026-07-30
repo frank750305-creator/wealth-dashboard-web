@@ -8,6 +8,7 @@ import {
   type QualityStatus,
 } from "@/lib/assetResearchWorkflow";
 import type {
+  BigQueryAdjustedStaleSymbol,
   BigQueryFxCurrency,
   BigQueryMarketDiagnostics,
   BigQueryQualityScorecard,
@@ -30,6 +31,7 @@ type BigQueryWarehouseSnapshotSectionProps = {
   bigQueryDiagnostics: BigQueryMarketDiagnostics;
   fxFreshnessDays: number | null;
   staleSymbols: BigQueryStaleSymbol[];
+  adjustedStaleSymbols: BigQueryAdjustedStaleSymbol[];
   fxCurrencies: BigQueryFxCurrency[];
 };
 
@@ -186,6 +188,7 @@ export function BigQueryWarehouseSnapshotSection({
   bigQueryDiagnostics,
   fxFreshnessDays,
   staleSymbols,
+  adjustedStaleSymbols,
   fxCurrencies,
 }: BigQueryWarehouseSnapshotSectionProps) {
   return (
@@ -311,6 +314,40 @@ export function BigQueryWarehouseSnapshotSection({
                   <div className="flex items-center justify-between gap-3 text-[11px] text-slate-500">
                     <span className="font-mono">{symbol.latest_date ?? "--"}</span>
                     <span className="font-mono">{formatCount(symbol.row_count)} rows</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
+      {adjustedStaleSymbols.length ? (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-3 text-[11px]">
+            <span className="text-slate-500">Adj 落後商品</span>
+            <span className="text-slate-600 font-mono">{adjustedStaleSymbols.length} 檔</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+            {adjustedStaleSymbols.slice(0, 8).map((symbol) => {
+              const adjustedLagDays = symbol.adjusted_lag_days ?? null;
+              return (
+                <div key={`${symbol.symbol}-adjusted-lag`} className="bg-slate-900 border border-amber-900/50 rounded-md p-2 space-y-1">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-slate-200 truncate">{symbol.symbol}</span>
+                    <span
+                      className={`rounded px-2 py-0.5 text-[10px] font-bold ${qualityBadgeClass(
+                        freshnessStatus(adjustedLagDays),
+                      )}`}
+                    >
+                      {adjustedLagDays === null ? "缺 Adj" : `${adjustedLagDays} 天`}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-500">
+                    <span className="font-mono">Adj {symbol.latest_adjusted_date ?? "--"}</span>
+                    <span className="font-mono">Raw {symbol.latest_raw_date ?? "--"}</span>
+                    <span className="font-mono">Latest {symbol.latest_any_date ?? "--"}</span>
+                    <span className="font-mono">{formatCount(symbol.adjusted_price_rows)} / {formatCount(symbol.raw_price_rows)}</span>
                   </div>
                 </div>
               );

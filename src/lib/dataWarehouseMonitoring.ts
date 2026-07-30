@@ -1,4 +1,5 @@
 import type {
+  BigQueryAdjustedStaleSymbol,
   BigQueryFxCurrency,
   BigQueryMarketDiagnostics,
   BigQuerySchemaCheck,
@@ -117,6 +118,11 @@ function staleSymbolExecutionStatus(staleDays: number | null): DataWarehouseStat
   return staleDays >= 10 ? "block" : "watch";
 }
 
+function adjustedStaleSymbolExecutionStatus(lagDays: number | null): DataWarehouseStatus {
+  if (lagDays === null) return "block";
+  return lagDays >= 30 ? "block" : "watch";
+}
+
 export function buildDataPipelineHealthItems({
   hasBigQueryCredentials,
   diagnostics,
@@ -126,8 +132,10 @@ export function buildDataPipelineHealthItems({
   symbolCoverageStatus,
   priceDepthStatus,
   staleSymbolStatus,
+  adjustedStaleStatus,
   fxCurrencyStatus,
   staleSymbols,
+  adjustedStaleSymbols,
   fxCurrencies,
   riskOwner,
 }: {
@@ -139,8 +147,10 @@ export function buildDataPipelineHealthItems({
   symbolCoverageStatus: DataWarehouseQualityStatus;
   priceDepthStatus: DataWarehouseQualityStatus;
   staleSymbolStatus: DataWarehouseQualityStatus;
+  adjustedStaleStatus: DataWarehouseQualityStatus;
   fxCurrencyStatus: DataWarehouseQualityStatus;
   staleSymbols: BigQueryStaleSymbol[];
+  adjustedStaleSymbols: BigQueryAdjustedStaleSymbol[];
   fxCurrencies: BigQueryFxCurrency[];
   riskOwner: string;
 }): DataPipelineHealthItem[] {
@@ -207,6 +217,14 @@ export function buildDataPipelineHealthItems({
       target: "應為 0；5 檔以上暫停",
       owner: cleanRiskOwner,
       action: staleSymbols.length ? "優先補跑落後商品，再確認最新交易日" : "未偵測到落後商品",
+    },
+    {
+      label: "Adj 價格同步",
+      status: diagnostics ? qualityToExecutionStatus(adjustedStaleStatus) : "watch",
+      value: `${adjustedStaleSymbols.length} 檔`,
+      target: "adj_price 應跟 raw/latest date 同步；5 檔以上暫停",
+      owner: cleanRiskOwner,
+      action: adjustedStaleSymbols.length ? "優先補齊 adj_price，否則報酬率要切 Raw 或排除" : "Adj 價格日期一致",
     },
     {
       label: "匯率幣別",
@@ -289,11 +307,13 @@ export function dataPipelineCsv({
   healthItems,
   tableSnapshots,
   staleSymbols,
+  adjustedStaleSymbols,
   fxCurrencies,
 }: {
   healthItems: DataPipelineHealthItem[];
   tableSnapshots: DataPipelineTableSnapshot[];
   staleSymbols: BigQueryStaleSymbol[];
+  adjustedStaleSymbols: BigQueryAdjustedStaleSymbol[];
   fxCurrencies: BigQueryFxCurrency[];
 }) {
   const header = ["section", "name", "status", "value", "target", "owner", "action"];
@@ -327,6 +347,15 @@ export function dataPipelineCsv({
       `${formatCount(symbol.row_count)} rows`,
     ];
   });
+  const adjustedStaleRows = adjustedStaleSymbols.map((symbol) => [
+    "adjusted_lag_symbol",
+    symbol.symbol,
+    executionReviewLabel(adjustedStaleSymbolExecutionStatus(symbol.adjusted_lag_days)),
+    `adj ${symbol.latest_adjusted_date ?? "--"} / raw ${symbol.latest_raw_date ?? "--"} / latest ${symbol.latest_any_date ?? "--"}`,
+    symbol.adjusted_lag_days === null ? "missing adj" : `${symbol.adjusted_lag_days} days`,
+    "",
+    `${formatCount(symbol.adjusted_price_rows)} adj rows / ${formatCount(symbol.raw_price_rows)} raw rows`,
+  ]);
   const fxRows = fxCurrencies.map((currency) => [
     "fx_currency",
     currency.currency,
@@ -337,7 +366,7 @@ export function dataPipelineCsv({
     "",
   ]);
 
-  return [header, ...healthRows, ...snapshotRows, ...staleRows, ...fxRows]
+  return [header, ...healthRows, ...snapshotRows, ...staleRows, ...adjustedStaleRows, ...fxRows]
     .map((row) => row.map(csvCell).join(","))
     .join("\n");
 }
@@ -347,12 +376,14 @@ export function bigQueryDiagnosticsCsv({
   qualityCards,
   issueCards,
   staleSymbols,
+  adjustedStaleSymbols,
   fxCurrencies,
 }: {
   diagnostics: BigQueryMarketDiagnostics;
   qualityCards: DataQualitySummaryCard[];
   issueCards: DataQualitySummaryCard[];
   staleSymbols: BigQueryStaleSymbol[];
+  adjustedStaleSymbols: BigQueryAdjustedStaleSymbol[];
   fxCurrencies: BigQueryFxCurrency[];
 }) {
   const rows = [
@@ -382,6 +413,13 @@ export function bigQueryDiagnosticsCsv({
       symbol.latest_date ?? "",
       symbol.stale_days ?? "",
       symbol.row_count,
+    ]),
+    ...adjustedStaleSymbols.map((symbol) => [
+      "adjusted_lag_symbol",
+      symbol.symbol,
+      symbol.latest_adjusted_date ?? "",
+      symbol.adjusted_lag_days ?? "",
+      `raw ${symbol.latest_raw_date ?? ""} / latest ${symbol.latest_any_date ?? ""}`,
     ]),
     ...fxCurrencies.map((currency) => [
       "fx_currency",
@@ -490,6 +528,7 @@ export function dataContractCsv(rows: DataContractItem[]) {
 export function buildCoverageUniverseItems({
   diagnostics,
   staleSymbols,
+  adjustedStaleSymbols,
   fxCurrencies,
   symbolCoverageStatus,
   priceDepthStatus,
@@ -498,6 +537,7 @@ export function buildCoverageUniverseItems({
 }: {
   diagnostics?: BigQueryMarketDiagnostics;
   staleSymbols: BigQueryStaleSymbol[];
+  adjustedStaleSymbols: BigQueryAdjustedStaleSymbol[];
   fxCurrencies: BigQueryFxCurrency[];
   symbolCoverageStatus: DataWarehouseQualityStatus;
   priceDepthStatus: DataWarehouseQualityStatus;
@@ -508,12 +548,19 @@ export function buildCoverageUniverseItems({
   if (!diagnostics) return [];
 
   const staleStatus: DataWarehouseStatus = staleSymbols.length >= 5 ? "block" : staleSymbols.length > 0 ? "watch" : "pass";
+  const adjustedStaleStatus: DataWarehouseStatus = adjustedStaleSymbols.length >= 5 ? "block" : adjustedStaleSymbols.length > 0 ? "watch" : "pass";
   const staleCoverage = staleSymbols.length
     ? staleSymbols
         .slice(0, 5)
         .map((symbol) => `${symbol.symbol}:${symbol.stale_days ?? daysSinceDate(symbol.latest_date) ?? "--"}d`)
         .join(", ")
     : "未偵測到落後商品";
+  const adjustedStaleCoverage = adjustedStaleSymbols.length
+    ? adjustedStaleSymbols
+        .slice(0, 5)
+        .map((symbol) => `${symbol.symbol}:${symbol.adjusted_lag_days ?? "--"}d`)
+        .join(", ")
+    : "Adj 價格日期一致";
   const fxCoverage = fxCurrencies.length
     ? fxCurrencies
         .slice(0, 8)
@@ -553,6 +600,15 @@ export function buildCoverageUniverseItems({
       coverage: staleCoverage,
       owner: cleanRiskOwner,
       action: staleSymbols.length ? "優先補跑落後商品，避免模型拿到過期價格" : "維持每日批次監控",
+    },
+    {
+      label: "Adj 報酬資料",
+      status: adjustedStaleStatus,
+      count: `${adjustedStaleSymbols.length} 檔`,
+      target: "Adj 落後商品 0 檔",
+      coverage: adjustedStaleCoverage,
+      owner: cleanRiskOwner,
+      action: adjustedStaleSymbols.length ? "補齊 adj_price 後再放行 Adj 報酬分析" : "可支援 Adj 報酬分析",
     },
     {
       label: "跨幣別覆蓋",

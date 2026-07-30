@@ -1176,8 +1176,10 @@ export function MarketDataPanel() {
   const priceFreshnessStatus = freshnessStatus(priceFreshnessDays);
   const fxFreshnessStatus = freshnessStatus(fxFreshnessDays);
   const staleSymbols = bigQueryDiagnostics?.staleSymbols ?? [];
+  const adjustedStaleSymbols = bigQueryDiagnostics?.adjustedStaleSymbols ?? [];
   const fxCurrencies = bigQueryDiagnostics?.fxCurrencies ?? [];
   const staleSymbolStatus: QualityStatus = staleSymbols.length >= 5 ? "risk" : staleSymbols.length > 0 ? "watch" : "strong";
+  const adjustedStaleStatus: QualityStatus = adjustedStaleSymbols.length >= 5 ? "risk" : adjustedStaleSymbols.length > 0 ? "watch" : "strong";
   const fxCurrencyStatus: QualityStatus = coverageStatus(fxCurrencies.length, 2, 1);
   const schemaStatus: QualityStatus = bigQueryDiagnostics
     ? bigQueryDiagnostics.schemaChecks.priceTable.isReady && bigQueryDiagnostics.schemaChecks.fxTable.isReady
@@ -1234,6 +1236,12 @@ export function MarketDataPanel() {
       value: `${staleSymbols.length} 檔`,
       status: bigQueryDiagnostics ? staleSymbolStatus : "neutral",
       note: staleSymbols.length ? "部分商品最新日落後於價格表最新日" : "未偵測到落後商品",
+    },
+    {
+      label: "Adj 落後",
+      value: `${adjustedStaleSymbols.length} 檔`,
+      status: bigQueryDiagnostics ? adjustedStaleStatus : "neutral",
+      note: adjustedStaleSymbols.length ? "adj_price 晚於 raw/latest date，報酬分析需先修復" : "Adj 價格日期一致",
     },
     {
       label: "匯率幣別",
@@ -1438,8 +1446,10 @@ export function MarketDataPanel() {
     symbolCoverageStatus,
     priceDepthStatus,
     staleSymbolStatus,
+    adjustedStaleStatus,
     fxCurrencyStatus,
     staleSymbols,
+    adjustedStaleSymbols,
     fxCurrencies,
     riskOwner,
   });
@@ -1470,6 +1480,7 @@ export function MarketDataPanel() {
   const coverageUniverseItems = buildCoverageUniverseItems({
     diagnostics: bigQueryDiagnostics ?? undefined,
     staleSymbols,
+    adjustedStaleSymbols,
     fxCurrencies,
     symbolCoverageStatus,
     priceDepthStatus,
@@ -2442,6 +2453,7 @@ export function MarketDataPanel() {
         qualityCards,
         issueCards,
         staleSymbols,
+        adjustedStaleSymbols,
         fxCurrencies,
       }),
       "text/csv;charset=utf-8",
@@ -2454,6 +2466,7 @@ export function MarketDataPanel() {
         healthItems: dataPipelineHealthItems,
         tableSnapshots: dataPipelineTableSnapshots,
         staleSymbols,
+        adjustedStaleSymbols,
         fxCurrencies,
       }),
       "text/csv;charset=utf-8",
@@ -5337,6 +5350,7 @@ export function MarketDataPanel() {
                 bigQueryDiagnostics={bigQueryDiagnostics}
                 fxFreshnessDays={fxFreshnessDays}
                 staleSymbols={staleSymbols}
+                adjustedStaleSymbols={adjustedStaleSymbols}
                 fxCurrencies={fxCurrencies}
               />
               )}

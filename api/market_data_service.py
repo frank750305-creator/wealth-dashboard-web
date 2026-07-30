@@ -71,6 +71,7 @@ def load_bigquery_market_diagnostics() -> Dict:
         "fxSummary": {},
         "recentSymbols": [],
         "staleSymbols": [],
+        "adjustedStaleSymbols": [],
         "fxCurrencies": [],
         "qualityScorecard": {},
     }
@@ -135,6 +136,38 @@ def load_bigquery_market_diagnostics() -> Dict:
     ORDER BY stale_days DESC, latest_date ASC, row_count DESC
     LIMIT 12
     """
+    adjusted_stale_symbols_query = f"""
+    WITH symbol_stats AS (
+        SELECT
+            symbol,
+            MAX(DATE(date)) AS latest_any_date,
+            MAX(IF(SAFE_CAST(adj_price AS FLOAT64) > 0, DATE(date), NULL)) AS latest_adjusted_date,
+            MAX(IF(SAFE_CAST(raw_price AS FLOAT64) > 0, DATE(date), NULL)) AS latest_raw_date,
+            COUNT(1) AS row_count,
+            COUNTIF(SAFE_CAST(adj_price AS FLOAT64) > 0) AS adjusted_price_rows,
+            COUNTIF(SAFE_CAST(raw_price AS FLOAT64) > 0) AS raw_price_rows
+        FROM {price_table}
+        GROUP BY symbol
+    )
+    SELECT
+        symbol,
+        latest_any_date,
+        latest_adjusted_date,
+        latest_raw_date,
+        row_count,
+        adjusted_price_rows,
+        raw_price_rows,
+        DATE_DIFF(latest_any_date, latest_adjusted_date, DAY) AS adjusted_lag_days,
+        DATE_DIFF(latest_any_date, latest_raw_date, DAY) AS raw_lag_days
+    FROM symbol_stats
+    WHERE latest_any_date IS NOT NULL
+      AND (
+        latest_adjusted_date IS NULL
+        OR DATE_DIFF(latest_any_date, latest_adjusted_date, DAY) >= 7
+      )
+    ORDER BY adjusted_lag_days DESC, latest_any_date DESC, row_count DESC, symbol
+    LIMIT 20
+    """
     fx_currencies_query = f"""
     SELECT
         currency,
@@ -152,6 +185,7 @@ def load_bigquery_market_diagnostics() -> Dict:
         fx_summary = next(iter(client.query(fx_summary_query).result()), None)
         recent_symbols = list(client.query(recent_symbols_query).result())
         stale_symbols = list(client.query(stale_symbols_query).result())
+        adjusted_stale_symbols = list(client.query(adjusted_stale_symbols_query).result())
         fx_currencies = list(client.query(fx_currencies_query).result())
     except Exception as exc:
         raise MarketDataQueryError(f"BigQuery diagnostics query failed: {exc}") from exc
@@ -171,6 +205,13 @@ def load_bigquery_market_diagnostics() -> Dict:
     diagnostics["staleSymbols"] = [
         _summary_row_to_dict(row, date_fields=("latest_date",))
         for row in stale_symbols
+    ]
+    diagnostics["adjustedStaleSymbols"] = [
+        _summary_row_to_dict(
+            row,
+            date_fields=("latest_any_date", "latest_adjusted_date", "latest_raw_date"),
+        )
+        for row in adjusted_stale_symbols
     ]
     diagnostics["fxCurrencies"] = [
         _summary_row_to_dict(row, date_fields=("first_date", "latest_date"))
@@ -927,6 +968,7 @@ def _build_bigquery_quality_scorecard(diagnostics: Dict) -> Dict:
     price_summary = diagnostics.get("priceSummary") or {}
     fx_summary = diagnostics.get("fxSummary") or {}
     stale_symbols = diagnostics.get("staleSymbols") or []
+    adjusted_stale_symbols = diagnostics.get("adjustedStaleSymbols") or []
 
     price_schema_ready = bool(price_schema.get("isReady"))
     fx_schema_ready = bool(fx_schema.get("isReady"))
@@ -955,6 +997,14 @@ def _build_bigquery_quality_scorecard(diagnostics: Dict) -> Dict:
         default=0,
     )
     exception_score = _exception_score(len(stale_symbols), max_stale_days)
+    max_adjusted_lag_days = max(
+        [_safe_number(symbol.get("adjusted_lag_days")) for symbol in adjusted_stale_symbols],
+        default=0,
+    )
+    adjusted_freshness_score = _exception_score(
+        len(adjusted_stale_symbols),
+        max_adjusted_lag_days,
+    )
 
     dimensions = [
         _quality_dimension(
@@ -969,15 +1019,23 @@ def _build_bigquery_quality_scorecard(diagnostics: Dict) -> Dict:
             "freshness",
             "Freshness",
             freshness_score,
-            25,
+            20,
             f"price {price_days if price_days is not None else '--'}d / fx {fx_days if fx_days is not None else '--'}d",
             "檢查每日更新批次" if freshness_score < 85 else "維持每日更新監控",
+        ),
+        _quality_dimension(
+            "adjusted_freshness",
+            "Adjusted freshness",
+            adjusted_freshness_score,
+            15,
+            f"{len(adjusted_stale_symbols)} adj-lag symbols / max {int(max_adjusted_lag_days)}d",
+            "補齊或重算 adj_price" if adjusted_freshness_score < 85 else "Adj 價格可支援報酬分析",
         ),
         _quality_dimension(
             "coverage",
             "Coverage",
             coverage_score,
-            20,
+            15,
             f"{int(_safe_number(price_summary.get('symbol_count')))} symbols / {int(_safe_number(fx_summary.get('currency_count')))} FX",
             "擴充商品池與 FX 幣別" if coverage_score < 85 else "可支援主要投組分析",
         ),

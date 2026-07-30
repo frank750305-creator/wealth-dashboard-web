@@ -51,6 +51,18 @@ export type BigQueryStaleSymbol = BigQueryRecentSymbol & {
   raw_price_rows?: number;
 };
 
+export type BigQueryAdjustedStaleSymbol = {
+  symbol: string;
+  latest_any_date: string | null;
+  latest_adjusted_date: string | null;
+  latest_raw_date: string | null;
+  row_count: number;
+  adjusted_price_rows: number;
+  raw_price_rows: number;
+  adjusted_lag_days: number | null;
+  raw_lag_days: number | null;
+};
+
 export type BigQueryFxCurrency = {
   currency: string;
   first_date: string | null;
@@ -99,6 +111,7 @@ export type BigQueryMarketDiagnostics = {
   fxSummary: BigQueryDiagnosticsSummary;
   recentSymbols: BigQueryRecentSymbol[];
   staleSymbols?: BigQueryStaleSymbol[];
+  adjustedStaleSymbols?: BigQueryAdjustedStaleSymbol[];
   fxCurrencies?: BigQueryFxCurrency[];
   qualityScorecard?: BigQueryQualityScorecard;
 };
