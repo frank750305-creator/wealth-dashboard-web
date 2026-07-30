@@ -845,7 +845,7 @@ export async function fetchBigQueryQuoteCards(
   return fetchJsonWithTimeout<BigQueryQuoteCardsResponse>(
     `/api/v1/market/bigquery/quotes?${params.toString()}`,
     "BigQuery 全部行情讀取異常",
-    12000,
+    20000,
   );
 }
 

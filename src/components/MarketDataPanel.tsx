@@ -4263,6 +4263,7 @@ export function MarketDataPanel() {
 
     setDailyQuoteStatus("loading");
     setDailyQuoteError("");
+    setDailyQuoteRows([]);
     const requestedSymbols = dedupeDailyQuoteSymbols(symbols, 500);
 
     try {
@@ -4280,6 +4281,15 @@ export function MarketDataPanel() {
   const handleLoadDailyQuotes = async () => {
     await loadDailyQuoteSymbols(parseDailyQuoteSymbols(dailyQuoteSymbolsText, 500));
   };
+  const handleDailyQuotePriceBasisChange = (nextPriceBasis: "adjusted" | "raw") => {
+    if (nextPriceBasis === assetPriceBasis) return;
+
+    setDailyQuoteRows([]);
+    setDailyQuoteError("");
+    setDailyQuoteStatus("loading");
+    setDailyQuoteAutoLoadStatus("loading");
+    setAssetPriceBasis(nextPriceBasis);
+  };
   useEffect(() => {
     if (!hasBigQueryCredentials) return;
 
@@ -4291,6 +4301,9 @@ export function MarketDataPanel() {
 
     async function loadAllStoredQuotes() {
       setDailyQuoteAutoLoadStatus("loading");
+      setDailyQuoteStatus("loading");
+      setDailyQuoteError("");
+      setDailyQuoteRows([]);
       try {
         const rows = await loadDailyRowsFromQuoteCards(assetPriceBasis, 500);
         if (ignore) return;
@@ -4516,7 +4529,7 @@ export function MarketDataPanel() {
               />
               <select
                 value={assetPriceBasis}
-                onChange={(event) => setAssetPriceBasis(event.target.value as "adjusted" | "raw")}
+                onChange={(event) => handleDailyQuotePriceBasisChange(event.target.value as "adjusted" | "raw")}
                 className="bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-slate-100"
               >
                 <option value="adjusted">Adj</option>
@@ -4682,7 +4695,7 @@ export function MarketDataPanel() {
                             {canSwitchPriceBasis ? (
                               <button
                                 type="button"
-                                onClick={() => setAssetPriceBasis(row.alternatePriceBasis!)}
+                                onClick={() => handleDailyQuotePriceBasisChange(row.alternatePriceBasis!)}
                                 title={`切到 ${priceBasisLabel(row.alternatePriceBasis!)} 查看 ${row.symbol}`}
                                 className="rounded-md border border-cyan-800 bg-cyan-950/40 px-2 py-1 text-[10px] font-bold text-cyan-100 hover:bg-cyan-900"
                               >
@@ -4724,7 +4737,7 @@ export function MarketDataPanel() {
                           {row.alternatePriceBasis ? (
                             <button
                               type="button"
-                              onClick={() => setAssetPriceBasis(row.alternatePriceBasis!)}
+                              onClick={() => handleDailyQuotePriceBasisChange(row.alternatePriceBasis!)}
                               className="shrink-0 rounded border border-cyan-800 bg-cyan-950/40 px-2 py-1 text-[10px] font-bold text-cyan-100 hover:bg-cyan-900"
                             >
                               切 {priceBasisLabel(row.alternatePriceBasis)}
@@ -4747,9 +4760,9 @@ export function MarketDataPanel() {
           ) : (
             <div className="rounded-lg border border-dashed border-cyan-900/60 bg-cyan-950/10 p-5 text-xs text-slate-400">
               {dailyQuoteStatus === "error"
-                ? "目前沒有可顯示的行情卡。上方錯誤訊息會說明是 API 逾時、查詢失敗，或 BigQuery 沒有可用價格。"
+                ? "目前沒有可顯示的行情表格。上方錯誤訊息會說明是 API 逾時、查詢失敗，或 BigQuery 沒有可用價格。"
                 : dailyQuoteAutoLoadStatus === "loading" || dailyQuoteStatus === "loading"
-                  ? "正在從 BigQuery 商品清單載入每一檔資料；載入後會顯示今日價格、前日漲跌與今年漲跌。"
+                  ? "正在從 BigQuery 行情摘要載入每一檔資料；載入後會顯示今日價格、前日漲跌與今年漲跌。"
                   : "尚未載入行情。按「重新讀取」後會從 BigQuery 讀取全部或指定標的。"}
             </div>
           )}
