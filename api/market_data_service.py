@@ -263,17 +263,13 @@ def load_bigquery_adjusted_backfill_plan(
     bigquery = _bigquery_module()
     client = _bigquery_client(bigquery)
     price_table = _table_path("BIGQUERY_PRICE_TABLE", DEFAULT_PRICE_TABLE)
-    candidates = []
-
-    for symbol_summary in adjusted_symbols[:bounded_limit]:
-        candidate = _load_adjusted_backfill_candidate(
-            bigquery=bigquery,
-            client=client,
-            price_table=price_table,
-            symbol_summary=symbol_summary,
-            max_daily_return=bounded_max_daily_return,
-        )
-        candidates.append(candidate)
+    candidates = _load_adjusted_backfill_candidates(
+        bigquery=bigquery,
+        client=client,
+        price_table=price_table,
+        symbol_summaries=adjusted_symbols[:bounded_limit],
+        max_daily_return=bounded_max_daily_return,
+    )
 
     plan["candidates"] = candidates
     plan["symbolsInspected"] = len(candidates)
@@ -355,20 +351,13 @@ def apply_bigquery_adjusted_backfill(
     }
 
 
-def _load_adjusted_backfill_candidate(
-    *,
-    bigquery,
-    client,
-    price_table: str,
-    symbol_summary: Dict,
-    max_daily_return: float,
-) -> Dict:
+def _empty_adjusted_backfill_candidate(symbol_summary: Dict) -> Dict:
     symbol = str(symbol_summary.get("symbol") or "").strip()
     latest_adjusted_date = _parse_internal_iso_date(symbol_summary.get("latest_adjusted_date"))
     latest_any_date = _parse_internal_iso_date(symbol_summary.get("latest_any_date"))
     latest_raw_date = _parse_internal_iso_date(symbol_summary.get("latest_raw_date"))
 
-    candidate = {
+    return {
         "symbol": symbol,
         "decision": "manual_review",
         "canApply": False,
@@ -391,48 +380,23 @@ def _load_adjusted_backfill_candidate(
         },
     }
 
+
+def _build_adjusted_backfill_candidate_from_records(
+    *,
+    symbol_summary: Dict,
+    records: List[Dict],
+    max_daily_return: float,
+) -> Dict:
+    symbol = str(symbol_summary.get("symbol") or "").strip()
+    latest_adjusted_date = _parse_internal_iso_date(symbol_summary.get("latest_adjusted_date"))
+    candidate = _empty_adjusted_backfill_candidate(symbol_summary)
+
     if not symbol:
         candidate["reasons"].append("missing_symbol")
         return candidate
     if not latest_adjusted_date:
         candidate["reasons"].append("no_adjusted_anchor")
         return candidate
-
-    start_date = latest_adjusted_date - timedelta(days=10)
-    query = f"""
-    SELECT
-        DATE(date) AS price_date,
-        SAFE_CAST(raw_price AS FLOAT64) AS raw_price,
-        SAFE_CAST(adj_price AS FLOAT64) AS adj_price
-    FROM {price_table}
-    WHERE symbol = @symbol
-      AND DATE(date) >= @start_date
-    ORDER BY price_date, raw_price, adj_price
-    """
-
-    try:
-        rows = list(
-            client.query(
-                query,
-                job_config=bigquery.QueryJobConfig(
-                    query_parameters=[
-                        bigquery.ScalarQueryParameter("symbol", "STRING", symbol),
-                        bigquery.ScalarQueryParameter("start_date", "DATE", start_date),
-                    ]
-                ),
-            ).result()
-        )
-    except Exception as exc:
-        raise MarketDataQueryError(f"BigQuery adjusted backfill plan query failed: {exc}") from exc
-
-    records = [
-        {
-            "date": row["price_date"],
-            "raw_price": _positive_number_or_none(row["raw_price"]),
-            "adj_price": _positive_number_or_none(row["adj_price"]),
-        }
-        for row in rows
-    ]
 
     anchor_records = [
         record
@@ -510,6 +474,141 @@ def _load_adjusted_backfill_candidate(
     candidate["canApply"] = True
     candidate["reasons"].append("passed_safety_checks")
     return candidate
+
+
+def _load_adjusted_backfill_candidates(
+    *,
+    bigquery,
+    client,
+    price_table: str,
+    symbol_summaries: List[Dict],
+    max_daily_return: float,
+) -> List[Dict]:
+    summaries = list(symbol_summaries)
+    symbols = []
+    start_dates = []
+
+    for symbol_summary in summaries:
+        symbol = str(symbol_summary.get("symbol") or "").strip()
+        latest_adjusted_date = _parse_internal_iso_date(symbol_summary.get("latest_adjusted_date"))
+        if symbol and latest_adjusted_date:
+            symbols.append(symbol)
+            start_dates.append(latest_adjusted_date - timedelta(days=10))
+
+    records_by_symbol: Dict[str, List[Dict]] = {}
+    if symbols and start_dates:
+        query = f"""
+        SELECT
+            symbol,
+            DATE(date) AS price_date,
+            SAFE_CAST(raw_price AS FLOAT64) AS raw_price,
+            SAFE_CAST(adj_price AS FLOAT64) AS adj_price
+        FROM {price_table}
+        WHERE symbol IN UNNEST(@symbols)
+          AND DATE(date) >= @start_date
+        ORDER BY symbol, price_date, raw_price, adj_price
+        """
+
+        try:
+            rows = list(
+                client.query(
+                    query,
+                    job_config=bigquery.QueryJobConfig(
+                        query_parameters=[
+                            bigquery.ArrayQueryParameter("symbols", "STRING", symbols),
+                            bigquery.ScalarQueryParameter("start_date", "DATE", min(start_dates)),
+                        ]
+                    ),
+                ).result()
+            )
+        except Exception as exc:
+            raise MarketDataQueryError(f"BigQuery adjusted backfill batch plan query failed: {exc}") from exc
+
+        for row in rows:
+            symbol = str(row["symbol"] or "").strip()
+            records_by_symbol.setdefault(symbol, []).append(
+                {
+                    "date": row["price_date"],
+                    "raw_price": _positive_number_or_none(row["raw_price"]),
+                    "adj_price": _positive_number_or_none(row["adj_price"]),
+                }
+            )
+
+    return [
+        _build_adjusted_backfill_candidate_from_records(
+            symbol_summary=symbol_summary,
+            records=records_by_symbol.get(str(symbol_summary.get("symbol") or "").strip(), []),
+            max_daily_return=max_daily_return,
+        )
+        for symbol_summary in summaries
+    ]
+
+
+def _load_adjusted_backfill_candidate(
+    *,
+    bigquery,
+    client,
+    price_table: str,
+    symbol_summary: Dict,
+    max_daily_return: float,
+) -> Dict:
+    symbol = str(symbol_summary.get("symbol") or "").strip()
+    latest_adjusted_date = _parse_internal_iso_date(symbol_summary.get("latest_adjusted_date"))
+
+    if not symbol:
+        return _build_adjusted_backfill_candidate_from_records(
+            symbol_summary=symbol_summary,
+            records=[],
+            max_daily_return=max_daily_return,
+        )
+    if not latest_adjusted_date:
+        return _build_adjusted_backfill_candidate_from_records(
+            symbol_summary=symbol_summary,
+            records=[],
+            max_daily_return=max_daily_return,
+        )
+
+    start_date = latest_adjusted_date - timedelta(days=10)
+    query = f"""
+    SELECT
+        DATE(date) AS price_date,
+        SAFE_CAST(raw_price AS FLOAT64) AS raw_price,
+        SAFE_CAST(adj_price AS FLOAT64) AS adj_price
+    FROM {price_table}
+    WHERE symbol = @symbol
+      AND DATE(date) >= @start_date
+    ORDER BY price_date, raw_price, adj_price
+    """
+
+    try:
+        rows = list(
+            client.query(
+                query,
+                job_config=bigquery.QueryJobConfig(
+                    query_parameters=[
+                        bigquery.ScalarQueryParameter("symbol", "STRING", symbol),
+                        bigquery.ScalarQueryParameter("start_date", "DATE", start_date),
+                    ]
+                ),
+            ).result()
+        )
+    except Exception as exc:
+        raise MarketDataQueryError(f"BigQuery adjusted backfill plan query failed: {exc}") from exc
+
+    records = [
+        {
+            "date": row["price_date"],
+            "raw_price": _positive_number_or_none(row["raw_price"]),
+            "adj_price": _positive_number_or_none(row["adj_price"]),
+        }
+        for row in rows
+    ]
+
+    return _build_adjusted_backfill_candidate_from_records(
+        symbol_summary=symbol_summary,
+        records=records,
+        max_daily_return=max_daily_return,
+    )
 
 
 def _apply_adjusted_backfill_candidate(*, bigquery, client, price_table: str, candidate: Dict) -> Dict:
