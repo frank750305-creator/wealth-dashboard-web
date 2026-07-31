@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from datetime import date
+from datetime import date, timedelta
 from typing import Dict, Iterable, List, Optional
 
 import numpy as np
@@ -14,6 +14,7 @@ DEFAULT_PROJECT_ID = "fund-war-room"
 DEFAULT_DATASET = "fund_database"
 DEFAULT_PRICE_TABLE = "daily_prices"
 DEFAULT_FX_TABLE = "daily_fx"
+DEFAULT_ADJUSTED_BACKFILL_MAX_DAILY_RETURN = 0.35
 
 IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
@@ -219,6 +220,230 @@ def load_bigquery_market_diagnostics() -> Dict:
     ]
     diagnostics["qualityScorecard"] = _build_bigquery_quality_scorecard(diagnostics)
     return diagnostics
+
+
+def load_bigquery_adjusted_backfill_plan(
+    *,
+    max_daily_return: float = DEFAULT_ADJUSTED_BACKFILL_MAX_DAILY_RETURN,
+    limit: int = 20,
+) -> Dict:
+    diagnostics = load_bigquery_market_diagnostics()
+    schema_checks = diagnostics.get("schemaChecks") or {}
+    price_schema = schema_checks.get("priceTable") or {}
+    adjusted_symbols = diagnostics.get("adjustedStaleSymbols") or []
+    bounded_limit = max(1, min(int(limit or 20), 100))
+    try:
+        bounded_max_daily_return = float(max_daily_return)
+    except (TypeError, ValueError):
+        bounded_max_daily_return = DEFAULT_ADJUSTED_BACKFILL_MAX_DAILY_RETURN
+    bounded_max_daily_return = max(0.05, min(bounded_max_daily_return, 1.0))
+
+    plan = {
+        "status": bigquery_market_status(),
+        "mode": "dry_run",
+        "writesEnabled": False,
+        "writeGuard": "This endpoint only builds a safety plan. It does not update BigQuery.",
+        "maxDailyReturn": bounded_max_daily_return,
+        "symbolsFlagged": len(adjusted_symbols),
+        "symbolsInspected": 0,
+        "safeToApplyCount": 0,
+        "manualReviewCount": 0,
+        "nothingToApplyCount": 0,
+        "proposedRowCount": 0,
+        "candidates": [],
+    }
+
+    if not price_schema.get("isReady"):
+        plan["blockers"] = ["daily_prices schema is not ready."]
+        return plan
+
+    if not adjusted_symbols:
+        return plan
+
+    bigquery = _bigquery_module()
+    client = _bigquery_client(bigquery)
+    price_table = _table_path("BIGQUERY_PRICE_TABLE", DEFAULT_PRICE_TABLE)
+    candidates = []
+
+    for symbol_summary in adjusted_symbols[:bounded_limit]:
+        candidate = _load_adjusted_backfill_candidate(
+            bigquery=bigquery,
+            client=client,
+            price_table=price_table,
+            symbol_summary=symbol_summary,
+            max_daily_return=bounded_max_daily_return,
+        )
+        candidates.append(candidate)
+
+    plan["candidates"] = candidates
+    plan["symbolsInspected"] = len(candidates)
+    plan["safeToApplyCount"] = sum(1 for item in candidates if item["decision"] == "safe_to_apply")
+    plan["manualReviewCount"] = sum(1 for item in candidates if item["decision"] == "manual_review")
+    plan["nothingToApplyCount"] = sum(1 for item in candidates if item["decision"] == "nothing_to_apply")
+    plan["proposedRowCount"] = sum(int(item.get("proposed", {}).get("rowCount") or 0) for item in candidates)
+    plan["blockers"] = [
+        f"{item['symbol']}: {', '.join(item['reasons'])}"
+        for item in candidates
+        if item["decision"] == "manual_review"
+    ][:8]
+    return plan
+
+
+def _load_adjusted_backfill_candidate(
+    *,
+    bigquery,
+    client,
+    price_table: str,
+    symbol_summary: Dict,
+    max_daily_return: float,
+) -> Dict:
+    symbol = str(symbol_summary.get("symbol") or "").strip()
+    latest_adjusted_date = _parse_internal_iso_date(symbol_summary.get("latest_adjusted_date"))
+    latest_any_date = _parse_internal_iso_date(symbol_summary.get("latest_any_date"))
+    latest_raw_date = _parse_internal_iso_date(symbol_summary.get("latest_raw_date"))
+
+    candidate = {
+        "symbol": symbol,
+        "decision": "manual_review",
+        "canApply": False,
+        "reasons": [],
+        "latestAnyDate": latest_any_date.isoformat() if latest_any_date else None,
+        "latestAdjustedDate": latest_adjusted_date.isoformat() if latest_adjusted_date else None,
+        "latestRawDate": latest_raw_date.isoformat() if latest_raw_date else None,
+        "adjustedLagDays": symbol_summary.get("adjusted_lag_days"),
+        "rowCount": symbol_summary.get("row_count"),
+        "rawPriceRows": symbol_summary.get("raw_price_rows"),
+        "adjustedPriceRows": symbol_summary.get("adjusted_price_rows"),
+        "anchor": None,
+        "proposed": {"rowCount": 0, "firstDate": None, "latestDate": None, "method": None},
+        "riskChecks": {
+            "maxAbsRawDailyReturn": None,
+            "maxAbsRawDailyReturnDate": None,
+            "duplicateDateCount": 0,
+            "duplicateRawConflictCount": 0,
+            "jumpDates": [],
+        },
+    }
+
+    if not symbol:
+        candidate["reasons"].append("missing_symbol")
+        return candidate
+    if not latest_adjusted_date:
+        candidate["reasons"].append("no_adjusted_anchor")
+        return candidate
+
+    start_date = latest_adjusted_date - timedelta(days=10)
+    query = f"""
+    SELECT
+        DATE(date) AS price_date,
+        SAFE_CAST(raw_price AS FLOAT64) AS raw_price,
+        SAFE_CAST(adj_price AS FLOAT64) AS adj_price
+    FROM {price_table}
+    WHERE symbol = @symbol
+      AND DATE(date) >= @start_date
+    ORDER BY price_date, raw_price, adj_price
+    """
+
+    try:
+        rows = list(
+            client.query(
+                query,
+                job_config=bigquery.QueryJobConfig(
+                    query_parameters=[
+                        bigquery.ScalarQueryParameter("symbol", "STRING", symbol),
+                        bigquery.ScalarQueryParameter("start_date", "DATE", start_date),
+                    ]
+                ),
+            ).result()
+        )
+    except Exception as exc:
+        raise MarketDataQueryError(f"BigQuery adjusted backfill plan query failed: {exc}") from exc
+
+    records = [
+        {
+            "date": row["price_date"],
+            "raw_price": _positive_number_or_none(row["raw_price"]),
+            "adj_price": _positive_number_or_none(row["adj_price"]),
+        }
+        for row in rows
+    ]
+
+    anchor_records = [
+        record
+        for record in records
+        if record["date"] <= latest_adjusted_date
+        and record["raw_price"] is not None
+        and record["adj_price"] is not None
+    ]
+    if not anchor_records:
+        candidate["reasons"].append("missing_positive_anchor_row")
+        return candidate
+
+    anchor_record = max(anchor_records, key=lambda item: item["date"])
+    anchor_ratio = anchor_record["adj_price"] / anchor_record["raw_price"]
+    candidate["anchor"] = {
+        "date": anchor_record["date"].isoformat(),
+        "rawPrice": _finite_or_none(anchor_record["raw_price"]),
+        "adjPrice": _finite_or_none(anchor_record["adj_price"]),
+        "adjustmentRatio": _finite_or_none(anchor_ratio),
+    }
+
+    if not np.isfinite(anchor_ratio) or anchor_ratio <= 0:
+        candidate["reasons"].append("invalid_anchor_ratio")
+        return candidate
+    if anchor_ratio < 0.2 or anchor_ratio > 5:
+        candidate["reasons"].append("anchor_ratio_outlier")
+        return candidate
+
+    rows_after_anchor = [record for record in records if record["date"] > anchor_record["date"]]
+    proposed_rows = [
+        record
+        for record in rows_after_anchor
+        if record["raw_price"] is not None and record["adj_price"] is None
+    ]
+    if not proposed_rows:
+        candidate["decision"] = "nothing_to_apply"
+        candidate["reasons"].append("no_missing_adjusted_rows_after_anchor")
+        return candidate
+
+    duplicate_date_count, duplicate_raw_conflict_count = _duplicate_price_date_counts(rows_after_anchor)
+    raw_risk = _raw_price_continuity_risk(
+        [anchor_record, *rows_after_anchor],
+        max_daily_return=max_daily_return,
+    )
+    candidate["riskChecks"] = {
+        "maxAbsRawDailyReturn": _finite_or_none(raw_risk["max_abs_return"]),
+        "maxAbsRawDailyReturnDate": raw_risk["max_abs_return_date"],
+        "duplicateDateCount": duplicate_date_count,
+        "duplicateRawConflictCount": duplicate_raw_conflict_count,
+        "jumpDates": raw_risk["jump_dates"],
+    }
+
+    proposed_values = [record["raw_price"] * anchor_ratio for record in proposed_rows]
+    proposed_dates = sorted({record["date"] for record in proposed_rows})
+    candidate["proposed"] = {
+        "rowCount": len(proposed_rows),
+        "firstDate": proposed_dates[0].isoformat() if proposed_dates else None,
+        "latestDate": proposed_dates[-1].isoformat() if proposed_dates else None,
+        "method": "adj_price = raw_price * last_valid_adjusted_to_raw_ratio",
+        "estimatedAdjMin": _finite_or_none(min(proposed_values) if proposed_values else None),
+        "estimatedAdjMax": _finite_or_none(max(proposed_values) if proposed_values else None),
+    }
+
+    if duplicate_raw_conflict_count:
+        candidate["reasons"].append("same_date_raw_price_conflict")
+    if raw_risk["jump_dates"]:
+        candidate["reasons"].append("raw_price_jump_detected")
+
+    if candidate["reasons"]:
+        candidate["decision"] = "manual_review"
+        candidate["canApply"] = False
+        return candidate
+
+    candidate["decision"] = "safe_to_apply"
+    candidate["canApply"] = True
+    candidate["reasons"].append("passed_safety_checks")
+    return candidate
 
 
 def search_bigquery_assets(*, query: Optional[str] = None, limit: int = 20) -> Dict:
@@ -1221,6 +1446,89 @@ def _elapsed_days(first_date: Optional[str], latest_date: Optional[str]) -> int:
     if not start or not end:
         return 0
     return max(0, (end - start).days)
+
+
+def _parse_internal_iso_date(value) -> Optional[date]:
+    if not value:
+        return None
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
+
+
+def _positive_number_or_none(value) -> Optional[float]:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(numeric) or numeric <= 0:
+        return None
+    return numeric
+
+
+def _duplicate_price_date_counts(records: List[Dict]) -> tuple[int, int]:
+    raw_values_by_date: Dict[str, set] = {}
+    row_counts_by_date: Dict[str, int] = {}
+    for record in records:
+        date_key = record["date"].isoformat()
+        row_counts_by_date[date_key] = row_counts_by_date.get(date_key, 0) + 1
+        raw_price = record.get("raw_price")
+        if raw_price is not None:
+            raw_values_by_date.setdefault(date_key, set()).add(round(float(raw_price), 10))
+
+    duplicate_date_count = sum(1 for count in row_counts_by_date.values() if count > 1)
+    duplicate_raw_conflict_count = sum(
+        1
+        for date_key, raw_values in raw_values_by_date.items()
+        if row_counts_by_date.get(date_key, 0) > 1 and len(raw_values) > 1
+    )
+    return duplicate_date_count, duplicate_raw_conflict_count
+
+
+def _raw_price_continuity_risk(records: List[Dict], *, max_daily_return: float) -> Dict:
+    raw_values_by_date: Dict[str, float] = {}
+    date_by_key: Dict[str, date] = {}
+    for record in records:
+        raw_price = record.get("raw_price")
+        if raw_price is None:
+            continue
+        date_key = record["date"].isoformat()
+        raw_values_by_date[date_key] = float(raw_price)
+        date_by_key[date_key] = record["date"]
+
+    ordered = [
+        (date_by_key[date_key], raw_values_by_date[date_key])
+        for date_key in sorted(raw_values_by_date.keys())
+    ]
+    max_abs_return = None
+    max_abs_return_date = None
+    jump_dates = []
+    previous_price = None
+
+    for current_date, current_price in ordered:
+        if previous_price and previous_price > 0:
+            daily_return = current_price / previous_price - 1
+            abs_return = abs(daily_return)
+            if max_abs_return is None or abs_return > max_abs_return:
+                max_abs_return = abs_return
+                max_abs_return_date = current_date.isoformat()
+            if abs_return > max_daily_return:
+                jump_dates.append(
+                    {
+                        "date": current_date.isoformat(),
+                        "dailyReturn": _finite_or_none(daily_return),
+                    }
+                )
+        previous_price = current_price
+
+    return {
+        "max_abs_return": max_abs_return,
+        "max_abs_return_date": max_abs_return_date,
+        "jump_dates": jump_dates[:5],
+    }
 
 
 def _safe_number(value) -> float:

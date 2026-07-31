@@ -10,6 +10,7 @@ try:
     from .market_data_service import (
         MarketDataError,
         bigquery_market_status,
+        load_bigquery_adjusted_backfill_plan,
         load_bigquery_asset_history,
         load_bigquery_asset_profile,
         load_bigquery_market_diagnostics,
@@ -77,6 +78,7 @@ except ImportError:
     from market_data_service import (
         MarketDataError,
         bigquery_market_status,
+        load_bigquery_adjusted_backfill_plan,
         load_bigquery_asset_history,
         load_bigquery_asset_profile,
         load_bigquery_market_diagnostics,
@@ -1528,6 +1530,22 @@ async def market_bigquery_assets(q: Optional[str] = None, limit: int = 20):
         return {
             "generatedAt": datetime.now(timezone.utc).isoformat(),
             **search_bigquery_assets(query=q, limit=limit),
+        }
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+@app.get("/api/v1/market/bigquery/adjusted-backfill-plan")
+async def market_bigquery_adjusted_backfill_plan(
+    max_daily_return: float = 0.35,
+    limit: int = 20,
+):
+    try:
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            **load_bigquery_adjusted_backfill_plan(
+                max_daily_return=max_daily_return,
+                limit=limit,
+            ),
         }
     except MarketDataError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc))
