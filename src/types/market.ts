@@ -63,6 +63,63 @@ export type BigQueryAdjustedStaleSymbol = {
   raw_lag_days: number | null;
 };
 
+export type BigQueryAdjustedBackfillDecision = "safe_to_apply" | "manual_review" | "nothing_to_apply";
+
+export type BigQueryAdjustedBackfillCandidate = {
+  symbol: string;
+  decision: BigQueryAdjustedBackfillDecision;
+  canApply: boolean;
+  reasons: string[];
+  latestAnyDate: string | null;
+  latestAdjustedDate: string | null;
+  latestRawDate: string | null;
+  adjustedLagDays: number | null;
+  rowCount: number;
+  rawPriceRows: number;
+  adjustedPriceRows: number;
+  anchor: {
+    date: string;
+    rawPrice: number | null;
+    adjPrice: number | null;
+    adjustmentRatio: number | null;
+  } | null;
+  proposed: {
+    rowCount: number;
+    firstDate: string | null;
+    latestDate: string | null;
+    method: string | null;
+    estimatedAdjMin?: number | null;
+    estimatedAdjMax?: number | null;
+  };
+  riskChecks: {
+    maxAbsRawDailyReturn: number | null;
+    maxAbsRawDailyReturnDate: string | null;
+    duplicateDateCount: number;
+    duplicateRawConflictCount: number;
+    jumpDates: Array<{
+      date: string;
+      dailyReturn: number | null;
+    }>;
+  };
+};
+
+export type BigQueryAdjustedBackfillPlanResponse = {
+  generatedAt: string;
+  status: Omit<BigQueryMarketStatus, "generatedAt">;
+  mode: "dry_run" | "apply" | string;
+  writesEnabled: boolean;
+  writeGuard: string;
+  maxDailyReturn: number;
+  symbolsFlagged: number;
+  symbolsInspected: number;
+  safeToApplyCount: number;
+  manualReviewCount: number;
+  nothingToApplyCount: number;
+  proposedRowCount: number;
+  candidates: BigQueryAdjustedBackfillCandidate[];
+  blockers?: string[];
+};
+
 export type BigQueryFxCurrency = {
   currency: string;
   first_date: string | null;

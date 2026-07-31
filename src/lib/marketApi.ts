@@ -1,6 +1,7 @@
 import type {
   BigQueryMarketStatus,
   BigQueryMarketDiagnostics,
+  BigQueryAdjustedBackfillPlanResponse,
   BigQueryAssetHistoryResponse,
   BigQueryAssetProfileResponse,
   BigQueryQuoteCardsResponse,
@@ -133,6 +134,22 @@ export async function fetchBigQueryMarketDiagnostics(): Promise<BigQueryMarketDi
   }
 
   return response.json();
+}
+
+export async function fetchBigQueryAdjustedBackfillPlan(
+  limit = 20,
+  maxDailyReturn = 0.35,
+): Promise<BigQueryAdjustedBackfillPlanResponse> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    max_daily_return: String(maxDailyReturn),
+  });
+
+  return fetchJsonWithTimeout<BigQueryAdjustedBackfillPlanResponse>(
+    `/api/v1/market/bigquery/adjusted-backfill-plan?${params.toString()}`,
+    "Adj 價格修復計畫讀取異常",
+    25000,
+  );
 }
 
 export async function fetchResearchTaskWarehouseStatus(): Promise<ResearchTaskWarehouseStatus> {
