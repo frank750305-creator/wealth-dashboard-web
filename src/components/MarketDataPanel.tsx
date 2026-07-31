@@ -122,7 +122,9 @@ import {
   summarizeDataProductStatusPage,
 } from "@/lib/dataProductStatusPage";
 import {
+  adjustedBackfillManualReviewCsv,
   buildCoverageUniverseItems,
+  buildAdjustedBackfillManualReviewRows,
   buildDataContractItems,
   buildDataPipelineHealthItems,
   buildDataPipelineTableSnapshots,
@@ -2594,6 +2596,15 @@ export function MarketDataPanel() {
       "text/csv;charset=utf-8",
     );
   };
+  const handleExportAdjustedBackfillManualReviewCsv = () => {
+    if (!adjustedBackfillManualReviewRows.length) return;
+
+    downloadTextFile(
+      `bigquery-adjusted-backfill-manual-review-${resultStamp()}.csv`,
+      adjustedBackfillManualReviewCsv(adjustedBackfillManualReviewRows),
+      "text/csv;charset=utf-8",
+    );
+  };
   const handleExportDataContractCsv = () => {
     if (!dataContractItems.length) return;
 
@@ -4713,6 +4724,7 @@ export function MarketDataPanel() {
     },
     [adjustedBackfillPlan, adjustedStaleSymbols],
   );
+  const adjustedBackfillManualReviewRows = buildAdjustedBackfillManualReviewRows(adjustedBackfillPlan);
   const adjustedRepairSafeCount = adjustedRepairPlanRows.filter((row) => row.severity === "safe").length;
   const adjustedRepairBlockCount = adjustedRepairPlanRows.filter((row) => row.severity === "block").length;
   const adjustedRepairWatchCount = adjustedRepairPlanRows.filter((row) => row.severity === "watch").length;
@@ -5190,6 +5202,72 @@ export function MarketDataPanel() {
                   </div>
                 </div>
               </div>
+
+              {adjustedBackfillManualReviewRows.length ? (
+                <div className="rounded-lg border border-rose-900/50 bg-rose-950/10 p-3">
+                  <div className="flex flex-col md:flex-row md:items-start justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] font-mono text-rose-300">MANUAL REVIEW QUEUE</p>
+                      <h5 className="mt-1 text-sm font-bold text-rose-100">人工覆核清單</h5>
+                      <p className="mt-1 text-[11px] leading-5 text-rose-200/70">
+                        這裡只列不能自動補的標的；先處理最大 raw 跳價，再重新檢查安全計畫。
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleExportAdjustedBackfillManualReviewCsv}
+                      className="rounded-md bg-rose-500/15 px-3 py-2 text-xs font-bold text-rose-100 hover:bg-rose-500/25"
+                    >
+                      匯出覆核 CSV
+                    </button>
+                  </div>
+                  <div className="mt-3 grid grid-cols-1 xl:grid-cols-2 gap-2">
+                    {adjustedBackfillManualReviewRows.slice(0, 6).map((row) => (
+                      <div key={`${row.symbol}-manual-review`} className="rounded-md border border-slate-800 bg-slate-950/70 p-3 text-xs">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-mono font-bold text-cyan-100">{row.symbol}</p>
+                            <p className="mt-1 text-[11px] text-rose-200/80">{row.reason}</p>
+                          </div>
+                          <span className="rounded bg-rose-500/15 px-2 py-1 text-[10px] font-bold text-rose-100">
+                            {typeof row.adjustedLagDays === "number" ? `${row.adjustedLagDays} 天` : "無 Adj"}
+                          </span>
+                        </div>
+                        <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
+                          <div>
+                            <p className="text-slate-500">最大跳價</p>
+                            <p className="mt-1 font-mono text-slate-100">{row.maxJumpDate ?? "--"}</p>
+                          </div>
+                          <div>
+                            <p className="text-slate-500">跳幅</p>
+                            <p className="mt-1 font-mono font-bold text-rose-100">{formatSignedPercent(row.dailyReturn)}</p>
+                          </div>
+                          <div>
+                            <p className="text-slate-500">前一筆 Raw</p>
+                            <p className="mt-1 font-mono text-slate-300">{row.previousDate ?? "--"} / {formatPrice(row.previousRawPrice)}</p>
+                          </div>
+                          <div>
+                            <p className="text-slate-500">異常 Raw</p>
+                            <p className="mt-1 font-mono text-slate-300">{row.maxJumpDate ?? "--"} / {formatPrice(row.rawPrice)}</p>
+                          </div>
+                        </div>
+                        <div className="mt-3 rounded border border-slate-800 bg-slate-900/70 p-2">
+                          <p className="text-[10px] text-slate-500">待補範圍</p>
+                          <p className="mt-1 font-mono text-[11px] text-cyan-100">
+                            {formatCount(row.proposedRowCount)} 筆 / {row.proposedWindow}
+                          </p>
+                          <p className="mt-2 text-[11px] leading-5 text-slate-400">{row.action}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {adjustedBackfillManualReviewRows.length > 6 ? (
+                    <p className="mt-2 text-[10px] text-slate-500">
+                      另有 {adjustedBackfillManualReviewRows.length - 6} 檔在 CSV 中；此區先顯示跳價最明顯的前 6 檔。
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
 
               <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-3">
                 <div className="overflow-x-auto rounded-lg border border-slate-800">

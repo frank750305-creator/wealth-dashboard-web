@@ -1,4 +1,6 @@
 import type {
+  BigQueryAdjustedBackfillCandidate,
+  BigQueryAdjustedBackfillPlanResponse,
   BigQueryAdjustedStaleSymbol,
   BigQueryFxCurrency,
   BigQueryMarketDiagnostics,
@@ -52,6 +54,23 @@ export type CoverageUniverseItem = {
   action: string;
 };
 
+export type AdjustedBackfillManualReviewRow = {
+  symbol: string;
+  reason: string;
+  latestRawDate: string | null;
+  latestAdjustedDate: string | null;
+  adjustedLagDays: number | null;
+  proposedRowCount: number;
+  proposedWindow: string;
+  maxJumpDate: string | null;
+  previousDate: string | null;
+  previousRawPrice: number | null;
+  rawPrice: number | null;
+  dailyReturn: number | null;
+  duplicateRawConflictCount: number;
+  action: string;
+};
+
 export type DataQualitySummaryCard = {
   label: string;
   value: string;
@@ -88,6 +107,119 @@ function csvCell(value: unknown) {
   if (value === null || value === undefined) return "";
   const text = String(value);
   return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function adjustedBackfillReasonText(reasons: string[]) {
+  const labels: Record<string, string> = {
+    no_adjusted_anchor: "沒有 Adj anchor",
+    missing_positive_anchor_row: "anchor 價格無效",
+    invalid_anchor_ratio: "調整比例無效",
+    anchor_ratio_outlier: "調整比例異常",
+    same_date_raw_price_conflict: "同日 raw 衝突",
+    raw_price_jump_detected: "raw 跳價",
+    no_missing_adjusted_rows_after_anchor: "無待補列",
+    passed_safety_checks: "安全檢查通過",
+  };
+
+  return reasons.map((reason) => labels[reason] ?? reason).join("、") || "--";
+}
+
+function adjustedBackfillAction(candidate: BigQueryAdjustedBackfillCandidate) {
+  if (candidate.reasons.includes("raw_price_jump_detected")) {
+    return "先確認 raw_price 是否拆分、單位錯誤或來源異常，再決定手動修正或建立調整係數";
+  }
+  if (candidate.reasons.includes("same_date_raw_price_conflict")) {
+    return "清理同日不同 raw_price，再重跑安全檢查";
+  }
+  if (
+    candidate.reasons.includes("no_adjusted_anchor") ||
+    candidate.reasons.includes("missing_positive_anchor_row")
+  ) {
+    return "補齊一筆可信 Adj anchor，才能用 raw 延伸回補";
+  }
+  if (
+    candidate.reasons.includes("invalid_anchor_ratio") ||
+    candidate.reasons.includes("anchor_ratio_outlier")
+  ) {
+    return "確認 raw 與 adj 的比例口徑，避免把錯誤比例延伸到新資料";
+  }
+  return "人工確認資料口徑後，再重新檢查";
+}
+
+function sortManualReviewRows(a: AdjustedBackfillManualReviewRow, b: AdjustedBackfillManualReviewRow) {
+  const aJump = Math.abs(a.dailyReturn ?? 0);
+  const bJump = Math.abs(b.dailyReturn ?? 0);
+  if (aJump !== bJump) return bJump - aJump;
+  return (b.adjustedLagDays ?? 0) - (a.adjustedLagDays ?? 0);
+}
+
+export function buildAdjustedBackfillManualReviewRows(
+  plan: BigQueryAdjustedBackfillPlanResponse | null | undefined,
+): AdjustedBackfillManualReviewRow[] {
+  if (!plan) return [];
+
+  return plan.candidates
+    .filter((candidate) => candidate.decision === "manual_review")
+    .map((candidate) => {
+      const jump = candidate.riskChecks.jumpDates[0];
+      const firstDate = candidate.proposed.firstDate ?? "--";
+      const latestDate = candidate.proposed.latestDate ?? "--";
+
+      return {
+        symbol: candidate.symbol,
+        reason: adjustedBackfillReasonText(candidate.reasons),
+        latestRawDate: candidate.latestRawDate,
+        latestAdjustedDate: candidate.latestAdjustedDate,
+        adjustedLagDays: candidate.adjustedLagDays,
+        proposedRowCount: candidate.proposed.rowCount,
+        proposedWindow: candidate.proposed.rowCount ? `${firstDate} ~ ${latestDate}` : "--",
+        maxJumpDate: jump?.date ?? candidate.riskChecks.maxAbsRawDailyReturnDate,
+        previousDate: jump?.previousDate ?? null,
+        previousRawPrice: jump?.previousRawPrice ?? null,
+        rawPrice: jump?.rawPrice ?? null,
+        dailyReturn: jump?.dailyReturn ?? candidate.riskChecks.maxAbsRawDailyReturn,
+        duplicateRawConflictCount: candidate.riskChecks.duplicateRawConflictCount,
+        action: adjustedBackfillAction(candidate),
+      };
+    })
+    .sort(sortManualReviewRows);
+}
+
+export function adjustedBackfillManualReviewCsv(rows: AdjustedBackfillManualReviewRow[]) {
+  const header = [
+    "symbol",
+    "reason",
+    "latest_raw_date",
+    "latest_adjusted_date",
+    "adjusted_lag_days",
+    "proposed_row_count",
+    "proposed_window",
+    "max_jump_date",
+    "previous_date",
+    "previous_raw_price",
+    "raw_price",
+    "daily_return",
+    "duplicate_raw_conflict_count",
+    "action",
+  ];
+  const csvRows = rows.map((row) => [
+    row.symbol,
+    row.reason,
+    row.latestRawDate ?? "",
+    row.latestAdjustedDate ?? "",
+    row.adjustedLagDays ?? "",
+    row.proposedRowCount,
+    row.proposedWindow,
+    row.maxJumpDate ?? "",
+    row.previousDate ?? "",
+    row.previousRawPrice ?? "",
+    row.rawPrice ?? "",
+    row.dailyReturn ?? "",
+    row.duplicateRawConflictCount,
+    row.action,
+  ]);
+
+  return [header, ...csvRows].map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
 function executionReviewLabel(status: DataWarehouseStatus) {
