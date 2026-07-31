@@ -150,7 +150,7 @@ export async function fetchBigQueryAdjustedBackfillPlan(
   return fetchJsonWithTimeout<BigQueryAdjustedBackfillPlanResponse>(
     `/api/v1/market/bigquery/adjusted-backfill-plan?${params.toString()}`,
     "Adj 價格修復計畫讀取異常",
-    25000,
+    45000,
   );
 }
 
