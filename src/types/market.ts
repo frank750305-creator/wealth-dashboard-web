@@ -98,6 +98,9 @@ export type BigQueryAdjustedBackfillCandidate = {
     duplicateRawConflictCount: number;
     jumpDates: Array<{
       date: string;
+      previousDate?: string | null;
+      previousRawPrice?: number | null;
+      rawPrice?: number | null;
       dailyReturn: number | null;
     }>;
   };

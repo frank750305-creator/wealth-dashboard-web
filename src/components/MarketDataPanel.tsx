@@ -1064,8 +1064,9 @@ function buildAdjustedRepairPlanRowsFromBackfillPlan(
     const isNothingToApply = candidate.decision === "nothing_to_apply";
     const severity: AdjustedRepairPlanRow["severity"] = isSafe ? "safe" : isNothingToApply ? "watch" : "block";
     const reasonText = candidate.reasons.map(adjustedBackfillReasonLabel).join("、") || "--";
+    const firstJump = candidate.riskChecks.jumpDates[0];
     const jumpText = candidate.riskChecks.jumpDates.length
-      ? `最大跳動 ${formatSignedPercent(candidate.riskChecks.maxAbsRawDailyReturn)} / ${candidate.riskChecks.maxAbsRawDailyReturnDate ?? "--"}`
+      ? `${firstJump.previousDate ?? "--"} ${formatPrice(firstJump.previousRawPrice)} -> ${firstJump.date} ${formatPrice(firstJump.rawPrice)} / ${formatSignedPercent(firstJump.dailyReturn)}`
       : candidate.riskChecks.duplicateRawConflictCount
         ? `同日 raw 衝突 ${candidate.riskChecks.duplicateRawConflictCount} 筆`
         : "未見跳價";

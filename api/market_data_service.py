@@ -1618,6 +1618,7 @@ def _raw_price_continuity_risk(records: List[Dict], *, max_daily_return: float) 
     max_abs_return = None
     max_abs_return_date = None
     jump_dates = []
+    previous_date = None
     previous_price = None
 
     for current_date, current_price in ordered:
@@ -1631,10 +1632,20 @@ def _raw_price_continuity_risk(records: List[Dict], *, max_daily_return: float) 
                 jump_dates.append(
                     {
                         "date": current_date.isoformat(),
+                        "previousDate": previous_date.isoformat() if previous_date else None,
+                        "previousRawPrice": _finite_or_none(previous_price),
+                        "rawPrice": _finite_or_none(current_price),
                         "dailyReturn": _finite_or_none(daily_return),
                     }
                 )
+        previous_date = current_date
         previous_price = current_price
+
+    jump_dates = sorted(
+        jump_dates,
+        key=lambda item: abs(float(item.get("dailyReturn") or 0)),
+        reverse=True,
+    )
 
     return {
         "max_abs_return": max_abs_return,
