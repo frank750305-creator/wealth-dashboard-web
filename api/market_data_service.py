@@ -289,6 +289,72 @@ def load_bigquery_adjusted_backfill_plan(
     return plan
 
 
+def apply_bigquery_adjusted_backfill(
+    *,
+    symbols: Optional[Iterable[str]] = None,
+    max_daily_return: float = DEFAULT_ADJUSTED_BACKFILL_MAX_DAILY_RETURN,
+    limit: int = 20,
+) -> Dict:
+    selected_symbols = set(_dedupe([symbol for symbol in symbols or [] if symbol]))
+    plan = load_bigquery_adjusted_backfill_plan(
+        max_daily_return=max_daily_return,
+        limit=limit,
+    )
+    safe_candidates = [
+        candidate
+        for candidate in plan.get("candidates", [])
+        if candidate.get("decision") == "safe_to_apply"
+        and (not selected_symbols or candidate.get("symbol") in selected_symbols)
+    ]
+
+    execution = {
+        "status": "skipped" if not safe_candidates else "applied",
+        "requestedSymbols": sorted(selected_symbols),
+        "safeCandidateCount": len(safe_candidates),
+        "updatedRowCount": 0,
+        "appliedSymbols": [],
+        "skippedSymbols": [
+            {
+                "symbol": candidate.get("symbol"),
+                "decision": candidate.get("decision"),
+                "reasons": candidate.get("reasons"),
+            }
+            for candidate in plan.get("candidates", [])
+            if candidate.get("decision") != "safe_to_apply"
+            or (selected_symbols and candidate.get("symbol") not in selected_symbols)
+        ],
+    }
+
+    if not safe_candidates:
+        return {
+            **plan,
+            "mode": "apply",
+            "writesEnabled": True,
+            "execution": execution,
+        }
+
+    bigquery = _bigquery_module()
+    client = _bigquery_client(bigquery)
+    price_table = _table_path("BIGQUERY_PRICE_TABLE", DEFAULT_PRICE_TABLE)
+
+    for candidate in safe_candidates:
+        result = _apply_adjusted_backfill_candidate(
+            bigquery=bigquery,
+            client=client,
+            price_table=price_table,
+            candidate=candidate,
+        )
+        execution["updatedRowCount"] += int(result["updatedRowCount"])
+        execution["appliedSymbols"].append(result)
+
+    return {
+        **plan,
+        "mode": "apply",
+        "writesEnabled": True,
+        "execution": execution,
+    }
+
+
 def _load_adjusted_backfill_candidate(
     *,
     bigquery,
@@ -444,6 +510,52 @@ def _load_adjusted_backfill_candidate(
     candidate["canApply"] = True
     candidate["reasons"].append("passed_safety_checks")
     return candidate
+
+
+def _apply_adjusted_backfill_candidate(*, bigquery, client, price_table: str, candidate: Dict) -> Dict:
+    proposed = candidate.get("proposed") or {}
+    anchor = candidate.get("anchor") or {}
+    symbol = candidate.get("symbol")
+    first_date = _parse_internal_iso_date(proposed.get("firstDate"))
+    latest_date = _parse_internal_iso_date(proposed.get("latestDate"))
+    adjustment_ratio = _positive_number_or_none(anchor.get("adjustmentRatio"))
+
+    if not symbol or not first_date or not latest_date or adjustment_ratio is None:
+        raise MarketDataError(f"Adjusted backfill candidate is incomplete for: {symbol or '--'}")
+
+    update_query = f"""
+    UPDATE {price_table}
+    SET adj_price = SAFE_CAST(raw_price AS FLOAT64) * @adjustment_ratio
+    WHERE symbol = @symbol
+      AND DATE(date) >= @first_date
+      AND DATE(date) <= @latest_date
+      AND SAFE_CAST(raw_price AS FLOAT64) > 0
+      AND (SAFE_CAST(adj_price AS FLOAT64) IS NULL OR SAFE_CAST(adj_price AS FLOAT64) <= 0)
+    """
+
+    try:
+        job = client.query(
+            update_query,
+            job_config=bigquery.QueryJobConfig(
+                query_parameters=[
+                    bigquery.ScalarQueryParameter("symbol", "STRING", symbol),
+                    bigquery.ScalarQueryParameter("first_date", "DATE", first_date),
+                    bigquery.ScalarQueryParameter("latest_date", "DATE", latest_date),
+                    bigquery.ScalarQueryParameter("adjustment_ratio", "FLOAT64", adjustment_ratio),
+                ]
+            ),
+        )
+        job.result()
+    except Exception as exc:
+        raise MarketDataQueryError(f"BigQuery adjusted backfill update failed for {symbol}: {exc}") from exc
+
+    return {
+        "symbol": symbol,
+        "updatedRowCount": int(job.num_dml_affected_rows or 0),
+        "firstDate": first_date.isoformat(),
+        "latestDate": latest_date.isoformat(),
+        "adjustmentRatio": _finite_or_none(adjustment_ratio),
+    }
 
 
 def search_bigquery_assets(*, query: Optional[str] = None, limit: int = 20) -> Dict:

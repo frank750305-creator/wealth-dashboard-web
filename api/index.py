@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict
@@ -9,6 +9,7 @@ import os
 try:
     from .market_data_service import (
         MarketDataError,
+        apply_bigquery_adjusted_backfill,
         bigquery_market_status,
         load_bigquery_adjusted_backfill_plan,
         load_bigquery_asset_history,
@@ -77,6 +78,7 @@ try:
 except ImportError:
     from market_data_service import (
         MarketDataError,
+        apply_bigquery_adjusted_backfill,
         bigquery_market_status,
         load_bigquery_adjusted_backfill_plan,
         load_bigquery_asset_history,
@@ -542,6 +544,11 @@ class PortfolioOptimizeBigQueryPayload(BaseModel):
     risk_free_rate: float = 0.02
     sample_count: int = 5000
     random_seed: int = 7
+
+class AdjustedBackfillApplyPayload(BaseModel):
+    symbols: Optional[List[str]] = None
+    max_daily_return: float = 0.35
+    limit: int = 20
 
 class ResearchTaskSyncRecordPayload(BaseModel):
     workspace_id: Optional[str] = None
@@ -1545,6 +1552,29 @@ async def market_bigquery_adjusted_backfill_plan(
             **load_bigquery_adjusted_backfill_plan(
                 max_daily_return=max_daily_return,
                 limit=limit,
+            ),
+        }
+    except MarketDataError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+@app.post("/api/v1/market/bigquery/adjusted-backfill-apply")
+async def market_bigquery_adjusted_backfill_apply(
+    payload: AdjustedBackfillApplyPayload,
+    x_market_admin_token: Optional[str] = Header(default=None),
+):
+    expected_token = os.getenv("MARKET_ADMIN_TOKEN")
+    if not expected_token:
+        raise HTTPException(status_code=403, detail="MARKET_ADMIN_TOKEN is not configured.")
+    if not x_market_admin_token or x_market_admin_token != expected_token:
+        raise HTTPException(status_code=403, detail="Invalid market admin token.")
+
+    try:
+        return {
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            **apply_bigquery_adjusted_backfill(
+                symbols=payload.symbols,
+                max_daily_return=payload.max_daily_return,
+                limit=payload.limit,
             ),
         }
     except MarketDataError as exc:
