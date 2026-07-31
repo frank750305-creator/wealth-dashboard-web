@@ -144,6 +144,13 @@ export type BigQueryAdjustedBackfillApplyPayload = {
   limit?: number;
 };
 
+export type BigQueryAdjustedBackfillApplyStatusResponse = {
+  generatedAt: string;
+  isConfigured: boolean;
+  requiredEnvVar: string;
+  mode: "protected_write" | string;
+};
+
 export type BigQueryFxCurrency = {
   currency: string;
   first_date: string | null;

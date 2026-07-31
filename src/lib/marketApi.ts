@@ -2,6 +2,7 @@ import type {
   BigQueryMarketStatus,
   BigQueryMarketDiagnostics,
   BigQueryAdjustedBackfillApplyPayload,
+  BigQueryAdjustedBackfillApplyStatusResponse,
   BigQueryAdjustedBackfillPlanResponse,
   BigQueryAssetHistoryResponse,
   BigQueryAssetProfileResponse,
@@ -150,6 +151,14 @@ export async function fetchBigQueryAdjustedBackfillPlan(
     `/api/v1/market/bigquery/adjusted-backfill-plan?${params.toString()}`,
     "Adj 價格修復計畫讀取異常",
     25000,
+  );
+}
+
+export async function fetchBigQueryAdjustedBackfillApplyStatus(): Promise<BigQueryAdjustedBackfillApplyStatusResponse> {
+  return fetchJsonWithTimeout<BigQueryAdjustedBackfillApplyStatusResponse>(
+    "/api/v1/market/bigquery/adjusted-backfill-apply-status",
+    "Adj 價格回補權限狀態讀取異常",
+    10000,
   );
 }
 

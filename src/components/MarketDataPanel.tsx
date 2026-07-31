@@ -36,6 +36,7 @@ import {
 } from "@/lib/rebalanceWorkflow";
 import {
   applyBigQueryAdjustedBackfill,
+  fetchBigQueryAdjustedBackfillApplyStatus,
   fetchBigQueryAdjustedBackfillPlan,
   fetchBigQueryAssetHistory,
   fetchBigQueryAssetProfile,
@@ -464,6 +465,7 @@ import {
 } from "@/lib/tradeExecutionWorkflow";
 import type {
   BigQueryAdjustedBackfillPlanResponse,
+  BigQueryAdjustedBackfillApplyStatusResponse,
   BigQueryAdjustedBackfillCandidate,
   BigQueryAdjustedStaleSymbol,
   BigQueryAsset,
@@ -1274,6 +1276,9 @@ export function MarketDataPanel() {
   const [adjustedBackfillPlan, setAdjustedBackfillPlan] = useState<BigQueryAdjustedBackfillPlanResponse | null>(null);
   const [adjustedBackfillPlanStatus, setAdjustedBackfillPlanStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [adjustedBackfillPlanError, setAdjustedBackfillPlanError] = useState("");
+  const [adjustedBackfillApplyConfig, setAdjustedBackfillApplyConfig] = useState<BigQueryAdjustedBackfillApplyStatusResponse | null>(null);
+  const [adjustedBackfillApplyConfigStatus, setAdjustedBackfillApplyConfigStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  const [adjustedBackfillApplyConfigError, setAdjustedBackfillApplyConfigError] = useState("");
   const [adjustedBackfillAdminToken, setAdjustedBackfillAdminToken] = useState("");
   const [adjustedBackfillApplyStatus, setAdjustedBackfillApplyStatus] = useState<"idle" | "applying" | "applied" | "error">("idle");
   const [adjustedBackfillApplyMessage, setAdjustedBackfillApplyMessage] = useState("");
@@ -4507,6 +4512,20 @@ export function MarketDataPanel() {
       setAdjustedBackfillPlanStatus("error");
     }
   }, []);
+  const loadAdjustedBackfillApplyConfig = useCallback(async () => {
+    setAdjustedBackfillApplyConfigStatus("loading");
+    setAdjustedBackfillApplyConfigError("");
+
+    try {
+      const status = await fetchBigQueryAdjustedBackfillApplyStatus();
+      setAdjustedBackfillApplyConfig(status);
+      setAdjustedBackfillApplyConfigStatus("loaded");
+    } catch (err: unknown) {
+      setAdjustedBackfillApplyConfig(null);
+      setAdjustedBackfillApplyConfigError(err instanceof Error ? err.message : String(err));
+      setAdjustedBackfillApplyConfigStatus("error");
+    }
+  }, []);
   useEffect(() => {
     if (!hasBigQueryCredentials) return;
 
@@ -4516,6 +4535,15 @@ export function MarketDataPanel() {
 
     return () => window.clearTimeout(timer);
   }, [hasBigQueryCredentials, loadAdjustedBackfillSafetyPlan]);
+  useEffect(() => {
+    if (!hasBigQueryCredentials) return;
+
+    const timer = window.setTimeout(() => {
+      void loadAdjustedBackfillApplyConfig();
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [hasBigQueryCredentials, loadAdjustedBackfillApplyConfig]);
   useEffect(() => {
     if (!hasBigQueryCredentials) return;
 
@@ -4706,8 +4734,14 @@ export function MarketDataPanel() {
       .map((candidate) => candidate.symbol) ?? [],
     [adjustedBackfillPlan],
   );
+  const adjustedBackfillApplyIsConfigured = Boolean(adjustedBackfillApplyConfig?.isConfigured);
   const handleApplyAdjustedBackfill = async () => {
     const cleanToken = adjustedBackfillAdminToken.trim();
+    if (!adjustedBackfillApplyIsConfigured) {
+      setAdjustedBackfillApplyStatus("error");
+      setAdjustedBackfillApplyMessage("Vercel 尚未設定 MARKET_ADMIN_TOKEN。");
+      return;
+    }
     if (!cleanToken) {
       setAdjustedBackfillApplyStatus("error");
       setAdjustedBackfillApplyMessage("請先輸入 MARKET_ADMIN_TOKEN。");
@@ -5201,9 +5235,13 @@ export function MarketDataPanel() {
                     <p>4. 跳價、無 anchor 或同日衝突會保留人工覆核，不會自動寫入。</p>
                   </div>
                   <div className="mt-3 rounded-md border border-amber-900/40 bg-amber-950/20 p-2 text-[11px] text-amber-100">
-                    目前狀態：{adjustedRepairSafeCount} 檔可自動補、{adjustedRepairBlockCount} 檔人工覆核、{adjustedRepairRawReadyCount} 檔 Raw 可查價；受保護寫入端點需設定 MARKET_ADMIN_TOKEN。
+                    目前狀態：{adjustedRepairSafeCount} 檔可自動補、{adjustedRepairBlockCount} 檔人工覆核、{adjustedRepairRawReadyCount} 檔 Raw 可查價；
+                    寫入權限 {adjustedBackfillApplyConfigStatus === "loading" ? "檢查中" : adjustedBackfillApplyIsConfigured ? "已啟用" : "尚未設定"}。
                     {adjustedRepairWatchCount ? ` 另有 ${adjustedRepairWatchCount} 檔觀察。` : ""}
                   </div>
+                  {adjustedBackfillApplyConfigError ? (
+                    <p className="mt-2 text-[11px] leading-5 text-rose-200">{adjustedBackfillApplyConfigError}</p>
+                  ) : null}
                   <div className="mt-3 rounded-md border border-slate-800 bg-slate-950/80 p-2">
                     <label className="text-[10px] font-bold text-slate-500" htmlFor="adjusted-backfill-admin-token">
                       MARKET_ADMIN_TOKEN
@@ -5222,6 +5260,7 @@ export function MarketDataPanel() {
                       onClick={handleApplyAdjustedBackfill}
                       disabled={
                         !hasBigQueryCredentials ||
+                        !adjustedBackfillApplyIsConfigured ||
                         !adjustedBackfillSafeSymbols.length ||
                         adjustedBackfillApplyStatus === "applying" ||
                         adjustedBackfillPlanStatus === "loading"
@@ -5235,6 +5274,11 @@ export function MarketDataPanel() {
                     <p className="mt-2 text-[10px] leading-4 text-slate-500">
                       安全清單：{adjustedBackfillSafeSymbols.length ? adjustedBackfillSafeSymbols.join("、") : "--"}
                     </p>
+                    {!adjustedBackfillApplyIsConfigured ? (
+                      <p className="mt-2 text-[10px] leading-4 text-amber-200/80">
+                        請先在 Vercel Environment Variables 新增 MARKET_ADMIN_TOKEN，完成後重新部署或等待 Production 生效。
+                      </p>
+                    ) : null}
                     {adjustedBackfillApplyMessage ? (
                       <p className={`mt-2 text-[11px] leading-5 ${adjustedBackfillApplyStatus === "error" ? "text-rose-200" : "text-emerald-200"}`}>
                         {adjustedBackfillApplyMessage}
