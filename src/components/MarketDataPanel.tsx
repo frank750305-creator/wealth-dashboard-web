@@ -5285,7 +5285,23 @@ export function MarketDataPanel() {
           )}
 
           {adjustedRepairPlanRows.length ? (
-            <section className="rounded-lg border border-amber-900/50 bg-amber-950/10 p-3 space-y-3">
+            <details className="group rounded-lg border border-amber-900/40 bg-amber-950/10">
+              <summary className="flex cursor-pointer list-none flex-col gap-2 p-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <p className="text-[10px] font-mono text-amber-300">DATA MAINTENANCE</p>
+                  <h4 className="mt-1 text-sm font-bold text-amber-100">資料維護工具</h4>
+                  <p className="mt-1 text-[11px] leading-5 text-amber-200/70">
+                    Adj 修復、安全回補與人工覆核預設收合，避免干擾今日行情與投組分析。
+                  </p>
+                </div>
+                <span className="rounded-md border border-amber-900/50 bg-slate-950 px-3 py-2 text-xs font-bold text-amber-100 group-open:hidden">
+                  展開維護
+                </span>
+                <span className="hidden rounded-md border border-amber-900/50 bg-slate-950 px-3 py-2 text-xs font-bold text-amber-100 group-open:inline-block">
+                  收合維護
+                </span>
+              </summary>
+              <div className="space-y-3 border-t border-amber-900/30 p-3">
               <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-3">
                 <div>
                   <p className="text-[10px] font-mono text-amber-300">ADJUSTED PRICE REPAIR</p>
@@ -5505,7 +5521,8 @@ export function MarketDataPanel() {
                   </div>
                 </div>
               </div>
-            </section>
+              </div>
+            </details>
           ) : null}
         </section>
         )}
