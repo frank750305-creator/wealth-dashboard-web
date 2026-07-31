@@ -35,6 +35,7 @@ import {
   rebalanceDraftRows,
 } from "@/lib/rebalanceWorkflow";
 import {
+  applyBigQueryAdjustedBackfill,
   fetchBigQueryAdjustedBackfillPlan,
   fetchBigQueryAssetHistory,
   fetchBigQueryAssetProfile,
@@ -1273,6 +1274,9 @@ export function MarketDataPanel() {
   const [adjustedBackfillPlan, setAdjustedBackfillPlan] = useState<BigQueryAdjustedBackfillPlanResponse | null>(null);
   const [adjustedBackfillPlanStatus, setAdjustedBackfillPlanStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [adjustedBackfillPlanError, setAdjustedBackfillPlanError] = useState("");
+  const [adjustedBackfillAdminToken, setAdjustedBackfillAdminToken] = useState("");
+  const [adjustedBackfillApplyStatus, setAdjustedBackfillApplyStatus] = useState<"idle" | "applying" | "applied" | "error">("idle");
+  const [adjustedBackfillApplyMessage, setAdjustedBackfillApplyMessage] = useState("");
   const dailyQuoteAutoLoadKeyRef = useRef("");
   const [activeCommandAreaId, setActiveCommandAreaId] = useState<PlatformCommandProductNavigatorActiveArea>("all");
   const sources = data?.sources ?? [];
@@ -4696,6 +4700,47 @@ export function MarketDataPanel() {
         ? Math.max(maxValue, symbol.adjusted_lag_days)
         : maxValue
     ), 0);
+  const adjustedBackfillSafeSymbols = useMemo(
+    () => adjustedBackfillPlan?.candidates
+      .filter((candidate) => candidate.decision === "safe_to_apply" && candidate.canApply)
+      .map((candidate) => candidate.symbol) ?? [],
+    [adjustedBackfillPlan],
+  );
+  const handleApplyAdjustedBackfill = async () => {
+    const cleanToken = adjustedBackfillAdminToken.trim();
+    if (!cleanToken) {
+      setAdjustedBackfillApplyStatus("error");
+      setAdjustedBackfillApplyMessage("請先輸入 MARKET_ADMIN_TOKEN。");
+      return;
+    }
+    if (!adjustedBackfillSafeSymbols.length) {
+      setAdjustedBackfillApplyStatus("error");
+      setAdjustedBackfillApplyMessage("目前沒有通過安全檢查的標的可回補。");
+      return;
+    }
+
+    setAdjustedBackfillApplyStatus("applying");
+    setAdjustedBackfillApplyMessage("");
+    try {
+      const result = await applyBigQueryAdjustedBackfill(
+        {
+          symbols: adjustedBackfillSafeSymbols,
+          max_daily_return: 0.35,
+          limit: 20,
+        },
+        cleanToken,
+      );
+      setAdjustedBackfillPlan(result);
+      setAdjustedBackfillApplyStatus("applied");
+      setAdjustedBackfillApplyMessage(
+        `已送出安全回補：${formatCount(result.execution?.updatedRowCount ?? 0)} 筆，${result.execution?.appliedSymbols.length ?? 0} 檔。`,
+      );
+      await loadAdjustedBackfillSafetyPlan();
+    } catch (err: unknown) {
+      setAdjustedBackfillApplyStatus("error");
+      setAdjustedBackfillApplyMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
   const handleDailyQuoteSort = (sortKey: DailyQuoteSortKey) => {
     setDailyQuoteSortDirection((currentDirection) => (
       dailyQuoteSortKey === sortKey && currentDirection === "asc" ? "desc" : "asc"
@@ -5158,6 +5203,43 @@ export function MarketDataPanel() {
                   <div className="mt-3 rounded-md border border-amber-900/40 bg-amber-950/20 p-2 text-[11px] text-amber-100">
                     目前狀態：{adjustedRepairSafeCount} 檔可自動補、{adjustedRepairBlockCount} 檔人工覆核、{adjustedRepairRawReadyCount} 檔 Raw 可查價；受保護寫入端點需設定 MARKET_ADMIN_TOKEN。
                     {adjustedRepairWatchCount ? ` 另有 ${adjustedRepairWatchCount} 檔觀察。` : ""}
+                  </div>
+                  <div className="mt-3 rounded-md border border-slate-800 bg-slate-950/80 p-2">
+                    <label className="text-[10px] font-bold text-slate-500" htmlFor="adjusted-backfill-admin-token">
+                      MARKET_ADMIN_TOKEN
+                    </label>
+                    <input
+                      id="adjusted-backfill-admin-token"
+                      type="password"
+                      autoComplete="off"
+                      value={adjustedBackfillAdminToken}
+                      onChange={(event) => setAdjustedBackfillAdminToken(event.target.value)}
+                      placeholder="輸入後才可執行"
+                      className="mt-1 w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-2 text-xs font-mono text-slate-100 outline-none focus:border-amber-400"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleApplyAdjustedBackfill}
+                      disabled={
+                        !hasBigQueryCredentials ||
+                        !adjustedBackfillSafeSymbols.length ||
+                        adjustedBackfillApplyStatus === "applying" ||
+                        adjustedBackfillPlanStatus === "loading"
+                      }
+                      className="mt-2 w-full rounded-md bg-emerald-500/15 px-3 py-2 text-xs font-bold text-emerald-100 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {adjustedBackfillApplyStatus === "applying"
+                        ? "安全回補中"
+                        : `只補通過檢查的 ${adjustedBackfillSafeSymbols.length} 檔`}
+                    </button>
+                    <p className="mt-2 text-[10px] leading-4 text-slate-500">
+                      安全清單：{adjustedBackfillSafeSymbols.length ? adjustedBackfillSafeSymbols.join("、") : "--"}
+                    </p>
+                    {adjustedBackfillApplyMessage ? (
+                      <p className={`mt-2 text-[11px] leading-5 ${adjustedBackfillApplyStatus === "error" ? "text-rose-200" : "text-emerald-200"}`}>
+                        {adjustedBackfillApplyMessage}
+                      </p>
+                    ) : null}
                   </div>
                 </div>
               </div>

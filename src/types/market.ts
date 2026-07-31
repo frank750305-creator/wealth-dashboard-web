@@ -118,6 +118,30 @@ export type BigQueryAdjustedBackfillPlanResponse = {
   proposedRowCount: number;
   candidates: BigQueryAdjustedBackfillCandidate[];
   blockers?: string[];
+  execution?: {
+    status: "skipped" | "applied" | string;
+    requestedSymbols: string[];
+    safeCandidateCount: number;
+    updatedRowCount: number;
+    appliedSymbols: Array<{
+      symbol: string;
+      updatedRowCount: number;
+      firstDate: string;
+      latestDate: string;
+      adjustmentRatio: number | null;
+    }>;
+    skippedSymbols: Array<{
+      symbol: string;
+      decision: string;
+      reasons: string[];
+    }>;
+  };
+};
+
+export type BigQueryAdjustedBackfillApplyPayload = {
+  symbols?: string[];
+  max_daily_return?: number;
+  limit?: number;
 };
 
 export type BigQueryFxCurrency = {

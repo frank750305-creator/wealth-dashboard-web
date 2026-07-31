@@ -1,6 +1,7 @@
 import type {
   BigQueryMarketStatus,
   BigQueryMarketDiagnostics,
+  BigQueryAdjustedBackfillApplyPayload,
   BigQueryAdjustedBackfillPlanResponse,
   BigQueryAssetHistoryResponse,
   BigQueryAssetProfileResponse,
@@ -150,6 +151,35 @@ export async function fetchBigQueryAdjustedBackfillPlan(
     "Adj 價格修復計畫讀取異常",
     25000,
   );
+}
+
+export async function applyBigQueryAdjustedBackfill(
+  payload: BigQueryAdjustedBackfillApplyPayload,
+  adminToken: string,
+): Promise<BigQueryAdjustedBackfillPlanResponse> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+  try {
+    const response = await fetch("/api/v1/market/bigquery/adjusted-backfill-apply", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-market-admin-token": adminToken,
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Adj 價格安全回補異常 (代碼: ${response.status})\n${errText}`);
+    }
+
+    return response.json();
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 export async function fetchResearchTaskWarehouseStatus(): Promise<ResearchTaskWarehouseStatus> {
