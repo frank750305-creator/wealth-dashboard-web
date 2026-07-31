@@ -149,6 +149,8 @@ export type BigQueryAdjustedBackfillApplyStatusResponse = {
   isConfigured: boolean;
   requiredEnvVar: string;
   mode: "protected_write" | string;
+  setupSteps: string[];
+  verificationPath: string;
 };
 
 export type BigQueryFxCurrency = {

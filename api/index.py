@@ -1559,11 +1559,20 @@ async def market_bigquery_adjusted_backfill_plan(
 
 @app.get("/api/v1/market/bigquery/adjusted-backfill-apply-status")
 async def market_bigquery_adjusted_backfill_apply_status():
+    required_env_var = "MARKET_ADMIN_TOKEN"
     return {
         "generatedAt": datetime.now(timezone.utc).isoformat(),
-        "isConfigured": bool(os.getenv("MARKET_ADMIN_TOKEN")),
-        "requiredEnvVar": "MARKET_ADMIN_TOKEN",
+        "isConfigured": bool(os.getenv(required_env_var)),
+        "requiredEnvVar": required_env_var,
         "mode": "protected_write",
+        "setupSteps": [
+            "Open Vercel project wealth-dashboard-web.",
+            "Go to Settings > Environment Variables.",
+            f"Add {required_env_var} for Production and Preview.",
+            "Redeploy the latest Production deployment.",
+            "Return to this page and click reload readiness.",
+        ],
+        "verificationPath": "/api/v1/market/bigquery/adjusted-backfill-apply-status",
     }
 
 @app.post("/api/v1/market/bigquery/adjusted-backfill-apply")

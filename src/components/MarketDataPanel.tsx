@@ -5275,9 +5275,26 @@ export function MarketDataPanel() {
                       安全清單：{adjustedBackfillSafeSymbols.length ? adjustedBackfillSafeSymbols.join("、") : "--"}
                     </p>
                     {!adjustedBackfillApplyIsConfigured ? (
-                      <p className="mt-2 text-[10px] leading-4 text-amber-200/80">
-                        請先在 Vercel Environment Variables 新增 MARKET_ADMIN_TOKEN，完成後重新部署或等待 Production 生效。
-                      </p>
+                      <div className="mt-2 rounded-md border border-amber-900/40 bg-amber-950/10 p-2">
+                        <p className="text-[10px] leading-4 text-amber-200/80">
+                          請先在 Vercel Environment Variables 新增 {adjustedBackfillApplyConfig?.requiredEnvVar ?? "MARKET_ADMIN_TOKEN"}，完成後重新部署或等待 Production 生效。
+                        </p>
+                        {adjustedBackfillApplyConfig?.setupSteps?.length ? (
+                          <ol className="mt-2 list-decimal space-y-1 pl-4 text-[10px] leading-4 text-slate-500">
+                            {adjustedBackfillApplyConfig.setupSteps.map((step) => (
+                              <li key={step}>{step}</li>
+                            ))}
+                          </ol>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={loadAdjustedBackfillApplyConfig}
+                          disabled={adjustedBackfillApplyConfigStatus === "loading"}
+                          className="mt-2 rounded-md border border-amber-800 px-2 py-1 text-[10px] font-bold text-amber-100 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {adjustedBackfillApplyConfigStatus === "loading" ? "檢查中" : "重新檢查寫入權限"}
+                        </button>
+                      </div>
                     ) : null}
                     {adjustedBackfillApplyMessage ? (
                       <p className={`mt-2 text-[11px] leading-5 ${adjustedBackfillApplyStatus === "error" ? "text-rose-200" : "text-emerald-200"}`}>
