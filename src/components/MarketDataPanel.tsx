@@ -585,6 +585,12 @@ function resultStamp() {
   return new Date().toISOString().slice(0, 19).replaceAll(":", "").replace("T", "-");
 }
 
+function csvCell(value: unknown) {
+  if (value === null || value === undefined) return "";
+  const text = String(value).replaceAll('"', '""');
+  return /[",\n]/.test(text) ? `"${text}"` : text;
+}
+
 function qualityToExecutionStatus(status: QualityStatus): ExecutionReviewStatus {
   if (status === "risk") return "block";
   if (status === "watch" || status === "neutral") return "watch";
@@ -1033,6 +1039,57 @@ function dailyQuoteIssueSummary(rows: DailyMarketQuoteRow[]) {
     : "";
 
   return `${issueRows.length} 檔標的目前 ${priceBasisLabel(issueRows[0].priceBasis)} 沒有可用價格${switchableText}。`;
+}
+
+function dailyQuoteRowsCsv(rows: DailyMarketQuoteRow[]) {
+  const headers = [
+    "symbol",
+    "price_basis",
+    "latest_date",
+    "latest_price",
+    "daily_return",
+    "daily_price_change",
+    "ytd_return",
+    "ytd_price_change",
+    "ytd_start_date",
+    "ytd_start_price",
+    "status",
+    "quality_label",
+    "quality_note",
+    "row_count",
+    "selected_price_rows",
+    "alternate_price_basis",
+    "alternate_latest_date",
+    "alternate_latest_price",
+    "error_message",
+  ];
+
+  const body = rows.map((row) => {
+    const quality = dailyQuoteQuality(row);
+    return [
+      row.symbol,
+      row.priceBasis,
+      row.latestDate,
+      row.latestPrice,
+      row.dailyReturn,
+      row.dailyPriceChange,
+      row.ytdReturn,
+      row.ytdPriceChange,
+      row.ytdStartDate,
+      row.ytdStartPrice,
+      row.status,
+      quality.label,
+      quality.note,
+      row.rowCount,
+      row.selectedPriceRows,
+      row.alternatePriceBasis,
+      row.alternateLatestDate,
+      row.alternateLatestPrice,
+      row.errorMessage,
+    ].map(csvCell).join(",");
+  });
+
+  return [headers.map(csvCell).join(","), ...body].join("\n");
 }
 
 function adjustedRepairBadgeClass(severity: AdjustedRepairPlanRow["severity"]) {
@@ -2602,6 +2659,15 @@ export function MarketDataPanel() {
     downloadTextFile(
       `bigquery-adjusted-backfill-manual-review-${resultStamp()}.csv`,
       adjustedBackfillManualReviewCsv(adjustedBackfillManualReviewRows),
+      "text/csv;charset=utf-8",
+    );
+  };
+  const handleExportDailyQuoteCsv = () => {
+    if (!dailyQuoteRows.length) return;
+
+    downloadTextFile(
+      `bigquery-daily-market-quotes-${resultStamp()}.csv`,
+      dailyQuoteRowsCsv(dailyQuoteRows),
       "text/csv;charset=utf-8",
     );
   };
@@ -4658,6 +4724,31 @@ export function MarketDataPanel() {
     if (!worstRow || typeof worstRow.dailyReturn !== "number" || row.dailyReturn < worstRow.dailyReturn) return row;
     return worstRow;
   }, null);
+  const dailyQuoteRowsWithDailyReturn = loadedDailyQuoteRows.filter((row) => typeof row.dailyReturn === "number");
+  const dailyQuoteRowsWithYtdReturn = loadedDailyQuoteRows.filter((row) => typeof row.ytdReturn === "number");
+  const strongestDailyQuoteRows = sortDailyQuoteRows(dailyQuoteRowsWithDailyReturn, "dailyReturn", "desc").slice(0, 3);
+  const weakestDailyQuoteRows = sortDailyQuoteRows(dailyQuoteRowsWithDailyReturn, "dailyReturn", "asc").slice(0, 3);
+  const strongestYtdQuoteRows = sortDailyQuoteRows(dailyQuoteRowsWithYtdReturn, "ytdReturn", "desc").slice(0, 3);
+  const dailyQuoteSnapshotGroups = [
+    {
+      label: "前日最強",
+      rows: strongestDailyQuoteRows,
+      metric: (row: DailyMarketQuoteRow) => formatSignedPercent(row.dailyReturn),
+      textClass: (row: DailyMarketQuoteRow) => dailyReturnTextClass(row.dailyReturn),
+    },
+    {
+      label: "前日最弱",
+      rows: weakestDailyQuoteRows,
+      metric: (row: DailyMarketQuoteRow) => formatSignedPercent(row.dailyReturn),
+      textClass: (row: DailyMarketQuoteRow) => dailyReturnTextClass(row.dailyReturn),
+    },
+    {
+      label: "今年最強",
+      rows: strongestYtdQuoteRows,
+      metric: (row: DailyMarketQuoteRow) => formatSignedPercent(row.ytdReturn),
+      textClass: (row: DailyMarketQuoteRow) => dailyReturnTextClass(row.ytdReturn),
+    },
+  ];
   const marketWorkspaceItems: Array<{
     id: MarketDataWorkspace;
     label: string;
@@ -4885,7 +4976,7 @@ export function MarketDataPanel() {
                 進入畫面會用 Raw 載入 BigQuery 全部標的；表格列出最新價格、前日漲跌與今年漲跌。
               </p>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-[1fr_150px_auto] gap-2 text-xs xl:min-w-[760px]">
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_150px_auto_auto] gap-2 text-xs xl:min-w-[860px]">
               <input
                 value={dailyQuoteSymbolsText}
                 onChange={(event) => setDailyQuoteSymbolsText(event.target.value)}
@@ -4912,6 +5003,14 @@ export function MarketDataPanel() {
                 className="px-3 py-2 rounded-md bg-cyan-700 hover:bg-cyan-600 text-white font-bold disabled:cursor-not-allowed disabled:bg-slate-900 disabled:text-slate-600"
               >
                 {dailyQuoteStatus === "loading" ? "讀取中" : "重新讀取"}
+              </button>
+              <button
+                type="button"
+                onClick={handleExportDailyQuoteCsv}
+                disabled={!dailyQuoteRows.length}
+                className="px-3 py-2 rounded-md border border-slate-700 bg-slate-900 text-slate-100 font-bold hover:border-cyan-700 hover:text-cyan-100 disabled:cursor-not-allowed disabled:border-slate-800 disabled:bg-slate-950 disabled:text-slate-700"
+              >
+                行情 CSV
               </button>
             </div>
           </div>
@@ -4953,31 +5052,52 @@ export function MarketDataPanel() {
 
           {dailyQuoteRows.length ? (
             <div className="space-y-3">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                <div className="rounded-md border border-slate-800 bg-slate-900/70 p-3">
-                  <p className="text-[10px] text-slate-500">漲跌分布</p>
-                  <p className="mt-1 text-lg font-bold font-mono text-slate-100">
-                    {positiveDailyQuoteCount} 上漲 / {negativeDailyQuoteCount} 下跌
-                  </p>
-                  <p className="mt-1 text-[11px] text-slate-600">以最新有效交易日計算前日漲跌</p>
+              <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-3">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                  <div>
+                    <p className="text-[10px] font-mono text-cyan-300">MARKET SNAPSHOT</p>
+                    <h4 className="mt-1 text-sm font-bold text-slate-100">市場快照</h4>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-[11px] md:grid-cols-4">
+                    <div className="rounded border border-slate-800 bg-slate-950 px-3 py-2">
+                      <p className="text-slate-500">上漲</p>
+                      <p className="font-mono font-bold text-emerald-200">{positiveDailyQuoteCount} 檔</p>
+                    </div>
+                    <div className="rounded border border-slate-800 bg-slate-950 px-3 py-2">
+                      <p className="text-slate-500">下跌</p>
+                      <p className="font-mono font-bold text-rose-200">{negativeDailyQuoteCount} 檔</p>
+                    </div>
+                    <div className="rounded border border-slate-800 bg-slate-950 px-3 py-2">
+                      <p className="text-slate-500">最強</p>
+                      <p className="font-mono font-bold text-emerald-200">{bestDailyQuoteRow?.symbol ?? "--"}</p>
+                    </div>
+                    <div className="rounded border border-slate-800 bg-slate-950 px-3 py-2">
+                      <p className="text-slate-500">最弱</p>
+                      <p className="font-mono font-bold text-rose-200">{worstDailyQuoteRow?.symbol ?? "--"}</p>
+                    </div>
+                  </div>
                 </div>
-                <div className="rounded-md border border-slate-800 bg-slate-900/70 p-3">
-                  <p className="text-[10px] text-slate-500">前日最強</p>
-                  <p className="mt-1 text-lg font-bold font-mono text-emerald-200">
-                    {bestDailyQuoteRow?.symbol ?? "--"}
-                  </p>
-                  <p className="mt-1 text-[11px] font-mono text-emerald-200">
-                    {formatSignedPercent(bestDailyQuoteRow?.dailyReturn)}
-                  </p>
-                </div>
-                <div className="rounded-md border border-slate-800 bg-slate-900/70 p-3">
-                  <p className="text-[10px] text-slate-500">前日最弱</p>
-                  <p className="mt-1 text-lg font-bold font-mono text-rose-200">
-                    {worstDailyQuoteRow?.symbol ?? "--"}
-                  </p>
-                  <p className="mt-1 text-[11px] font-mono text-rose-200">
-                    {formatSignedPercent(worstDailyQuoteRow?.dailyReturn)}
-                  </p>
+                <div className="mt-3 grid grid-cols-1 lg:grid-cols-3 gap-2">
+                  {dailyQuoteSnapshotGroups.map((group) => (
+                    <div key={group.label} className="rounded-md border border-slate-800 bg-slate-950/70 p-3">
+                      <p className="text-[10px] font-bold text-slate-500">{group.label}</p>
+                      <div className="mt-2 space-y-2">
+                        {group.rows.length ? group.rows.map((row) => (
+                          <div key={`${group.label}-${row.symbol}`} className="flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="truncate font-mono text-xs font-bold text-slate-100">{row.symbol}</p>
+                              <p className="font-mono text-[10px] text-slate-600">{formatPrice(row.latestPrice)}</p>
+                            </div>
+                            <p className={`shrink-0 font-mono text-xs font-bold ${group.textClass(row)}`}>
+                              {group.metric(row)}
+                            </p>
+                          </div>
+                        )) : (
+                          <p className="text-[11px] text-slate-600">尚無可排序資料</p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
 
