@@ -461,6 +461,7 @@ import {
   type ExecutionReviewStatus,
 } from "@/lib/tradeExecutionWorkflow";
 import type {
+  BigQueryAdjustedStaleSymbol,
   BigQueryAsset,
   BigQueryAssetHistoryResponse,
   BigQueryAssetProfileResponse,
@@ -621,6 +622,20 @@ type DailyQuoteQuality = {
   label: string;
   note: string;
 };
+
+type AdjustedRepairPlanRow = {
+  symbol: string;
+  severity: "block" | "watch";
+  issueLabel: string;
+  rawLatestDate: string;
+  adjustedLatestDate: string;
+  lagText: string;
+  coverageText: string;
+  action: string;
+  canUseRaw: boolean;
+};
+
+const EMPTY_ADJUSTED_STALE_SYMBOLS: BigQueryAdjustedStaleSymbol[] = [];
 
 function finiteMarketNumber(value: number | null | undefined) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
@@ -1009,6 +1024,38 @@ function dailyQuoteIssueSummary(rows: DailyMarketQuoteRow[]) {
   return `${issueRows.length} 檔標的目前 ${priceBasisLabel(issueRows[0].priceBasis)} 沒有可用價格${switchableText}。`;
 }
 
+function adjustedRepairBadgeClass(severity: AdjustedRepairPlanRow["severity"]) {
+  return severity === "block"
+    ? "bg-rose-500/15 text-rose-200"
+    : "bg-amber-500/15 text-amber-200";
+}
+
+function buildAdjustedRepairPlanRows(symbols: BigQueryAdjustedStaleSymbol[]): AdjustedRepairPlanRow[] {
+  return symbols.map((symbol) => {
+    const lagDays = symbol.adjusted_lag_days;
+    const canUseRaw = symbol.latest_raw_date === symbol.latest_any_date && symbol.raw_lag_days === 0;
+    const severity: AdjustedRepairPlanRow["severity"] = lagDays === null || lagDays >= 30 ? "block" : "watch";
+    const issueLabel = lagDays === null ? "缺 Adj" : lagDays >= 30 ? "Adj 停更" : "Adj 延遲";
+    const action = lagDays === null
+      ? "先建立 adj_price 來源或對應代號，再放行報酬分析"
+      : lagDays >= 30
+        ? "重跑 adj_price 回補批次，確認配息與拆分口徑"
+        : "補跑近期 adj_price，完成後重新讀取 diagnostics";
+
+    return {
+      symbol: symbol.symbol,
+      severity,
+      issueLabel,
+      rawLatestDate: symbol.latest_raw_date ?? "--",
+      adjustedLatestDate: symbol.latest_adjusted_date ?? "--",
+      lagText: lagDays === null ? "無 Adj" : `${lagDays} 天`,
+      coverageText: `${formatCount(symbol.adjusted_price_rows)} / ${formatCount(symbol.raw_price_rows)}`,
+      action,
+      canUseRaw,
+    };
+  });
+}
+
 export function MarketDataPanel() {
   const {
     data,
@@ -1177,7 +1224,7 @@ export function MarketDataPanel() {
   const priceFreshnessStatus = freshnessStatus(priceFreshnessDays);
   const fxFreshnessStatus = freshnessStatus(fxFreshnessDays);
   const staleSymbols = bigQueryDiagnostics?.staleSymbols ?? [];
-  const adjustedStaleSymbols = bigQueryDiagnostics?.adjustedStaleSymbols ?? [];
+  const adjustedStaleSymbols = bigQueryDiagnostics?.adjustedStaleSymbols ?? EMPTY_ADJUSTED_STALE_SYMBOLS;
   const fxCurrencies = bigQueryDiagnostics?.fxCurrencies ?? [];
   const staleSymbolStatus: QualityStatus = staleSymbols.length >= 5 ? "risk" : staleSymbols.length > 0 ? "watch" : "strong";
   const adjustedStaleStatus: QualityStatus = adjustedStaleSymbols.length >= 5 ? "risk" : adjustedStaleSymbols.length > 0 ? "watch" : "strong";
@@ -4539,6 +4586,18 @@ export function MarketDataPanel() {
         : "等待行情載入",
     },
   ];
+  const adjustedRepairPlanRows = useMemo(
+    () => buildAdjustedRepairPlanRows(adjustedStaleSymbols),
+    [adjustedStaleSymbols],
+  );
+  const adjustedRepairBlockCount = adjustedRepairPlanRows.filter((row) => row.severity === "block").length;
+  const adjustedRepairWatchCount = adjustedRepairPlanRows.filter((row) => row.severity === "watch").length;
+  const adjustedRepairRawReadyCount = adjustedRepairPlanRows.filter((row) => row.canUseRaw).length;
+  const adjustedRepairMaxLagDays = adjustedStaleSymbols.reduce((maxValue, symbol) => (
+    typeof symbol.adjusted_lag_days === "number"
+      ? Math.max(maxValue, symbol.adjusted_lag_days)
+      : maxValue
+  ), 0);
   const handleDailyQuoteSort = (sortKey: DailyQuoteSortKey) => {
     setDailyQuoteSortDirection((currentDirection) => (
       dailyQuoteSortKey === sortKey && currentDirection === "asc" ? "desc" : "asc"
@@ -4912,6 +4971,84 @@ export function MarketDataPanel() {
                   : "尚未載入行情。按「重新讀取」後會從 BigQuery 讀取全部或指定標的。"}
             </div>
           )}
+
+          {adjustedRepairPlanRows.length ? (
+            <section className="rounded-lg border border-amber-900/50 bg-amber-950/10 p-3 space-y-3">
+              <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-3">
+                <div>
+                  <p className="text-[10px] font-mono text-amber-300">ADJUSTED PRICE REPAIR</p>
+                  <h4 className="mt-1 text-sm font-bold text-amber-100">Adj 價格修復計畫</h4>
+                  <p className="mt-1 text-[11px] leading-5 text-amber-200/75">
+                    今日行情可先用 Raw 查最新價；正式投組報酬仍要等 adj_price 回補後再放行。此區只列修復計畫，沒有寫入 BigQuery。
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs lg:min-w-[560px]">
+                  <div className="rounded-md border border-amber-900/40 bg-slate-950/60 p-2">
+                    <p className="text-[10px] text-slate-500">需修復</p>
+                    <p className="mt-1 font-mono text-lg font-bold text-amber-100">{adjustedRepairPlanRows.length} 檔</p>
+                  </div>
+                  <div className="rounded-md border border-rose-900/40 bg-slate-950/60 p-2">
+                    <p className="text-[10px] text-slate-500">阻擋</p>
+                    <p className="mt-1 font-mono text-lg font-bold text-rose-200">{adjustedRepairBlockCount} 檔</p>
+                  </div>
+                  <div className="rounded-md border border-slate-800 bg-slate-950/60 p-2">
+                    <p className="text-[10px] text-slate-500">Raw 可查價</p>
+                    <p className="mt-1 font-mono text-lg font-bold text-cyan-100">{adjustedRepairRawReadyCount} 檔</p>
+                  </div>
+                  <div className="rounded-md border border-slate-800 bg-slate-950/60 p-2">
+                    <p className="text-[10px] text-slate-500">最大落後</p>
+                    <p className="mt-1 font-mono text-lg font-bold text-slate-100">{adjustedRepairMaxLagDays} 天</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-3">
+                <div className="overflow-x-auto rounded-lg border border-slate-800">
+                  <table className="min-w-[900px] w-full border-collapse text-left text-xs">
+                    <thead className="bg-slate-900 text-slate-500">
+                      <tr>
+                        {["標的", "狀態", "Raw 最新", "Adj 最新", "落後", "Adj / Raw 筆數", "修復動作"].map((label) => (
+                          <th key={label} className="border-b border-slate-800 px-3 py-2 font-bold text-slate-300">
+                            {label}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {adjustedRepairPlanRows.slice(0, 10).map((row) => (
+                        <tr key={`${row.symbol}-repair`} className="border-b border-slate-800/70 bg-slate-950/60">
+                          <td className="px-3 py-2 font-mono font-bold text-cyan-100">{row.symbol}</td>
+                          <td className="px-3 py-2">
+                            <span className={`rounded px-2 py-1 text-[10px] font-bold ${adjustedRepairBadgeClass(row.severity)}`}>
+                              {row.issueLabel}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 font-mono text-slate-300">{row.rawLatestDate}</td>
+                          <td className="px-3 py-2 font-mono text-slate-300">{row.adjustedLatestDate}</td>
+                          <td className="px-3 py-2 font-mono text-amber-100">{row.lagText}</td>
+                          <td className="px-3 py-2 font-mono text-slate-400">{row.coverageText}</td>
+                          <td className="px-3 py-2 text-slate-400">{row.action}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="rounded-lg border border-slate-800 bg-slate-950/70 p-3 text-xs">
+                  <p className="font-bold text-slate-200">放行規則</p>
+                  <div className="mt-2 space-y-2 text-[11px] leading-5 text-slate-500">
+                    <p>1. Raw 用於「今日行情」看最新價。</p>
+                    <p>2. Adj 用於「投資組合分析」算報酬、波動與回撤。</p>
+                    <p>3. 回補 adj_price 會寫入 BigQuery，必須先確認資料來源與回補口徑。</p>
+                    <p>4. 修復後重新讀取 diagnostics，`Adjusted freshness` 需回到正常才放行正式分析。</p>
+                  </div>
+                  <div className="mt-3 rounded-md border border-amber-900/40 bg-amber-950/20 p-2 text-[11px] text-amber-100">
+                    目前狀態：{adjustedRepairBlockCount} 檔阻擋、{adjustedRepairWatchCount} 檔觀察；尚未執行 BigQuery 寫入。
+                  </div>
+                </div>
+              </div>
+            </section>
+          ) : null}
         </section>
         )}
 
