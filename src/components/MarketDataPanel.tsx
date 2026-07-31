@@ -4672,6 +4672,8 @@ export function MarketDataPanel() {
   const isPortfolioWorkspace = activeMarketWorkspace === "portfolio";
   const isOperationsWorkspace = false;
   const isBackofficeWorkspace = false;
+  const availableBigQuerySymbols = dedupeDailyQuoteSymbols(dailyQuoteRows.map((row) => row.symbol), 500);
+  const portfolioSelectableSymbols = availableBigQuerySymbols.filter((symbol) => !/\s/.test(symbol));
   const loadedDailyQuoteRows = dailyQuoteRows.filter((row) => row.status === "loaded");
   const failedDailyQuoteRows = dailyQuoteRows.filter((row) => row.status === "error");
   const dailyQuoteQualitySummary = useMemo(() => {
@@ -5967,6 +5969,7 @@ export function MarketDataPanel() {
           isSearchingAssets={isSearchingAssets}
           isLoadingAssetProfile={isLoadingAssetProfile}
           onSearchAssets={handleSearchAssets}
+          availableSymbols={availableBigQuerySymbols}
           onLoadAssetProfile={handleLoadAssetProfile}
           assetPanelError={assetPanelError}
           assetSuggestions={assetSuggestions}
@@ -6000,6 +6003,7 @@ export function MarketDataPanel() {
             assetQuery={assetQuery}
             onAssetQueryChange={setAssetQuery}
             assetSuggestions={assetSuggestions}
+            availableSymbols={portfolioSelectableSymbols}
             onSearchAssets={handleSearchAssets}
             onAppendComparisonSymbol={handleAppendComparisonSymbol}
             comparisonSymbols={comparisonSymbols}

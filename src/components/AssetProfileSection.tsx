@@ -19,6 +19,7 @@ type AssetProfileSectionProps = {
   isSearchingAssets: boolean;
   isLoadingAssetProfile: boolean;
   onSearchAssets: () => void;
+  availableSymbols: string[];
   onLoadAssetProfile: (symbol?: string) => void | Promise<void>;
   assetPanelError: string | null;
   assetSuggestions: BigQueryAsset[];
@@ -52,6 +53,7 @@ export function AssetProfileSection({
   onLoadAssetProfile: handleLoadAssetProfile,
   assetPanelError,
   assetSuggestions,
+  availableSymbols,
   onAddAssetToComparison,
   assetProfile,
   assetHistory,
@@ -83,9 +85,15 @@ export function AssetProfileSection({
                     void handleLoadAssetProfile();
                   }
                 }}
+                list="asset-profile-symbol-options"
                 placeholder="0050.TW"
                 className="min-w-0 bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-slate-100 font-mono outline-none focus:border-cyan-600"
               />
+              <datalist id="asset-profile-symbol-options">
+                {availableSymbols.map((symbol) => (
+                  <option key={symbol} value={symbol} />
+                ))}
+              </datalist>
               <select
                 value=""
                 onChange={(event) => {

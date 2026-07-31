@@ -28,6 +28,7 @@ type WatchlistControlsSectionProps = {
   assetQuery: string;
   onAssetQueryChange: (value: string) => void;
   assetSuggestions: BigQueryAsset[];
+  availableSymbols: string[];
   onSearchAssets: () => void | Promise<void>;
   onAppendComparisonSymbol: (symbol: string) => void;
   comparisonSymbols: string;
@@ -64,6 +65,7 @@ export function WatchlistControlsSection({
   assetQuery,
   onAssetQueryChange,
   assetSuggestions,
+  availableSymbols,
   onSearchAssets,
   onAppendComparisonSymbol,
   comparisonSymbols,
@@ -141,7 +143,7 @@ export function WatchlistControlsSection({
             {symbolCount}/12 symbols
           </span>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto_auto] gap-2 text-xs">
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_1fr_auto_auto] gap-2 text-xs">
           <input
             value={assetQuery}
             onChange={(event) => onAssetQueryChange(event.target.value)}
@@ -150,9 +152,30 @@ export function WatchlistControlsSection({
                 onAppendComparisonSymbol(assetQuery);
               }
             }}
+            list="watchlist-symbol-options"
             placeholder="輸入代號，例如 0050.TW"
             className="min-w-0 rounded-md border border-slate-800 bg-slate-950 px-3 py-2 font-mono text-slate-100 outline-none placeholder:text-slate-700 focus:border-cyan-600"
           />
+          <datalist id="watchlist-symbol-options">
+            {availableSymbols.map((symbol) => (
+              <option key={symbol} value={symbol} />
+            ))}
+          </datalist>
+          <select
+            value=""
+            onChange={(event) => {
+              if (event.target.value) onAppendComparisonSymbol(event.target.value);
+            }}
+            disabled={!availableSymbols.length || symbolCount >= 12}
+            className="min-w-0 rounded-md border border-slate-800 bg-slate-950 px-3 py-2 text-slate-100 disabled:cursor-not-allowed disabled:text-slate-600"
+          >
+            <option value="">從 BigQuery 加入</option>
+            {availableSymbols.map((symbol) => (
+              <option key={symbol} value={symbol}>
+                {symbol}
+              </option>
+            ))}
+          </select>
           <select
             value=""
             onChange={(event) => {
