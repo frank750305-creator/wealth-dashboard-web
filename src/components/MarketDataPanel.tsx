@@ -608,6 +608,9 @@ type DailyQuoteFilter = "all" | "loaded" | "error";
 type DailyQuoteSortKey = "symbol" | "latestDate" | "latestPrice" | "dailyReturn" | "ytdReturn" | "status";
 type SortDirection = "asc" | "desc";
 type DailyQuoteQualityLevel = "ready" | "watch" | "risk";
+type DailyQuoteAutoLoadStatus = "idle" | "loading" | "retrying" | "done";
+
+const DAILY_QUOTE_AUTO_RETRY_DELAY_MS = 2000;
 
 type DailyMarketQuoteRow = {
   symbol: string;
@@ -1328,7 +1331,7 @@ export function MarketDataPanel() {
   const [dailyQuoteRows, setDailyQuoteRows] = useState<DailyMarketQuoteRow[]>([]);
   const [dailyQuoteStatus, setDailyQuoteStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [dailyQuoteError, setDailyQuoteError] = useState("");
-  const [dailyQuoteAutoLoadStatus, setDailyQuoteAutoLoadStatus] = useState<"idle" | "loading" | "done">("idle");
+  const [dailyQuoteAutoLoadStatus, setDailyQuoteAutoLoadStatus] = useState<DailyQuoteAutoLoadStatus>("idle");
   const [dailyQuoteSearch, setDailyQuoteSearch] = useState("");
   const [dailyQuoteFilter, setDailyQuoteFilter] = useState<DailyQuoteFilter>("all");
   const [dailyQuoteSortKey, setDailyQuoteSortKey] = useState<DailyQuoteSortKey>("symbol");
@@ -4565,6 +4568,7 @@ export function MarketDataPanel() {
     }
   }, [dailyQuotePriceBasis]);
   const handleLoadDailyQuotes = async () => {
+    setDailyQuoteAutoLoadStatus("done");
     await loadDailyQuoteSymbols(parseDailyQuoteSymbols(dailyQuoteSymbolsText, 500));
   };
   const handleDailyQuotePriceBasisChange = (nextPriceBasis: "adjusted" | "raw") => {
@@ -4637,7 +4641,19 @@ export function MarketDataPanel() {
       setDailyQuoteError("");
       setDailyQuoteRows([]);
       try {
-        const rows = await loadDailyRowsFromQuoteCards(dailyQuotePriceBasis, 500);
+        let rows: DailyMarketQuoteRow[];
+        try {
+          rows = await loadDailyRowsFromQuoteCards(dailyQuotePriceBasis, 500);
+        } catch (firstError: unknown) {
+          if (ignore) return;
+          setDailyQuoteAutoLoadStatus("retrying");
+          setDailyQuoteError(
+            `第一次自動載入沒有完成，系統正在自動重試一次。${firstError instanceof Error ? `\n${firstError.message}` : ""}`,
+          );
+          await new Promise((resolve) => window.setTimeout(resolve, DAILY_QUOTE_AUTO_RETRY_DELAY_MS));
+          if (ignore) return;
+          rows = await loadDailyRowsFromQuoteCards(dailyQuotePriceBasis, 500);
+        }
         if (ignore) return;
 
         if (!rows.length) {
@@ -4655,7 +4671,9 @@ export function MarketDataPanel() {
         setDailyQuoteAutoLoadStatus("done");
       } catch (err: unknown) {
         if (ignore) return;
-        setDailyQuoteError(err instanceof Error ? err.message : String(err));
+        setDailyQuoteError(
+          `自動載入暫時失敗，請稍後再按「手動重新讀取」。\n${err instanceof Error ? err.message : String(err)}`,
+        );
         setDailyQuoteStatus("error");
         setDailyQuoteAutoLoadStatus("done");
       }
@@ -4774,7 +4792,9 @@ export function MarketDataPanel() {
     {
       label: "行情狀態",
       value:
-        dailyQuoteAutoLoadStatus === "loading"
+        dailyQuoteAutoLoadStatus === "retrying"
+          ? "自動重試中"
+          : dailyQuoteAutoLoadStatus === "loading"
           ? "自動載入中"
           : dailyQuoteStatus === "loaded"
             ? "已載入"
@@ -4783,8 +4803,10 @@ export function MarketDataPanel() {
                 : "待設定",
       note: dailyQuoteRows.length
         ? `成功 ${loadedDailyQuoteRows.length}，缺資料 ${failedDailyQuoteRows.length}`
-        : dailyQuoteAutoLoadStatus === "loading"
-          ? "一次讀取 BigQuery 行情摘要，逾時保護已啟用"
+        : dailyQuoteAutoLoadStatus === "retrying"
+          ? "第一次載入未完成，系統會自動補跑一次"
+          : dailyQuoteAutoLoadStatus === "loading"
+            ? `正在自動讀取 BigQuery ${formatCount(bigQueryDiagnostics?.priceSummary.symbol_count)} 檔行情`
           : bigQueryBadge,
     },
     {
@@ -4975,7 +4997,7 @@ export function MarketDataPanel() {
               <p className="text-[10px] font-mono text-cyan-300">DAILY MARKET</p>
               <h3 className="mt-1 text-base font-bold text-slate-100">今日行情</h3>
               <p className="text-[11px] text-slate-500 mt-0.5">
-                進入畫面會用 Raw 載入 BigQuery 全部標的；表格列出最新價格、前日漲跌與今年漲跌。
+                進入畫面會自動載入 BigQuery 全部標的；表格列出最新價格、前日漲跌與今年漲跌。
               </p>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-[1fr_150px_auto_auto] gap-2 text-xs xl:min-w-[860px]">
@@ -5004,7 +5026,7 @@ export function MarketDataPanel() {
                 disabled={!hasBigQueryCredentials || dailyQuoteStatus === "loading"}
                 className="px-3 py-2 rounded-md bg-cyan-700 hover:bg-cyan-600 text-white font-bold disabled:cursor-not-allowed disabled:bg-slate-900 disabled:text-slate-600"
               >
-                {dailyQuoteStatus === "loading" ? "讀取中" : "重新讀取"}
+                {dailyQuoteStatus === "loading" ? "自動讀取中" : "手動重新讀取"}
               </button>
               <button
                 type="button"
@@ -5278,9 +5300,11 @@ export function MarketDataPanel() {
             <div className="rounded-lg border border-dashed border-cyan-900/60 bg-cyan-950/10 p-5 text-xs text-slate-400">
               {dailyQuoteStatus === "error"
                 ? "目前沒有可顯示的行情表格。上方錯誤訊息會說明是 API 逾時、查詢失敗，或 BigQuery 沒有可用價格。"
-                : dailyQuoteAutoLoadStatus === "loading" || dailyQuoteStatus === "loading"
-                  ? "正在從 BigQuery 行情摘要載入每一檔資料；載入後會顯示今日價格、前日漲跌與今年漲跌。"
-                  : "尚未載入行情。按「重新讀取」後會從 BigQuery 讀取全部或指定標的。"}
+                : dailyQuoteAutoLoadStatus === "retrying"
+                  ? "第一次自動載入沒有完成，系統正在自動重試一次；成功後會直接顯示每檔價格與漲跌。"
+                  : dailyQuoteAutoLoadStatus === "loading" || dailyQuoteStatus === "loading"
+                    ? `正在自動從 BigQuery 載入 ${formatCount(bigQueryDiagnostics?.priceSummary.symbol_count)} 檔行情；載入後會顯示今日價格、前日漲跌與今年漲跌。`
+                    : "尚未載入行情。系統會自動讀取；也可以按「手動重新讀取」補抓全部或指定標的。"}
             </div>
           )}
 
