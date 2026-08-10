@@ -471,6 +471,7 @@ import type {
   BigQueryAdjustedBackfillCandidate,
   BigQueryAdjustedStaleSymbol,
   BigQueryAsset,
+  BigQueryAssetCategory,
   BigQueryAssetHistoryResponse,
   BigQueryAssetProfileResponse,
   BigQueryQuoteCard,
@@ -611,9 +612,22 @@ type DailyQuoteQualityLevel = "ready" | "watch" | "risk";
 type DailyQuoteAutoLoadStatus = "idle" | "loading" | "retrying" | "done";
 
 const DAILY_QUOTE_AUTO_RETRY_DELAY_MS = 2000;
+const DAILY_QUOTE_PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
+const DAILY_QUOTE_CATEGORY_OPTIONS: Array<{ id: BigQueryAssetCategory; label: string }> = [
+  { id: "all", label: "全部標的" },
+  { id: "tw_etf", label: "台股 ETF" },
+  { id: "us_etf", label: "美股 ETF" },
+  { id: "stock", label: "股票" },
+  { id: "fund", label: "基金" },
+  { id: "fx", label: "匯率" },
+  { id: "index", label: "指數" },
+  { id: "other", label: "其他" },
+];
 
 type DailyMarketQuoteRow = {
   symbol: string;
+  category: BigQueryAssetCategory;
+  categoryLabel: string;
   latestAnyDate: string | null;
   latestDate: string | null;
   latestPrice: number | null;
@@ -632,6 +646,14 @@ type DailyMarketQuoteRow = {
   alternateLatestDate?: string | null;
   alternateLatestPrice?: number | null;
   alternateSelectedPriceRows?: number | null;
+};
+
+type DailyMarketQuotePage = {
+  rows: DailyMarketQuoteRow[];
+  total: number;
+  offset: number;
+  limit: number;
+  hasMore: boolean;
 };
 
 type DailyQuoteQuality = {
@@ -750,6 +772,8 @@ function dailyQuoteRowFromHistory(
 
   return {
     symbol: history.symbol || symbol,
+    category: "other",
+    categoryLabel: "其他",
     latestAnyDate: history.summary.latest_date,
     latestDate: latest?.date ?? history.summary.latest_date,
     latestPrice,
@@ -778,6 +802,8 @@ function dailyQuoteRowFromQuoteCard(
 
   return {
     symbol: quote.symbol,
+    category: quote.category ?? "other",
+    categoryLabel: quote.category_label ?? "其他",
     latestAnyDate: quote.latest_any_date,
     latestDate: quote.latest_date ?? quote.latest_any_date,
     latestPrice,
@@ -855,6 +881,49 @@ async function loadDailyRowsFromQuoteCards(
   }
 }
 
+async function loadDailyQuotePageFromBigQuery({
+  priceBasis,
+  query,
+  category,
+  limit,
+  offset,
+}: {
+  priceBasis: "adjusted" | "raw";
+  query: string;
+  category: BigQueryAssetCategory;
+  limit: number;
+  offset: number;
+}): Promise<DailyMarketQuotePage> {
+  const response = await withClientTimeout(
+    fetchBigQueryQuoteCards(priceBasis, limit, { query, category, offset }),
+    15000,
+    "BigQuery 分頁行情讀取逾時：前端 15 秒內沒有收到回應。",
+  );
+  let rows = response.quotes.map((quote) => dailyQuoteRowFromQuoteCard(quote, response.priceBasis));
+
+  if (rows.some((row) => row.status === "error")) {
+    const alternatePriceBasis = priceBasis === "adjusted" ? "raw" : "adjusted";
+    try {
+      const alternateResponse = await withClientTimeout(
+        fetchBigQueryQuoteCards(alternatePriceBasis, limit, { query, category, offset }),
+        8000,
+        `BigQuery ${priceBasisLabel(alternatePriceBasis)} 備用分頁行情讀取逾時。`,
+      );
+      rows = annotateDailyRowsWithAlternateQuoteCards(rows, alternateResponse.quotes, alternatePriceBasis);
+    } catch {
+      // Keep the primary rows. The row-level quality message already tells the user what is missing.
+    }
+  }
+
+  return {
+    rows,
+    total: response.total,
+    offset: response.offset,
+    limit: response.limit,
+    hasMore: response.hasMore,
+  };
+}
+
 async function loadDailyRowsForSymbols(
   symbols: string[],
   priceBasis: "adjusted" | "raw",
@@ -870,6 +939,8 @@ async function loadDailyRowsForSymbols(
 
   return uniqueSymbols.map((symbol) => rowsBySymbol.get(symbol.toUpperCase()) ?? {
     symbol,
+    category: "other",
+    categoryLabel: "其他",
     latestAnyDate: null,
     latestDate: null,
     latestPrice: null,
@@ -910,6 +981,8 @@ async function loadDailyRowsFromHistoryFallback(
 
     return {
       symbol,
+      category: "other",
+      categoryLabel: "其他",
       latestAnyDate: null,
       latestDate: null,
       latestPrice: null,
@@ -1327,7 +1400,13 @@ export function MarketDataPanel() {
   const [marketAlertAuditRecords, setMarketAlertAuditRecords] = useState<MarketAlertWarehouseAuditRecord[]>([]);
   const [watchlistMemoCopyStatus, setWatchlistMemoCopyStatus] = useState<"idle" | "copied">("idle");
   const [activeMarketWorkspace, setActiveMarketWorkspace] = useState<MarketDataWorkspace>("quotes");
-  const [dailyQuoteSymbolsText, setDailyQuoteSymbolsText] = useState("0050.TW 0056.TW 2330.TW SPY QQQ");
+  const [dailyQuoteSymbolsText, setDailyQuoteSymbolsText] = useState("");
+  const [dailyQuoteQuery, setDailyQuoteQuery] = useState("");
+  const [dailyQuoteCategory, setDailyQuoteCategory] = useState<BigQueryAssetCategory>("all");
+  const [dailyQuotePageSize, setDailyQuotePageSize] = useState(50);
+  const [dailyQuoteOffset, setDailyQuoteOffset] = useState(0);
+  const [dailyQuoteTotal, setDailyQuoteTotal] = useState(0);
+  const [dailyQuoteHasMore, setDailyQuoteHasMore] = useState(false);
   const [dailyQuoteRows, setDailyQuoteRows] = useState<DailyMarketQuoteRow[]>([]);
   const [dailyQuoteStatus, setDailyQuoteStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [dailyQuoteError, setDailyQuoteError] = useState("");
@@ -4559,6 +4638,9 @@ export function MarketDataPanel() {
       const rows = await loadDailyRowsForSymbols(requestedSymbols, dailyQuotePriceBasis);
       const loadedCount = rows.filter((row) => row.status === "loaded").length;
       setDailyQuoteRows(rows);
+      setDailyQuoteOffset(0);
+      setDailyQuoteTotal(rows.length);
+      setDailyQuoteHasMore(false);
       setDailyQuoteError(dailyQuoteIssueSummary(rows));
       setDailyQuoteStatus(loadedCount ? "loaded" : "error");
     } catch (err: unknown) {
@@ -4567,9 +4649,48 @@ export function MarketDataPanel() {
       setDailyQuoteStatus("error");
     }
   }, [dailyQuotePriceBasis]);
+  const loadDailyQuotePage = useCallback(async (nextOffset = dailyQuoteOffset, nextQuery = dailyQuoteQuery) => {
+    setDailyQuoteAutoLoadStatus(nextOffset === 0 ? "loading" : "done");
+    setDailyQuoteStatus("loading");
+    setDailyQuoteError("");
+    setDailyQuoteRows([]);
+
+    try {
+      const page = await loadDailyQuotePageFromBigQuery({
+        priceBasis: dailyQuotePriceBasis,
+        query: nextQuery.trim(),
+        category: dailyQuoteCategory,
+        limit: dailyQuotePageSize,
+        offset: nextOffset,
+      });
+      const loadedCount = page.rows.filter((row) => row.status === "loaded").length;
+      setDailyQuoteRows(page.rows);
+      setDailyQuoteOffset(page.offset);
+      setDailyQuoteTotal(page.total);
+      setDailyQuoteHasMore(page.hasMore);
+      setDailyQuoteError(page.rows.length ? dailyQuoteIssueSummary(page.rows) : "BigQuery daily_prices 目前沒有符合條件的標的。");
+      setDailyQuoteStatus(loadedCount ? "loaded" : "error");
+      setDailyQuoteAutoLoadStatus("done");
+    } catch (err: unknown) {
+      setDailyQuoteRows([]);
+      setDailyQuoteTotal(0);
+      setDailyQuoteHasMore(false);
+      setDailyQuoteError(err instanceof Error ? err.message : String(err));
+      setDailyQuoteStatus("error");
+      setDailyQuoteAutoLoadStatus("done");
+    }
+  }, [dailyQuoteCategory, dailyQuoteOffset, dailyQuotePageSize, dailyQuotePriceBasis, dailyQuoteQuery]);
   const handleLoadDailyQuotes = async () => {
-    setDailyQuoteAutoLoadStatus("done");
-    await loadDailyQuoteSymbols(parseDailyQuoteSymbols(dailyQuoteSymbolsText, 500));
+    const requestedSymbols = parseDailyQuoteSymbols(dailyQuoteSymbolsText, 500);
+    const shouldUseManualSymbols = requestedSymbols.length > 1;
+    if (shouldUseManualSymbols) {
+      setDailyQuoteAutoLoadStatus("done");
+      await loadDailyQuoteSymbols(requestedSymbols);
+      return;
+    }
+
+    setDailyQuoteQuery(dailyQuoteSymbolsText.trim());
+    await loadDailyQuotePage(0, dailyQuoteSymbolsText.trim());
   };
   const handleDailyQuotePriceBasisChange = (nextPriceBasis: "adjusted" | "raw") => {
     if (nextPriceBasis === dailyQuotePriceBasis) return;
@@ -4578,7 +4699,31 @@ export function MarketDataPanel() {
     setDailyQuoteError("");
     setDailyQuoteStatus("loading");
     setDailyQuoteAutoLoadStatus("loading");
+    setDailyQuoteOffset(0);
     setDailyQuotePriceBasis(nextPriceBasis);
+  };
+  const handleDailyQuoteCategoryChange = (nextCategory: BigQueryAssetCategory) => {
+    setDailyQuoteRows([]);
+    setDailyQuoteError("");
+    setDailyQuoteStatus("loading");
+    setDailyQuoteAutoLoadStatus("loading");
+    setDailyQuoteOffset(0);
+    setDailyQuoteCategory(nextCategory);
+  };
+  const handleDailyQuotePageSizeChange = (nextPageSize: number) => {
+    setDailyQuoteRows([]);
+    setDailyQuoteError("");
+    setDailyQuoteStatus("loading");
+    setDailyQuoteAutoLoadStatus("loading");
+    setDailyQuoteOffset(0);
+    setDailyQuotePageSize(nextPageSize);
+  };
+  const handleDailyQuotePreviousPage = () => {
+    setDailyQuoteOffset((currentOffset) => Math.max(0, currentOffset - dailyQuotePageSize));
+  };
+  const handleDailyQuoteNextPage = () => {
+    if (!dailyQuoteHasMore) return;
+    setDailyQuoteOffset((currentOffset) => currentOffset + dailyQuotePageSize);
   };
   const loadAdjustedBackfillSafetyPlan = useCallback(async () => {
     setAdjustedBackfillPlanStatus("loading");
@@ -4629,7 +4774,13 @@ export function MarketDataPanel() {
   useEffect(() => {
     if (!hasBigQueryCredentials) return;
 
-    const autoLoadKey = dailyQuotePriceBasis;
+    const autoLoadKey = [
+      dailyQuotePriceBasis,
+      dailyQuoteCategory,
+      dailyQuoteQuery,
+      dailyQuotePageSize,
+      dailyQuoteOffset,
+    ].join("|");
     if (dailyQuoteAutoLoadKeyRef.current === autoLoadKey) return;
     dailyQuoteAutoLoadKeyRef.current = autoLoadKey;
 
@@ -4641,9 +4792,15 @@ export function MarketDataPanel() {
       setDailyQuoteError("");
       setDailyQuoteRows([]);
       try {
-        let rows: DailyMarketQuoteRow[];
+        let page: DailyMarketQuotePage;
         try {
-          rows = await loadDailyRowsFromQuoteCards(dailyQuotePriceBasis, 500);
+          page = await loadDailyQuotePageFromBigQuery({
+            priceBasis: dailyQuotePriceBasis,
+            query: dailyQuoteQuery,
+            category: dailyQuoteCategory,
+            limit: dailyQuotePageSize,
+            offset: dailyQuoteOffset,
+          });
         } catch (firstError: unknown) {
           if (ignore) return;
           setDailyQuoteAutoLoadStatus("retrying");
@@ -4652,21 +4809,30 @@ export function MarketDataPanel() {
           );
           await new Promise((resolve) => window.setTimeout(resolve, DAILY_QUOTE_AUTO_RETRY_DELAY_MS));
           if (ignore) return;
-          rows = await loadDailyRowsFromQuoteCards(dailyQuotePriceBasis, 500);
+          page = await loadDailyQuotePageFromBigQuery({
+            priceBasis: dailyQuotePriceBasis,
+            query: dailyQuoteQuery,
+            category: dailyQuoteCategory,
+            limit: dailyQuotePageSize,
+            offset: dailyQuoteOffset,
+          });
         }
         if (ignore) return;
 
-        if (!rows.length) {
+        if (!page.rows.length) {
           setDailyQuoteError("BigQuery daily_prices 目前沒有可顯示標的。");
           setDailyQuoteStatus("error");
           setDailyQuoteAutoLoadStatus("done");
+          setDailyQuoteTotal(page.total);
+          setDailyQuoteHasMore(false);
           return;
         }
 
-        setDailyQuoteSymbolsText(rows.map((row) => row.symbol).join("\n"));
-        const loadedCount = rows.filter((row) => row.status === "loaded").length;
-        setDailyQuoteRows(rows);
-        setDailyQuoteError(dailyQuoteIssueSummary(rows));
+        const loadedCount = page.rows.filter((row) => row.status === "loaded").length;
+        setDailyQuoteRows(page.rows);
+        setDailyQuoteTotal(page.total);
+        setDailyQuoteHasMore(page.hasMore);
+        setDailyQuoteError(dailyQuoteIssueSummary(page.rows));
         setDailyQuoteStatus(loadedCount ? "loaded" : "error");
         setDailyQuoteAutoLoadStatus("done");
       } catch (err: unknown) {
@@ -4676,6 +4842,8 @@ export function MarketDataPanel() {
         );
         setDailyQuoteStatus("error");
         setDailyQuoteAutoLoadStatus("done");
+        setDailyQuoteTotal(0);
+        setDailyQuoteHasMore(false);
       }
     }
 
@@ -4684,7 +4852,14 @@ export function MarketDataPanel() {
     return () => {
       ignore = true;
     };
-  }, [hasBigQueryCredentials, dailyQuotePriceBasis]);
+  }, [
+    hasBigQueryCredentials,
+    dailyQuoteCategory,
+    dailyQuoteOffset,
+    dailyQuotePageSize,
+    dailyQuotePriceBasis,
+    dailyQuoteQuery,
+  ]);
   const isOverviewWorkspace = activeMarketWorkspace === "quotes";
   const isAssetsWorkspace = activeMarketWorkspace === "portfolio";
   const isPortfolioWorkspace = activeMarketWorkspace === "portfolio";
@@ -4727,11 +4902,18 @@ export function MarketDataPanel() {
       const matchesSearch =
         !cleanSearch ||
         row.symbol.toLowerCase().includes(cleanSearch) ||
+        row.categoryLabel.toLowerCase().includes(cleanSearch) ||
         (row.latestDate ?? "").includes(cleanSearch);
       return matchesFilter && matchesSearch;
     });
     return sortDailyQuoteRows(matchingRows, dailyQuoteSortKey, dailyQuoteSortDirection);
   }, [dailyQuoteRows, dailyQuoteSearch, dailyQuoteFilter, dailyQuoteSortKey, dailyQuoteSortDirection]);
+  const dailyQuotePageStart = dailyQuoteRows.length ? dailyQuoteOffset + 1 : 0;
+  const dailyQuotePageEnd = dailyQuoteOffset + dailyQuoteRows.length;
+  const dailyQuoteCurrentPage = Math.floor(dailyQuoteOffset / dailyQuotePageSize) + 1;
+  const dailyQuoteTotalPages = Math.max(1, Math.ceil((dailyQuoteTotal || dailyQuoteRows.length || 1) / dailyQuotePageSize));
+  const dailyQuoteCategoryLabel =
+    DAILY_QUOTE_CATEGORY_OPTIONS.find((option) => option.id === dailyQuoteCategory)?.label ?? "全部標的";
   const positiveDailyQuoteCount = loadedDailyQuoteRows.filter((row) => typeof row.dailyReturn === "number" && row.dailyReturn > 0).length;
   const negativeDailyQuoteCount = loadedDailyQuoteRows.filter((row) => typeof row.dailyReturn === "number" && row.dailyReturn < 0).length;
   const bestDailyQuoteRow = loadedDailyQuoteRows.reduce<DailyMarketQuoteRow | null>((bestRow, row) => {
@@ -4779,7 +4961,7 @@ export function MarketDataPanel() {
       id: "quotes",
       label: "今日行情",
       description: "當日價格、漲跌幅、資料日期與資料品質",
-      metric: dailyQuoteRows.length ? `${loadedDailyQuoteRows.length}/${dailyQuoteRows.length} 檔` : bigQueryBadge,
+      metric: dailyQuoteRows.length ? `${dailyQuotePageStart}-${dailyQuotePageEnd}/${dailyQuoteTotal || dailyQuoteRows.length}` : bigQueryBadge,
     },
     {
       id: "portfolio",
@@ -4811,8 +4993,8 @@ export function MarketDataPanel() {
     },
     {
       label: "BigQuery 標的",
-      value: dailyQuoteRows.length ? `${loadedDailyQuoteRows.length}/${dailyQuoteRows.length}` : "--",
-      note: `資料庫共 ${formatCount(bigQueryDiagnostics?.priceSummary.symbol_count)} 檔`,
+      value: dailyQuoteRows.length ? `${dailyQuotePageStart}-${dailyQuotePageEnd}` : "--",
+      note: `目前 ${dailyQuoteCategoryLabel}，總計 ${formatCount(dailyQuoteTotal || bigQueryDiagnostics?.priceSummary.symbol_count)} 檔`,
     },
     {
       label: "最新資料日",
@@ -5000,7 +5182,16 @@ export function MarketDataPanel() {
                 進入畫面會自動載入 BigQuery 全部標的；表格列出最新價格、前日漲跌與今年漲跌。
               </p>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-[1fr_150px_auto_auto] gap-2 text-xs xl:min-w-[860px]">
+            <div className="grid grid-cols-1 md:grid-cols-[150px_1fr_150px_120px_auto_auto] gap-2 text-xs xl:min-w-[1040px]">
+              <select
+                value={dailyQuoteCategory}
+                onChange={(event) => handleDailyQuoteCategoryChange(event.target.value as BigQueryAssetCategory)}
+                className="bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-slate-100"
+              >
+                {DAILY_QUOTE_CATEGORY_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id}>{option.label}</option>
+                ))}
+              </select>
               <input
                 value={dailyQuoteSymbolsText}
                 onChange={(event) => setDailyQuoteSymbolsText(event.target.value)}
@@ -5009,7 +5200,7 @@ export function MarketDataPanel() {
                     void handleLoadDailyQuotes();
                   }
                 }}
-                placeholder="0050.TW 0056.TW 2330.TW SPY QQQ"
+                placeholder="留空看全部；輸入 0050.TW 搜尋；多個代號用空白分隔"
                 className="min-w-0 bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-slate-100 font-mono outline-none focus:border-cyan-600"
               />
               <select
@@ -5020,13 +5211,22 @@ export function MarketDataPanel() {
                 <option value="raw">Raw 最新價</option>
                 <option value="adjusted">Adj 報酬</option>
               </select>
+              <select
+                value={dailyQuotePageSize}
+                onChange={(event) => handleDailyQuotePageSizeChange(Number(event.target.value))}
+                className="bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-slate-100"
+              >
+                {DAILY_QUOTE_PAGE_SIZE_OPTIONS.map((pageSize) => (
+                  <option key={pageSize} value={pageSize}>{pageSize} / 頁</option>
+                ))}
+              </select>
               <button
                 type="button"
                 onClick={() => void handleLoadDailyQuotes()}
                 disabled={!hasBigQueryCredentials || dailyQuoteStatus === "loading"}
                 className="px-3 py-2 rounded-md bg-cyan-700 hover:bg-cyan-600 text-white font-bold disabled:cursor-not-allowed disabled:bg-slate-900 disabled:text-slate-600"
               >
-                {dailyQuoteStatus === "loading" ? "自動讀取中" : "手動重新讀取"}
+                {dailyQuoteStatus === "loading" ? "讀取中" : "重新讀取"}
               </button>
               <button
                 type="button"
@@ -5125,11 +5325,11 @@ export function MarketDataPanel() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto_auto] gap-2 rounded-lg border border-slate-800 bg-slate-900/60 p-3 text-xs">
+              <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto_auto_auto_auto] gap-2 rounded-lg border border-slate-800 bg-slate-900/60 p-3 text-xs">
                 <input
                   value={dailyQuoteSearch}
                   onChange={(event) => setDailyQuoteSearch(event.target.value)}
-                  placeholder="搜尋標的或日期"
+                  placeholder="在目前頁面搜尋標的、分類或日期"
                   className="min-w-0 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-slate-100 outline-none placeholder:text-slate-700 focus:border-cyan-600"
                 />
                 <select
@@ -5142,7 +5342,28 @@ export function MarketDataPanel() {
                   <option value="error">只看缺資料</option>
                 </select>
                 <div className="rounded-md border border-slate-800 bg-slate-950 px-3 py-2 text-slate-400">
-                  顯示 {filteredDailyQuoteRows.length} / {dailyQuoteRows.length} 檔
+                  本頁 {filteredDailyQuoteRows.length} / {dailyQuoteRows.length} 檔
+                </div>
+                <div className="rounded-md border border-slate-800 bg-slate-950 px-3 py-2 text-slate-400">
+                  第 {dailyQuoteCurrentPage} / {dailyQuoteTotalPages} 頁
+                </div>
+                <div className="grid grid-cols-2 gap-1">
+                  <button
+                    type="button"
+                    onClick={handleDailyQuotePreviousPage}
+                    disabled={dailyQuoteStatus === "loading" || dailyQuoteOffset <= 0}
+                    className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 font-bold text-slate-100 hover:border-cyan-700 hover:text-cyan-100 disabled:cursor-not-allowed disabled:border-slate-800 disabled:text-slate-700"
+                  >
+                    上一頁
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDailyQuoteNextPage}
+                    disabled={dailyQuoteStatus === "loading" || !dailyQuoteHasMore}
+                    className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 font-bold text-slate-100 hover:border-cyan-700 hover:text-cyan-100 disabled:cursor-not-allowed disabled:border-slate-800 disabled:text-slate-700"
+                  >
+                    下一頁
+                  </button>
                 </div>
               </div>
 
@@ -5169,6 +5390,7 @@ export function MarketDataPanel() {
                           </button>
                         </th>
                       ))}
+                      <th className="border-b border-slate-800 px-3 py-2 font-bold text-slate-300">類別</th>
                       <th className="border-b border-slate-800 px-3 py-2 font-bold text-slate-300">品質</th>
                       <th className="border-b border-slate-800 px-3 py-2 font-bold text-slate-300">資料量</th>
                       <th className="border-b border-slate-800 px-3 py-2 font-bold text-slate-300">動作</th>
@@ -5216,7 +5438,12 @@ export function MarketDataPanel() {
                                 ? "有資料"
                                 : canSwitchPriceBasis
                                   ? `${priceBasisLabel(row.priceBasis)} 缺 / ${priceBasisLabel(row.alternatePriceBasis!)} 可用`
-                                  : "缺資料"}
+                              : "缺資料"}
+                            </span>
+                          </td>
+                          <td className="px-3 py-3">
+                            <span className="rounded bg-slate-900 px-2 py-1 text-[10px] font-bold text-slate-300">
+                              {row.categoryLabel}
                             </span>
                           </td>
                           <td className="px-3 py-3">
@@ -5256,7 +5483,7 @@ export function MarketDataPanel() {
                       );
                     }) : (
                       <tr>
-                        <td colSpan={9} className="px-3 py-6 text-center text-slate-500">
+                        <td colSpan={10} className="px-3 py-6 text-center text-slate-500">
                           沒有符合條件的標的。
                         </td>
                       </tr>

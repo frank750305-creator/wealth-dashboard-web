@@ -6,6 +6,7 @@ import type {
   BigQueryAdjustedBackfillPlanResponse,
   BigQueryAssetHistoryResponse,
   BigQueryAssetProfileResponse,
+  BigQueryAssetCategory,
   BigQueryQuoteCardsResponse,
   BigQueryAssetSearchResponse,
   DecisionFunnelWarehouseLatestResponse,
@@ -874,9 +875,16 @@ export async function fetchMarketAlertWarehouseAudit({
   return response.json();
 }
 
-export async function fetchBigQueryAssets(query = "", limit = 20): Promise<BigQueryAssetSearchResponse> {
+export async function fetchBigQueryAssets(
+  query = "",
+  limit = 20,
+  category: BigQueryAssetCategory = "all",
+  offset = 0,
+): Promise<BigQueryAssetSearchResponse> {
   const params = new URLSearchParams({
     limit: String(limit),
+    category,
+    offset: String(Math.max(0, offset)),
   });
   if (query.trim()) {
     params.set("q", query.trim());
@@ -892,11 +900,21 @@ export async function fetchBigQueryAssets(query = "", limit = 20): Promise<BigQu
 export async function fetchBigQueryQuoteCards(
   priceBasis: "adjusted" | "raw" = "adjusted",
   limit = 500,
+  options: {
+    query?: string;
+    category?: BigQueryAssetCategory;
+    offset?: number;
+  } = {},
 ): Promise<BigQueryQuoteCardsResponse> {
   const params = new URLSearchParams({
     price_basis: priceBasis,
     limit: String(limit),
+    category: options.category ?? "all",
+    offset: String(Math.max(0, options.offset ?? 0)),
   });
+  if (options.query?.trim()) {
+    params.set("q", options.query.trim());
+  }
 
   return fetchJsonWithTimeout<BigQueryQuoteCardsResponse>(
     `/api/v1/market/bigquery/quotes?${params.toString()}`,

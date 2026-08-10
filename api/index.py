@@ -1532,11 +1532,16 @@ async def trading_market_alert_audit(
         raise HTTPException(status_code=exc.status_code, detail=str(exc))
 
 @app.get("/api/v1/market/bigquery/assets")
-async def market_bigquery_assets(q: Optional[str] = None, limit: int = 20):
+async def market_bigquery_assets(
+    q: Optional[str] = None,
+    category: str = "all",
+    limit: int = 20,
+    offset: int = 0,
+):
     try:
         return {
             "generatedAt": datetime.now(timezone.utc).isoformat(),
-            **search_bigquery_assets(query=q, limit=limit),
+            **search_bigquery_assets(query=q, category=category, limit=limit, offset=offset),
         }
     except MarketDataError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc))
@@ -1599,11 +1604,23 @@ async def market_bigquery_adjusted_backfill_apply(
         raise HTTPException(status_code=exc.status_code, detail=str(exc))
 
 @app.get("/api/v1/market/bigquery/quotes")
-async def market_bigquery_quote_cards(price_basis: str = "adjusted", limit: int = 500):
+async def market_bigquery_quote_cards(
+    price_basis: str = "adjusted",
+    q: Optional[str] = None,
+    category: str = "all",
+    limit: int = 500,
+    offset: int = 0,
+):
     try:
         return {
             "generatedAt": datetime.now(timezone.utc).isoformat(),
-            **load_bigquery_quote_cards(price_basis=price_basis, limit=limit),
+            **load_bigquery_quote_cards(
+                price_basis=price_basis,
+                query=q,
+                category=category,
+                limit=limit,
+                offset=offset,
+            ),
         }
     except MarketDataError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc))

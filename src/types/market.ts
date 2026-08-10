@@ -209,8 +209,17 @@ export type BigQueryMarketDiagnostics = {
   qualityScorecard?: BigQueryQualityScorecard;
 };
 
+export type BigQueryAssetCategory = "all" | "tw_etf" | "us_etf" | "fund" | "stock" | "fx" | "index" | "other";
+
+export type BigQueryAssetCategoryOption = {
+  id: BigQueryAssetCategory;
+  label: string;
+};
+
 export type BigQueryAsset = {
   symbol: string;
+  category: BigQueryAssetCategory;
+  category_label: string;
   first_date: string | null;
   latest_date: string | null;
   row_count: number;
@@ -222,12 +231,20 @@ export type BigQueryAssetSearchResponse = {
   generatedAt: string;
   status: Omit<BigQueryMarketStatus, "generatedAt">;
   query: string;
+  category: BigQueryAssetCategory;
+  categoryLabel: string;
+  categories: BigQueryAssetCategoryOption[];
   limit: number;
+  offset: number;
+  total: number;
+  hasMore: boolean;
   assets: BigQueryAsset[];
 };
 
 export type BigQueryQuoteCard = {
   symbol: string;
+  category: BigQueryAssetCategory;
+  category_label: string;
   first_date: string | null;
   latest_any_date: string | null;
   latest_date: string | null;
@@ -248,7 +265,14 @@ export type BigQueryQuoteCardsResponse = {
   generatedAt: string;
   status: Omit<BigQueryMarketStatus, "generatedAt">;
   priceBasis: "adjusted" | "raw";
+  query: string;
+  category: BigQueryAssetCategory;
+  categoryLabel: string;
+  categories: BigQueryAssetCategoryOption[];
   limit: number;
+  offset: number;
+  total: number;
+  hasMore: boolean;
   quotes: BigQueryQuoteCard[];
 };
 

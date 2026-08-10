@@ -18,6 +18,19 @@ DEFAULT_ADJUSTED_BACKFILL_MAX_DAILY_RETURN = 0.35
 
 IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
+ASSET_CATEGORY_LABELS = {
+    "all": "全部",
+    "tw_etf": "台股 ETF",
+    "us_etf": "美股 ETF",
+    "fund": "基金",
+    "stock": "股票",
+    "fx": "匯率",
+    "index": "指數",
+    "other": "其他",
+}
+
+VALID_ASSET_CATEGORIES = set(ASSET_CATEGORY_LABELS.keys())
+
 
 class MarketDataError(RuntimeError):
     status_code = 400
@@ -657,22 +670,64 @@ def _apply_adjusted_backfill_candidate(*, bigquery, client, price_table: str, ca
     }
 
 
-def search_bigquery_assets(*, query: Optional[str] = None, limit: int = 20) -> Dict:
+def _normalize_asset_category(category: Optional[str]) -> str:
+    normalized = (category or "all").strip().lower()
+    return normalized if normalized in VALID_ASSET_CATEGORIES else "all"
+
+
+def _asset_category_label(category: Optional[str]) -> str:
+    return ASSET_CATEGORY_LABELS.get(_normalize_asset_category(category), ASSET_CATEGORY_LABELS["other"])
+
+
+def _asset_categories() -> List[Dict[str, str]]:
+    return [
+        {"id": category, "label": label}
+        for category, label in ASSET_CATEGORY_LABELS.items()
+    ]
+
+
+def _asset_category_sql(symbol_expression: str) -> str:
+    return f"""
+    CASE
+        WHEN REGEXP_CONTAINS(UPPER({symbol_expression}), r'^[A-Z]{{3}}[_-]?[A-Z]{{3}}$') THEN 'fx'
+        WHEN STARTS_WITH({symbol_expression}, '^') THEN 'index'
+        WHEN REGEXP_CONTAINS(UPPER({symbol_expression}), r'^[0-9]{{4,6}}\\.TW$') THEN 'tw_etf'
+        WHEN UPPER({symbol_expression}) IN ('SPY', 'QQQ', 'VOO', 'VTI', 'IVV', 'DIA', 'IWM', 'AGG', 'BND', 'TLT', 'GLD', 'SLV', 'VNQ')
+          OR REGEXP_CONTAINS(UPPER({symbol_expression}), r'ETF') THEN 'us_etf'
+        WHEN REGEXP_CONTAINS(UPPER({symbol_expression}), r'^[A-Z]{{1,5}}(\\.[A-Z]{{1,3}})?$') THEN 'stock'
+        WHEN REGEXP_CONTAINS(UPPER({symbol_expression}), r'FUND|FIDELITY|FRANKLIN|ALLIANZ|ALLIANCE|ABERDEEN|BLACKROCK|UBS|GOLDMAN')
+          OR REGEXP_CONTAINS({symbol_expression}, r'_') THEN 'fund'
+        ELSE 'other'
+    END
+    """
+
+
+def search_bigquery_assets(
+    *,
+    query: Optional[str] = None,
+    category: str = "all",
+    limit: int = 20,
+    offset: int = 0,
+) -> Dict:
     bigquery = _bigquery_module()
     client = _bigquery_client(bigquery)
     price_table = _table_path("BIGQUERY_PRICE_TABLE", DEFAULT_PRICE_TABLE)
     clean_query = (query or "").strip().lower()
+    normalized_category = _normalize_asset_category(category)
     bounded_limit = max(1, min(int(limit or 20), 500))
+    bounded_offset = max(0, int(offset or 0))
+    category_sql = _asset_category_sql("symbol")
 
-    where_clause = ""
     query_parameters = [
         bigquery.ScalarQueryParameter("limit", "INT64", bounded_limit),
+        bigquery.ScalarQueryParameter("offset", "INT64", bounded_offset),
+        bigquery.ScalarQueryParameter("category", "STRING", normalized_category),
+        bigquery.ScalarQueryParameter("query", "STRING", clean_query),
+        bigquery.ScalarQueryParameter("query_pattern", "STRING", f"%{clean_query}%"),
     ]
     if clean_query:
-        where_clause = "WHERE LOWER(symbol) LIKE @query_pattern"
         query_parameters.extend(
             [
-                bigquery.ScalarQueryParameter("query_pattern", "STRING", f"%{clean_query}%"),
                 bigquery.ScalarQueryParameter("query_exact", "STRING", clean_query),
                 bigquery.ScalarQueryParameter("query_prefix", "STRING", clean_query),
             ]
@@ -691,18 +746,40 @@ def search_bigquery_assets(*, query: Optional[str] = None, limit: int = 20) -> D
         order_clause = "latest_date DESC, row_count DESC, symbol"
 
     asset_query = f"""
+    WITH base AS (
+        SELECT
+            symbol,
+            DATE(date) AS price_date,
+            SAFE_CAST(adj_price AS FLOAT64) AS adj_price,
+            SAFE_CAST(raw_price AS FLOAT64) AS raw_price,
+            {category_sql} AS category
+        FROM {price_table}
+        WHERE @query = '' OR LOWER(symbol) LIKE @query_pattern
+    ),
+    assets AS (
+        SELECT
+            symbol,
+            category,
+            MIN(price_date) AS first_date,
+            MAX(price_date) AS latest_date,
+            COUNT(1) AS row_count,
+            COUNTIF(adj_price > 0) AS adjusted_price_rows,
+            COUNTIF(raw_price > 0) AS raw_price_rows
+        FROM base
+        WHERE @category = 'all' OR category = @category
+        GROUP BY symbol, category
+    ),
+    total_assets AS (
+        SELECT COUNT(1) AS total FROM assets
+    )
     SELECT
-        symbol,
-        MIN(DATE(date)) AS first_date,
-        MAX(DATE(date)) AS latest_date,
-        COUNT(1) AS row_count,
-        COUNTIF(SAFE_CAST(adj_price AS FLOAT64) > 0) AS adjusted_price_rows,
-        COUNTIF(SAFE_CAST(raw_price AS FLOAT64) > 0) AS raw_price_rows
-    FROM {price_table}
-    {where_clause}
-    GROUP BY symbol
+        assets.*,
+        total_assets.total AS total_assets
+    FROM assets
+    CROSS JOIN total_assets
     ORDER BY {order_clause}
     LIMIT @limit
+    OFFSET @offset
     """
 
     try:
@@ -715,49 +792,80 @@ def search_bigquery_assets(*, query: Optional[str] = None, limit: int = 20) -> D
     except Exception as exc:
         raise MarketDataQueryError(f"BigQuery asset search query failed: {exc}") from exc
 
+    assets = []
+    for row in rows:
+        asset = _summary_row_to_dict(row, date_fields=("first_date", "latest_date"))
+        asset["category_label"] = _asset_category_label(asset.get("category"))
+        asset.pop("total_assets", None)
+        assets.append(asset)
+
+    total = int(rows[0]["total_assets"]) if rows else 0
+
     return {
         "status": bigquery_market_status(),
         "query": clean_query,
+        "category": normalized_category,
+        "categoryLabel": _asset_category_label(normalized_category),
+        "categories": _asset_categories(),
         "limit": bounded_limit,
-        "assets": [
-            _summary_row_to_dict(row, date_fields=("first_date", "latest_date"))
-            for row in rows
-        ],
+        "offset": bounded_offset,
+        "total": total,
+        "hasMore": bounded_offset + len(assets) < total,
+        "assets": assets,
     }
 
 
-def load_bigquery_quote_cards(*, price_basis: str = "adjusted", limit: int = 500) -> Dict:
+def load_bigquery_quote_cards(
+    *,
+    price_basis: str = "adjusted",
+    query: Optional[str] = None,
+    category: str = "all",
+    limit: int = 500,
+    offset: int = 0,
+) -> Dict:
     bigquery = _bigquery_module()
     client = _bigquery_client(bigquery)
     selected_price_column = _price_column(price_basis)
     normalized_price_basis = _normalize_price_basis(price_basis)
     price_table = _table_path("BIGQUERY_PRICE_TABLE", DEFAULT_PRICE_TABLE)
     bounded_limit = max(1, min(int(limit or 500), 500))
+    bounded_offset = max(0, int(offset or 0))
+    clean_query = (query or "").strip().lower()
+    normalized_category = _normalize_asset_category(category)
+    category_sql = _asset_category_sql("symbol")
 
     query = f"""
     WITH base AS (
         SELECT
             symbol,
             DATE(date) AS price_date,
-            SAFE_CAST({selected_price_column} AS FLOAT64) AS selected_price
+            SAFE_CAST({selected_price_column} AS FLOAT64) AS selected_price,
+            {category_sql} AS category
         FROM {price_table}
+        WHERE @query = '' OR LOWER(symbol) LIKE @query_pattern
+    ),
+    filtered_base AS (
+        SELECT *
+        FROM base
+        WHERE @category = 'all' OR category = @category
     ),
     symbol_stats AS (
         SELECT
             symbol,
+            category,
             MIN(price_date) AS first_date,
             MAX(price_date) AS latest_any_date,
             COUNT(1) AS row_count,
             COUNTIF(selected_price > 0) AS selected_price_rows
-        FROM base
-        GROUP BY symbol
+        FROM filtered_base
+        GROUP BY symbol, category
     ),
     valid_prices AS (
         SELECT
             symbol,
             price_date,
             selected_price
-        FROM base
+        FROM filtered_base
         WHERE selected_price IS NOT NULL
           AND selected_price > 0
     ),
@@ -804,9 +912,13 @@ def load_bigquery_quote_cards(*, price_basis: str = "adjusted", limit: int = 500
             selected_price AS ytd_start_price
         FROM ytd_candidates
         WHERE ytd_rank = 1
+    ),
+    total_symbols AS (
+        SELECT COUNT(1) AS total FROM symbol_stats
     )
     SELECT
         symbol_stats.symbol,
+        symbol_stats.category,
         symbol_stats.first_date,
         symbol_stats.latest_any_date,
         latest.latest_date,
@@ -820,13 +932,16 @@ def load_bigquery_quote_cards(*, price_basis: str = "adjusted", limit: int = 500
         SAFE_DIVIDE(latest.latest_price, ytd_start.ytd_start_price) - 1 AS ytd_return,
         latest.latest_price - ytd_start.ytd_start_price AS ytd_price_change,
         symbol_stats.row_count,
-        symbol_stats.selected_price_rows
+        symbol_stats.selected_price_rows,
+        total_symbols.total AS total_symbols
     FROM symbol_stats
+    CROSS JOIN total_symbols
     LEFT JOIN latest USING (symbol)
     LEFT JOIN previous USING (symbol)
     LEFT JOIN ytd_start USING (symbol)
     ORDER BY latest.latest_date DESC, symbol_stats.row_count DESC, symbol_stats.symbol
     LIMIT @limit
+    OFFSET @offset
     """
 
     try:
@@ -836,6 +951,10 @@ def load_bigquery_quote_cards(*, price_basis: str = "adjusted", limit: int = 500
                 job_config=bigquery.QueryJobConfig(
                     query_parameters=[
                         bigquery.ScalarQueryParameter("limit", "INT64", bounded_limit),
+                        bigquery.ScalarQueryParameter("offset", "INT64", bounded_offset),
+                        bigquery.ScalarQueryParameter("category", "STRING", normalized_category),
+                        bigquery.ScalarQueryParameter("query", "STRING", clean_query),
+                        bigquery.ScalarQueryParameter("query_pattern", "STRING", f"%{clean_query}%"),
                     ]
                 ),
             ).result()
@@ -843,17 +962,30 @@ def load_bigquery_quote_cards(*, price_basis: str = "adjusted", limit: int = 500
     except Exception as exc:
         raise MarketDataQueryError(f"BigQuery quote cards query failed: {exc}") from exc
 
+    quotes = []
+    for row in rows:
+        quote = _summary_row_to_dict(
+            row,
+            date_fields=("first_date", "latest_any_date", "latest_date", "previous_date", "ytd_start_date"),
+        )
+        quote["category_label"] = _asset_category_label(quote.get("category"))
+        quote.pop("total_symbols", None)
+        quotes.append(quote)
+
+    total = int(rows[0]["total_symbols"]) if rows else 0
+
     return {
         "status": bigquery_market_status(),
         "priceBasis": normalized_price_basis,
+        "query": clean_query,
+        "category": normalized_category,
+        "categoryLabel": _asset_category_label(normalized_category),
+        "categories": _asset_categories(),
         "limit": bounded_limit,
-        "quotes": [
-            _summary_row_to_dict(
-                row,
-                date_fields=("first_date", "latest_any_date", "latest_date", "previous_date", "ytd_start_date"),
-            )
-            for row in rows
-        ],
+        "offset": bounded_offset,
+        "total": total,
+        "hasMore": bounded_offset + len(quotes) < total,
+        "quotes": quotes,
     }
 
 
