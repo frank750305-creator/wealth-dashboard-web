@@ -87,7 +87,33 @@ export function WatchlistControlsSection({
   onMinimumComparisonScoreChange,
   comparisonError,
 }: WatchlistControlsSectionProps) {
-  const symbolCount = parseSymbolList(comparisonSymbols).length;
+  const selectedSymbols = parseSymbolList(comparisonSymbols);
+  const symbolCount = selectedSymbols.length;
+  const optionBySymbol = new Map<string, { symbol: string; label: string }>();
+
+  assetSuggestions.forEach((asset) => {
+    optionBySymbol.set(asset.symbol.toUpperCase(), {
+      symbol: asset.symbol,
+      label: `${asset.symbol} · ${asset.latest_date ?? "--"} · ${asset.row_count.toLocaleString("zh-TW")} 筆`,
+    });
+  });
+  availableSymbols.forEach((symbol) => {
+    const key = symbol.toUpperCase();
+    if (!optionBySymbol.has(key)) {
+      optionBySymbol.set(key, { symbol, label: symbol });
+    }
+  });
+
+  const dropdownOptions = [...optionBySymbol.values()]
+    .filter((option) => !selectedSymbols.some((symbol) => symbol.toUpperCase() === option.symbol.toUpperCase()))
+    .slice(0, 120);
+  const removeComparisonSymbol = (symbolToRemove: string) => {
+    onComparisonSymbolsChange(
+      selectedSymbols
+        .filter((symbol) => symbol.toUpperCase() !== symbolToRemove.toUpperCase())
+        .join(" "),
+    );
+  };
 
   return (
     <>
@@ -133,69 +159,63 @@ export function WatchlistControlsSection({
         </div>
       </div>
 
-      <div className="rounded-lg border border-cyan-900/40 bg-cyan-950/10 p-3 space-y-2">
+      <div className="rounded-lg border border-cyan-900/40 bg-cyan-950/10 p-3 space-y-3">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
           <div>
             <p className="text-xs font-bold text-cyan-100">選擇投資標的</p>
-            <p className="mt-0.5 text-[11px] text-slate-500">可手動輸入，也可搜尋 BigQuery 後用下拉加入。</p>
+            <p className="mt-0.5 text-[11px] text-slate-500">下拉直接選；找不到再用手動輸入或搜尋。</p>
           </div>
           <span className="rounded bg-slate-950 px-2 py-1 text-[10px] font-mono text-slate-400">
             {symbolCount}/12 symbols
           </span>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_1fr_auto_auto] gap-2 text-xs">
-          <input
-            value={assetQuery}
-            onChange={(event) => onAssetQueryChange(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                onAppendComparisonSymbol(assetQuery);
-              }
-            }}
-            list="watchlist-symbol-options"
-            placeholder="輸入代號，例如 0050.TW"
-            className="min-w-0 rounded-md border border-slate-800 bg-slate-950 px-3 py-2 font-mono text-slate-100 outline-none placeholder:text-slate-700 focus:border-cyan-600"
-          />
+
+        <div className="grid grid-cols-1 xl:grid-cols-[1.1fr_0.9fr_auto_auto] gap-2 text-xs">
+          <label className="space-y-1">
+            <span className="text-slate-500">下拉選取標的</span>
+            <select
+              value=""
+              onChange={(event) => {
+                if (event.target.value) onAppendComparisonSymbol(event.target.value);
+              }}
+              disabled={!dropdownOptions.length || symbolCount >= 12}
+              className="w-full rounded-md border border-cyan-800/70 bg-slate-950 px-3 py-2 font-mono text-slate-100 disabled:cursor-not-allowed disabled:text-slate-600"
+            >
+              <option value="">
+                {dropdownOptions.length ? "選一個標的加入" : isSearchingAssets ? "載入標的中" : "沒有可選標的"}
+              </option>
+              {dropdownOptions.map((option) => (
+                <option key={option.symbol} value={option.symbol}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="space-y-1">
+            <span className="text-slate-500">手動輸入名稱 / 代號</span>
+            <input
+              value={assetQuery}
+              onChange={(event) => onAssetQueryChange(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  onAppendComparisonSymbol(assetQuery);
+                }
+              }}
+              list="watchlist-symbol-options"
+              placeholder="0050.TW、SPY、基金名稱"
+              className="w-full rounded-md border border-slate-800 bg-slate-950 px-3 py-2 font-mono text-slate-100 outline-none placeholder:text-slate-700 focus:border-cyan-600"
+            />
+          </label>
           <datalist id="watchlist-symbol-options">
-            {availableSymbols.map((symbol) => (
-              <option key={symbol} value={symbol} />
+            {dropdownOptions.map((option) => (
+              <option key={option.symbol} value={option.symbol} />
             ))}
           </datalist>
-          <select
-            value=""
-            onChange={(event) => {
-              if (event.target.value) onAppendComparisonSymbol(event.target.value);
-            }}
-            disabled={!availableSymbols.length || symbolCount >= 12}
-            className="min-w-0 rounded-md border border-slate-800 bg-slate-950 px-3 py-2 text-slate-100 disabled:cursor-not-allowed disabled:text-slate-600"
-          >
-            <option value="">從 BigQuery 加入</option>
-            {availableSymbols.map((symbol) => (
-              <option key={symbol} value={symbol}>
-                {symbol}
-              </option>
-            ))}
-          </select>
-          <select
-            value=""
-            onChange={(event) => {
-              if (event.target.value) onAppendComparisonSymbol(event.target.value);
-            }}
-            disabled={!assetSuggestions.length}
-            className="min-w-0 rounded-md border border-slate-800 bg-slate-950 px-3 py-2 text-slate-100 disabled:cursor-not-allowed disabled:text-slate-600"
-          >
-            <option value="">從搜尋結果加入</option>
-            {assetSuggestions.map((asset) => (
-              <option key={asset.symbol} value={asset.symbol}>
-                {asset.symbol} · {asset.latest_date ?? "--"} · {asset.row_count.toLocaleString("zh-TW")} 筆
-              </option>
-            ))}
-          </select>
           <button
             type="button"
             onClick={() => void onSearchAssets()}
             disabled={!hasBigQueryCredentials || isSearchingAssets || !assetQuery.trim()}
-            className="rounded-md bg-slate-800 px-3 py-2 font-bold text-slate-100 hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-900 disabled:text-slate-600"
+            className="xl:self-end rounded-md bg-slate-800 px-3 py-2 font-bold text-slate-100 hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-900 disabled:text-slate-600"
           >
             {isSearchingAssets ? "搜尋中" : "搜尋"}
           </button>
@@ -203,20 +223,47 @@ export function WatchlistControlsSection({
             type="button"
             onClick={() => onAppendComparisonSymbol(assetQuery)}
             disabled={!assetQuery.trim() || symbolCount >= 12}
-            className="rounded-md bg-cyan-700 px-3 py-2 font-bold text-white hover:bg-cyan-600 disabled:cursor-not-allowed disabled:bg-slate-900 disabled:text-slate-600"
+            className="xl:self-end rounded-md bg-cyan-700 px-3 py-2 font-bold text-white hover:bg-cyan-600 disabled:cursor-not-allowed disabled:bg-slate-900 disabled:text-slate-600"
           >
-            加入
+            手動加入
           </button>
+        </div>
+
+        <div className="rounded-md border border-slate-800 bg-slate-950/70 p-2">
+          <p className="text-[10px] font-bold text-slate-500">已選標的</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {selectedSymbols.length ? selectedSymbols.map((symbol) => (
+              <span
+                key={symbol}
+                className="inline-flex items-center gap-2 rounded-md border border-cyan-900/60 bg-cyan-950/30 px-2 py-1 font-mono text-[11px] font-bold text-cyan-100"
+              >
+                {symbol}
+                <button
+                  type="button"
+                  onClick={() => removeComparisonSymbol(symbol)}
+                  className="text-slate-500 hover:text-rose-200"
+                  aria-label={`移除 ${symbol}`}
+                >
+                  x
+                </button>
+              </span>
+            )) : (
+              <span className="text-[11px] text-slate-600">尚未選取</span>
+            )}
+          </div>
         </div>
       </div>
 
+      <label className="block space-y-1">
+        <span className="text-[11px] text-slate-500">批次手動輸入 / 編輯</span>
       <textarea
         value={comparisonSymbols}
         onChange={(event) => onComparisonSymbolsChange(event.target.value)}
-        rows={3}
+        rows={2}
         placeholder="0050.TW SPY QQQ"
         className="w-full resize-y rounded-md border border-slate-800 bg-slate-900 px-3 py-2 font-mono text-xs text-slate-100 outline-none placeholder:text-slate-700 focus:border-cyan-600"
       />
+      </label>
       <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
         <span>最多比較 12 檔；可用空白、逗號或換行分隔</span>
         <span className="font-mono">

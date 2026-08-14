@@ -3364,6 +3364,34 @@ export function MarketDataPanel() {
       setIsSearchingAssets(false);
     }
   };
+  useEffect(() => {
+    if (!hasBigQueryCredentials) return;
+
+    let ignore = false;
+
+    async function loadInitialAssetOptions() {
+      setIsSearchingAssets(true);
+      try {
+        const response = await fetchBigQueryAssets("", 120);
+        if (!ignore && response.assets.length) {
+          setAssetSuggestions(response.assets);
+        }
+      } catch {
+        if (!ignore) setAssetSuggestions([]);
+      } finally {
+        if (!ignore) setIsSearchingAssets(false);
+      }
+    }
+
+    const timer = window.setTimeout(() => {
+      void loadInitialAssetOptions();
+    }, 0);
+
+    return () => {
+      ignore = true;
+      window.clearTimeout(timer);
+    };
+  }, [hasBigQueryCredentials]);
   const handleLoadAssetProfile = async (symbol = assetQuery) => {
     const cleanSymbol = symbol.trim();
     if (!hasBigQueryCredentials || !cleanSymbol) return;
