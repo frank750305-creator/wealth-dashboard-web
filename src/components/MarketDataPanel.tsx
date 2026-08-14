@@ -24,6 +24,11 @@ import {
   type QualityStatus,
 } from "@/lib/assetResearchWorkflow";
 import {
+  assetRiskMatrixCsv,
+  buildAssetRiskMatrixRow,
+  type AssetRiskMatrixRow,
+} from "@/lib/assetRiskMatrix";
+import {
   allocationDraftCsv,
   allocationDraftRows,
   allocationRiskCsv,
@@ -480,6 +485,7 @@ import type {
 } from "@/types/market";
 import { AllocationDraftSection } from "./AllocationDraftSection";
 import { AssetComparisonTable } from "./AssetComparisonTable";
+import { AssetRiskMatrixSection } from "./AssetRiskMatrixSection";
 import { BigQueryConnectionSection } from "./BigQueryConnectionSection";
 import { BigQueryPortfolioPanel } from "./BigQueryPortfolioPanel";
 import {
@@ -1283,6 +1289,11 @@ export function MarketDataPanel() {
   const [comparisonRows, setComparisonRows] = useState<AssetComparisonRow[]>([]);
   const [comparisonError, setComparisonError] = useState<string | null>(null);
   const [isLoadingComparison, setIsLoadingComparison] = useState(false);
+  const [assetRiskMatrixRows, setAssetRiskMatrixRows] = useState<AssetRiskMatrixRow[]>([]);
+  const [assetRiskMatrixStatus, setAssetRiskMatrixStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  const [assetRiskMatrixError, setAssetRiskMatrixError] = useState("");
+  const [assetRiskBenchmarkSymbol, setAssetRiskBenchmarkSymbol] = useState("SPY");
+  const [assetRiskFreeRatePercent, setAssetRiskFreeRatePercent] = useState(2);
   const [comparisonSignalFilter, setComparisonSignalFilter] = useState<AssetDecisionSignal | "all">("all");
   const [comparisonSortKey, setComparisonSortKey] = useState<AssetComparisonSortKey>("score");
   const [minimumComparisonScore, setMinimumComparisonScore] = useState(0);
@@ -3397,23 +3408,89 @@ export function MarketDataPanel() {
       "text/markdown;charset=utf-8",
     );
   };
+  const loadAssetRiskMatrix = useCallback(async (symbols: string[]) => {
+    const cleanSymbols = parseSymbolList(symbols.join(" "));
+    if (!hasBigQueryCredentials || !cleanSymbols.length) return;
+
+    setAssetRiskMatrixStatus("loading");
+    setAssetRiskMatrixError("");
+    setAssetRiskMatrixRows([]);
+
+    const benchmarkSymbol = assetRiskBenchmarkSymbol.trim();
+    const symbolsToFetch = Array.from(
+      new Set([...cleanSymbols, benchmarkSymbol].filter(Boolean).map((symbol) => symbol.toUpperCase())),
+    );
+    const settledHistories = await Promise.allSettled(
+      symbolsToFetch.map((symbol) => fetchBigQueryAssetHistory(symbol, assetPriceBasis, { limit: 2000 })),
+    );
+    const historyBySymbol = new Map<string, BigQueryAssetHistoryResponse>();
+    const failedSymbols: string[] = [];
+
+    settledHistories.forEach((result, index) => {
+      const symbol = symbolsToFetch[index];
+      if (result.status === "fulfilled") {
+        historyBySymbol.set(symbol, result.value);
+      } else {
+        failedSymbols.push(`${symbol}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`);
+      }
+    });
+
+    const benchmarkHistory = benchmarkSymbol ? historyBySymbol.get(benchmarkSymbol.toUpperCase()) ?? null : null;
+    const rows = cleanSymbols
+      .map((symbol) => historyBySymbol.get(symbol.toUpperCase()))
+      .filter((history): history is BigQueryAssetHistoryResponse => Boolean(history))
+      .map((history) => buildAssetRiskMatrixRow({
+        history,
+        benchmarkHistory,
+        riskFreeRate: assetRiskFreeRatePercent / 100,
+      }));
+
+    setAssetRiskMatrixRows(rows);
+    setAssetRiskMatrixStatus(rows.length ? "loaded" : "error");
+    setAssetRiskMatrixError(
+      [
+        benchmarkSymbol && !benchmarkHistory
+          ? `基準 ${benchmarkSymbol} 沒有可用歷史資料，Beta/Alpha 類指標暫時無法計算。`
+          : "",
+        failedSymbols.length ? `部分標的讀取失敗：\n${failedSymbols.join("\n")}` : "",
+        !rows.length ? "沒有可顯示的風險矩陣資料。" : "",
+      ].filter(Boolean).join("\n"),
+    );
+  }, [assetPriceBasis, assetRiskBenchmarkSymbol, assetRiskFreeRatePercent, hasBigQueryCredentials]);
   const handleCompareAssets = async () => {
     const symbols = parseSymbolList(comparisonSymbols);
     if (!hasBigQueryCredentials || !symbols.length) return;
 
     setIsLoadingComparison(true);
     setComparisonError(null);
-    try {
-      const profiles = await Promise.all(
-        symbols.map((symbol) => fetchBigQueryAssetProfile(symbol, assetPriceBasis)),
-      );
-      setComparisonRows(profiles.map(comparisonRowFromProfile));
-    } catch (err: unknown) {
+    const profilePromise = Promise.all(
+      symbols.map((symbol) => fetchBigQueryAssetProfile(symbol, assetPriceBasis)),
+    );
+    const [profileResult] = await Promise.allSettled([
+      profilePromise,
+      loadAssetRiskMatrix(symbols),
+    ]);
+
+    if (profileResult.status === "fulfilled") {
+      setComparisonRows(profileResult.value.map(comparisonRowFromProfile));
+    } else {
       setComparisonRows([]);
-      setComparisonError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setIsLoadingComparison(false);
+      setComparisonError(profileResult.reason instanceof Error ? profileResult.reason.message : String(profileResult.reason));
     }
+
+    setIsLoadingComparison(false);
+  };
+  const handleRefreshAssetRiskMatrix = async () => {
+    await loadAssetRiskMatrix(parseSymbolList(comparisonSymbols));
+  };
+  const handleExportAssetRiskMatrixCsv = () => {
+    if (!assetRiskMatrixRows.length) return;
+
+    downloadTextFile(
+      `bigquery-asset-risk-matrix-${resultStamp()}.csv`,
+      assetRiskMatrixCsv(assetRiskMatrixRows, assetRiskBenchmarkSymbol, assetRiskFreeRatePercent / 100),
+      "text/csv;charset=utf-8",
+    );
   };
   const handleAppendComparisonSymbol = (symbol: string) => {
     const cleanSymbol = symbol.trim();
@@ -6292,6 +6369,19 @@ export function MarketDataPanel() {
             minimumComparisonScore={minimumComparisonScore}
             onMinimumComparisonScoreChange={setMinimumComparisonScore}
             comparisonError={comparisonError}
+          />
+
+          <AssetRiskMatrixSection
+            rows={assetRiskMatrixRows}
+            benchmarkSymbol={assetRiskBenchmarkSymbol}
+            onBenchmarkSymbolChange={setAssetRiskBenchmarkSymbol}
+            riskFreeRatePercent={assetRiskFreeRatePercent}
+            onRiskFreeRatePercentChange={setAssetRiskFreeRatePercent}
+            priceBasis={assetPriceBasis}
+            isLoading={assetRiskMatrixStatus === "loading"}
+            error={assetRiskMatrixError}
+            onRefresh={handleRefreshAssetRiskMatrix}
+            onExportCsv={handleExportAssetRiskMatrixCsv}
           />
 
           <ResearchTaskBoardSection
