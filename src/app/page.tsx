@@ -99,7 +99,7 @@ export default function Home() {
   const shouldShowControlCenter = activeTab === "main";
 
   return (
-    <main className="min-h-screen bg-slate-950 text-white p-4 md:p-8 font-sans overflow-x-hidden">
+    <main className="wealth-light-theme min-h-screen bg-slate-50 text-slate-950 p-4 md:p-8 font-sans overflow-x-hidden">
       <div className="max-w-[1750px] mx-auto">
         <DashboardHeader activeTab={activeTab} />
 

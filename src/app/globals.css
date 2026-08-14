@@ -24,3 +24,127 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+.wealth-light-theme {
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+.wealth-light-theme :is(.bg-slate-950, .bg-slate-900, .bg-slate-800) {
+  background-color: #ffffff !important;
+}
+
+.wealth-light-theme :is(
+  .bg-slate-950\/80,
+  .bg-slate-950\/70,
+  .bg-slate-950\/60,
+  .bg-slate-950\/50,
+  .bg-slate-900\/80,
+  .bg-slate-900\/70,
+  .bg-slate-900\/60,
+  .bg-slate-900\/50,
+  .bg-slate-900\/40
+) {
+  background-color: #ffffff !important;
+}
+
+.wealth-light-theme :is(
+  .bg-cyan-950\/40,
+  .bg-cyan-950\/30,
+  .bg-cyan-950\/20,
+  .bg-cyan-950\/10
+) {
+  background-color: #ecfeff !important;
+}
+
+.wealth-light-theme :is(
+  .bg-emerald-500\/15,
+  .bg-emerald-950\/30,
+  .bg-emerald-950\/20,
+  .bg-emerald-950\/10
+) {
+  background-color: #ecfdf5 !important;
+}
+
+.wealth-light-theme :is(
+  .bg-amber-500\/15,
+  .bg-amber-950\/30,
+  .bg-amber-950\/20,
+  .bg-amber-950\/10
+) {
+  background-color: #fffbeb !important;
+}
+
+.wealth-light-theme :is(
+  .bg-rose-500\/15,
+  .bg-rose-950\/30,
+  .bg-rose-950\/20,
+  .bg-rose-950\/10,
+  .bg-red-950\/30,
+  .bg-red-950\/20,
+  .bg-red-950\/10
+) {
+  background-color: #fff1f2 !important;
+}
+
+.wealth-light-theme :is(.border-slate-900, .border-slate-800, .border-slate-700) {
+  border-color: #e2e8f0 !important;
+}
+
+.wealth-light-theme :is(.border-cyan-900\/60, .border-cyan-900\/50, .border-cyan-900\/40, .border-cyan-800, .border-cyan-800\/70) {
+  border-color: #67e8f9 !important;
+}
+
+.wealth-light-theme :is(.border-amber-900\/60, .border-amber-900\/50, .border-amber-900\/40, .border-amber-900\/30, .border-amber-800) {
+  border-color: #fcd34d !important;
+}
+
+.wealth-light-theme :is(.border-rose-900\/60, .border-rose-900\/50, .border-rose-900\/40, .border-red-900\/60) {
+  border-color: #fda4af !important;
+}
+
+.wealth-light-theme :is(.text-slate-100, .text-slate-200, .text-slate-300) {
+  color: #0f172a !important;
+}
+
+.wealth-light-theme :is(.text-slate-400, .text-slate-500, .text-slate-600, .text-slate-700) {
+  color: #64748b !important;
+}
+
+.wealth-light-theme :is(.text-cyan-100, .text-cyan-200, .text-cyan-300) {
+  color: #0e7490 !important;
+}
+
+.wealth-light-theme :is(.text-blue-300, .text-blue-400) {
+  color: #2563eb !important;
+}
+
+.wealth-light-theme :is(.text-emerald-100, .text-emerald-200, .text-emerald-300, .text-emerald-400) {
+  color: #047857 !important;
+}
+
+.wealth-light-theme :is(.text-amber-100, .text-amber-200, .text-amber-300, .text-orange-300, .text-orange-400) {
+  color: #b45309 !important;
+}
+
+.wealth-light-theme :is(.text-rose-100, .text-rose-200, .text-rose-300, .text-red-300, .text-red-400) {
+  color: #be123c !important;
+}
+
+.wealth-light-theme :is(input, select, textarea) {
+  background-color: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
+.wealth-light-theme :is(input, select, textarea)::placeholder {
+  color: #94a3b8 !important;
+}
+
+.wealth-light-theme :is(table, thead, tbody, tr, td, th) {
+  color: inherit;
+}
+
+.wealth-light-theme .shadow-2xl {
+  box-shadow: 0 16px 35px -24px rgba(15, 23, 42, 0.35) !important;
+}
