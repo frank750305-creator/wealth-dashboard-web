@@ -92,12 +92,11 @@ function inferCurrency(symbol: string) {
 function dedupeSymbols(symbols: string[]) {
   const seen = new Set<string>();
   return symbols
-    .map((symbol) => symbol.trim())
+    .map((symbol) => symbol.trim().toUpperCase())
     .filter(Boolean)
     .filter((symbol) => {
-      const key = symbol.toUpperCase();
-      if (seen.has(key)) return false;
-      seen.add(key);
+      if (seen.has(symbol)) return false;
+      seen.add(symbol);
       return true;
     })
     .slice(0, 12);
@@ -219,7 +218,7 @@ export function PortfolioAnalyticsSection({
     [displayResult, benchmarkHistory],
   );
   const annualRows = useMemo(() => buildAnnualReturnRows(displayResult), [displayResult]);
-  const activeBenchmark = benchmarkSymbol.trim();
+  const activeBenchmark = benchmarkSymbol.trim().toUpperCase();
   const canRun = hasBigQueryCredentials && selectedSymbols.length > 0;
   const selectedOptimizationMode = optimizationModeOptions.find((option) => option.id === optimizationMode);
 
