@@ -4,16 +4,18 @@ import type { PortfolioEfficientFrontier } from "@/types/market";
 type BigQueryPortfolioEfficientFrontierProps = {
   efficientFrontier: PortfolioEfficientFrontier | undefined;
   formatChartPercent: (value: unknown) => string;
+  variant?: "card" | "embedded";
 };
 
 export function BigQueryPortfolioEfficientFrontier({
   efficientFrontier,
   formatChartPercent,
+  variant = "card",
 }: BigQueryPortfolioEfficientFrontierProps) {
   if (!efficientFrontier?.points?.length) return null;
 
   return (
-    <div className="bg-slate-950 border border-slate-800 rounded-lg p-3">
+    <div className={variant === "card" ? "bg-slate-950 border border-slate-800 rounded-lg p-3" : ""}>
       <div className="flex items-center justify-between gap-3 mb-3">
         <div>
           <p className="text-[11px] text-slate-500">有效前緣</p>

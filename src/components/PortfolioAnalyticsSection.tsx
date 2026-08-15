@@ -433,7 +433,7 @@ export function PortfolioAnalyticsSection({
             disabled={!canRun || status === "loading"}
             className="rounded-md bg-cyan-700 px-4 py-2 text-xs font-bold text-white hover:bg-cyan-600 disabled:cursor-not-allowed disabled:bg-slate-900 disabled:text-slate-600"
           >
-            {status === "loading" ? "分析中" : "執行組合分析"}
+            {status === "loading" ? "分析中" : "用輸入權重分析"}
           </button>
         </div>
       </div>
@@ -441,9 +441,9 @@ export function PortfolioAnalyticsSection({
       <div className="rounded-lg border border-cyan-900/60 bg-cyan-950/10 p-3">
         <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
           <div>
-            <p className="text-[11px] font-bold text-slate-200">輸入組合權重</p>
+            <p className="text-[11px] font-bold text-cyan-200">步驟 1：輸入組合權重</p>
             <p className="mt-0.5 text-[11px] leading-5 text-slate-500">
-              主分析會用這裡的權重計算；合計不是 100% 時，系統會按比例換算。
+              這裡是主分析的計算依據；輸入完後按右上「用輸入權重分析」。
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -552,6 +552,126 @@ export function PortfolioAnalyticsSection({
         </div>
 
         <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-3">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <p className="text-[11px] font-bold text-slate-200">效率前緣 / AI 調整</p>
+              <p className="mt-1 text-[11px] leading-5 text-slate-500">
+                {selectedOptimizationMode?.note ?? "選擇最佳化目標後執行 AI 調整。"}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleRunOptimization()}
+              disabled={!hasBigQueryCredentials || selectedSymbols.length < 2 || optimizationStatus === "loading"}
+              className="rounded-md bg-cyan-700 px-4 py-2 text-xs font-bold text-white hover:bg-cyan-600 disabled:cursor-not-allowed disabled:bg-slate-900 disabled:text-slate-600"
+            >
+              {optimizationStatus === "loading" ? "AI 調整中" : "執行 AI 調整"}
+            </button>
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            {optimizationModeOptions.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => setOptimizationMode(option.id)}
+                className={`rounded-md border px-3 py-2 text-left text-xs font-bold transition ${
+                  optimizationMode === option.id
+                    ? "border-cyan-400 bg-cyan-950/50 text-cyan-100"
+                    : "border-slate-800 bg-slate-950 text-slate-400 hover:border-slate-600 hover:text-slate-200"
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+
+          {optimizationMode === "target_vol" ? (
+            <label className="mt-3 flex max-w-xs flex-col gap-1 text-[11px] font-bold text-slate-500">
+              客戶可承擔標準差
+              <div className="flex items-center gap-2 rounded-md border border-slate-800 bg-slate-950 px-3 py-2">
+                <input
+                  type="number"
+                  min={1}
+                  max={80}
+                  step={0.5}
+                  value={targetVolatilityPercent}
+                  onChange={(event) => setTargetVolatilityPercent(normalizeTargetVolatilityPercent(Number(event.target.value)))}
+                  className="w-full bg-transparent font-mono text-sm font-bold text-slate-100 outline-none"
+                />
+                <span className="text-xs text-slate-500">%</span>
+              </div>
+            </label>
+          ) : null}
+
+          {optimizationMessage ? (
+            <div className="mt-3 whitespace-pre-wrap rounded-md border border-amber-900/60 bg-amber-950/10 p-3 text-xs leading-5 text-amber-200">
+              {optimizationMessage}
+            </div>
+          ) : null}
+
+          <div className="mt-3 rounded-md border border-slate-800 bg-slate-950 p-3">
+            <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+              <div>
+                <p className="text-[11px] font-bold text-slate-200">AI 調整後權重</p>
+                <p className="mt-0.5 text-[11px] leading-5 text-slate-500">
+                  {hasOptimizedWeights
+                    ? `已依「${selectedOptimizationMode?.label ?? currentOptimizationResult?.optimizationMode}」產生建議。`
+                    : "執行 AI 調整後，這裡會顯示建議權重。"}
+                  {currentOptimizationResult?.optimizationMode === "target_vol" && currentOptimizationResult.targetVolatility !== null
+                    ? ` 目標標準差 ${formatPercent(currentOptimizationResult.targetVolatility, 1)}。`
+                    : ""}
+                </p>
+              </div>
+              {hasOptimizedWeights ? (
+                <button
+                  type="button"
+                  onClick={handleApplyOptimizedWeights}
+                  className="rounded-md border border-cyan-500 px-3 py-2 text-xs font-bold text-cyan-200 hover:bg-cyan-950/60"
+                >
+                  套用到上方權重
+                </button>
+              ) : null}
+            </div>
+
+            {aiWeightRows.length ? (
+              <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
+                {aiWeightRows.map((weightRow) => {
+                  const normalizedWeight = Math.max(0, Math.min(1, weightRow.weight ?? 0));
+                  return (
+                    <div key={weightRow.symbol} className="rounded-md border border-slate-800 bg-slate-900 p-3 text-xs">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="truncate font-bold text-slate-200" title={weightRow.symbol}>{weightRow.symbol}</span>
+                        <span className="font-mono font-bold text-cyan-200">{formatPercent(weightRow.weight, 1)}</span>
+                      </div>
+                      <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-800">
+                        <div
+                          className="h-full rounded-full bg-cyan-500"
+                          style={{ width: `${normalizedWeight * 100}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="mt-3 rounded-md border border-dashed border-slate-800 p-4 text-center text-xs text-slate-500">
+                尚未產生 AI 權重。
+              </div>
+            )}
+          </div>
+
+          <BigQueryPortfolioEfficientFrontier
+            efficientFrontier={currentOptimizationResult?.efficientFrontier}
+            formatChartPercent={formatChartPercent}
+            variant="embedded"
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_1fr]">
+        <BigQueryPortfolioCorrelationMatrix matrix={displayResult?.correlationMatrix} />
+        <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-3">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
               <p className="text-[11px] font-bold text-slate-200">每年漲跌幅</p>
@@ -578,127 +698,6 @@ export function PortfolioAnalyticsSection({
               </div>
             )}
           </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_1fr]">
-        <BigQueryPortfolioCorrelationMatrix matrix={displayResult?.correlationMatrix} />
-        <div className="space-y-4">
-          <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-3">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-              <div>
-                <p className="text-[11px] font-bold text-slate-200">效率前緣 / AI 調整</p>
-                <p className="mt-1 text-[11px] leading-5 text-slate-500">
-                  {selectedOptimizationMode?.note ?? "選擇最佳化目標後執行 AI 調整。"}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => void handleRunOptimization()}
-                disabled={!hasBigQueryCredentials || selectedSymbols.length < 2 || optimizationStatus === "loading"}
-                className="rounded-md bg-cyan-700 px-4 py-2 text-xs font-bold text-white hover:bg-cyan-600 disabled:cursor-not-allowed disabled:bg-slate-900 disabled:text-slate-600"
-              >
-                {optimizationStatus === "loading" ? "AI 調整中" : "執行 AI 調整"}
-              </button>
-            </div>
-
-            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {optimizationModeOptions.map((option) => (
-                <button
-                  key={option.id}
-                  type="button"
-                  onClick={() => setOptimizationMode(option.id)}
-                  className={`rounded-md border px-3 py-2 text-left text-xs font-bold transition ${
-                    optimizationMode === option.id
-                      ? "border-cyan-400 bg-cyan-950/50 text-cyan-100"
-                      : "border-slate-800 bg-slate-950 text-slate-400 hover:border-slate-600 hover:text-slate-200"
-                  }`}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-
-            {optimizationMode === "target_vol" ? (
-              <label className="mt-3 flex max-w-xs flex-col gap-1 text-[11px] font-bold text-slate-500">
-                客戶可承擔標準差
-                <div className="flex items-center gap-2 rounded-md border border-slate-800 bg-slate-950 px-3 py-2">
-                  <input
-                    type="number"
-                    min={1}
-                    max={80}
-                    step={0.5}
-                    value={targetVolatilityPercent}
-                    onChange={(event) => setTargetVolatilityPercent(normalizeTargetVolatilityPercent(Number(event.target.value)))}
-                    className="w-full bg-transparent font-mono text-sm font-bold text-slate-100 outline-none"
-                  />
-                  <span className="text-xs text-slate-500">%</span>
-                </div>
-              </label>
-            ) : null}
-
-            {optimizationMessage ? (
-              <div className="mt-3 whitespace-pre-wrap rounded-md border border-amber-900/60 bg-amber-950/10 p-3 text-xs leading-5 text-amber-200">
-                {optimizationMessage}
-              </div>
-            ) : null}
-
-            <div className="mt-3 rounded-md border border-slate-800 bg-slate-950 p-3">
-              <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                <div>
-                  <p className="text-[11px] font-bold text-slate-200">AI 調整後權重</p>
-                  <p className="mt-0.5 text-[11px] leading-5 text-slate-500">
-                    {hasOptimizedWeights
-                      ? `已依「${selectedOptimizationMode?.label ?? currentOptimizationResult?.optimizationMode}」產生建議。`
-                      : "執行 AI 調整後，這裡會顯示建議權重。"}
-                    {currentOptimizationResult?.optimizationMode === "target_vol" && currentOptimizationResult.targetVolatility !== null
-                      ? ` 目標標準差 ${formatPercent(currentOptimizationResult.targetVolatility, 1)}。`
-                      : ""}
-                  </p>
-                </div>
-                {hasOptimizedWeights ? (
-                  <button
-                    type="button"
-                    onClick={handleApplyOptimizedWeights}
-                    className="rounded-md border border-cyan-500 px-3 py-2 text-xs font-bold text-cyan-200 hover:bg-cyan-950/60"
-                  >
-                    套用到上方權重
-                  </button>
-                ) : null}
-              </div>
-
-              {aiWeightRows.length ? (
-                <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
-                  {aiWeightRows.map((weightRow) => {
-                    const normalizedWeight = Math.max(0, Math.min(1, weightRow.weight ?? 0));
-                    return (
-                      <div key={weightRow.symbol} className="rounded-md border border-slate-800 bg-slate-900 p-3 text-xs">
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="truncate font-bold text-slate-200" title={weightRow.symbol}>{weightRow.symbol}</span>
-                          <span className="font-mono font-bold text-cyan-200">{formatPercent(weightRow.weight, 1)}</span>
-                        </div>
-                        <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-800">
-                          <div
-                            className="h-full rounded-full bg-cyan-500"
-                            style={{ width: `${normalizedWeight * 100}%` }}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="mt-3 rounded-md border border-dashed border-slate-800 p-4 text-center text-xs text-slate-500">
-                  尚未產生 AI 權重。
-                </div>
-              )}
-            </div>
-          </div>
-
-          <BigQueryPortfolioEfficientFrontier
-            efficientFrontier={currentOptimizationResult?.efficientFrontier}
-            formatChartPercent={formatChartPercent}
-          />
         </div>
       </div>
     </section>
