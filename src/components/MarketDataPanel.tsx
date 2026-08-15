@@ -486,6 +486,7 @@ import type {
 import { AllocationDraftSection } from "./AllocationDraftSection";
 import { AssetComparisonTable } from "./AssetComparisonTable";
 import { AssetRiskMatrixSection } from "./AssetRiskMatrixSection";
+import { PortfolioAnalyticsSection } from "./PortfolioAnalyticsSection";
 import { BigQueryConnectionSection } from "./BigQueryConnectionSection";
 import {
   BigQueryQualityCardGrid,
@@ -4983,6 +4984,7 @@ export function MarketDataPanel() {
   const isBackofficeWorkspace = false;
   const availableBigQuerySymbols = dedupeDailyQuoteSymbols(dailyQuoteRows.map((row) => row.symbol), 500);
   const portfolioSelectableSymbols = availableBigQuerySymbols;
+  const selectedPortfolioSymbols = parseSymbolList(comparisonSymbols);
   const loadedDailyQuoteRows = dailyQuoteRows.filter((row) => row.status === "loaded");
   const failedDailyQuoteRows = dailyQuoteRows.filter((row) => row.status === "error");
   const dailyQuoteQualitySummary = useMemo(() => {
@@ -6377,6 +6379,14 @@ export function MarketDataPanel() {
             error={assetRiskMatrixError}
             onRefresh={handleRefreshAssetRiskMatrix}
             onExportCsv={handleExportAssetRiskMatrixCsv}
+          />
+
+          <PortfolioAnalyticsSection
+            symbols={selectedPortfolioSymbols}
+            benchmarkSymbol={assetRiskBenchmarkSymbol}
+            priceBasis={assetPriceBasis}
+            riskFreeRatePercent={assetRiskFreeRatePercent}
+            hasBigQueryCredentials={hasBigQueryCredentials}
           />
 
           <details className="group rounded-lg border border-slate-800 bg-slate-900/40">
