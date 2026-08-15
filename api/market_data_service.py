@@ -1144,7 +1144,7 @@ def load_bigquery_asset_history(
     selected_price_column = _price_column(price_basis)
     normalized_price_basis = _normalize_price_basis(price_basis)
     price_table = _table_path("BIGQUERY_PRICE_TABLE", DEFAULT_PRICE_TABLE)
-    bounded_limit = max(20, min(int(limit or 365), 2000))
+    bounded_limit = max(20, min(int(limit or 365), 20000))
 
     where_clauses = ["symbol = @symbol"]
     query_parameters = [

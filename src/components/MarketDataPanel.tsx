@@ -3460,7 +3460,7 @@ export function MarketDataPanel() {
         return true;
       });
     const settledHistories = await Promise.allSettled(
-      symbolsToFetch.map((symbol) => fetchBigQueryAssetHistory(symbol, assetPriceBasis, { limit: 2000 })),
+      symbolsToFetch.map((symbol) => fetchBigQueryAssetHistory(symbol, assetPriceBasis, { limit: 20000 })),
     );
     const historyBySymbol = new Map<string, BigQueryAssetHistoryResponse>();
     const failedSymbols: string[] = [];

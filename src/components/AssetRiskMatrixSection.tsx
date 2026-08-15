@@ -76,7 +76,7 @@ export function AssetRiskMatrixSection({
           <p className="text-[10px] font-mono text-cyan-300">RISK MATRIX</p>
           <h3 className="mt-1 text-sm font-bold text-slate-100">多標的風險矩陣</h3>
           <p className="mt-1 text-[11px] text-slate-500">
-            {priceBasis === "adjusted" ? "Adjusted" : "Raw"} 價格口徑 · Beta / Alpha 以基準標的對齊日報酬計算
+            {priceBasis === "adjusted" ? "Adjusted" : "Raw"} 價格口徑 · 以 BigQuery 可用完整歷史計算；Beta / Alpha 以基準標的對齊日報酬
           </p>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-[140px_140px_auto_auto] gap-2 text-xs xl:min-w-[560px]">
@@ -145,9 +145,9 @@ export function AssetRiskMatrixSection({
                 {[
                   "名稱",
                   "類型",
-                  "成立時間",
-                  "年期",
-                  "成立報酬率",
+                  "資料起始日",
+                  "資料年期",
+                  "累積報酬",
                   "年化報酬",
                   "最新價",
                   "Sharpe",
