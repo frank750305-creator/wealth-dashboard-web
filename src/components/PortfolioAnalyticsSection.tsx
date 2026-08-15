@@ -22,6 +22,7 @@ import type {
   BigQueryAssetHistoryResponse,
   PortfolioAnalysisResponse,
   PortfolioOptimizationResponse,
+  PortfolioOptimizeBigQueryPayload,
   PortfolioWealthPoint,
 } from "@/types/market";
 import { BigQueryPortfolioCorrelationMatrix } from "./BigQueryPortfolioCorrelationMatrix";
@@ -47,7 +48,19 @@ type AnnualReturnRow = {
 };
 
 const analysisMode = "long_rebuild" as const;
-const optimizationMode = "max_sharpe" as const;
+
+type OptimizationMode = PortfolioOptimizeBigQueryPayload["optimization_mode"];
+
+const optimizationModeOptions: Array<{
+  id: OptimizationMode;
+  label: string;
+  note: string;
+}> = [
+  { id: "max_return", label: "報酬最大", note: "選歷史年化報酬最高的組合" },
+  { id: "min_vol", label: "風險最小", note: "選歷史波動最低的組合" },
+  { id: "max_sharpe", label: "最優 Sharpe", note: "選單位風險報酬最好的組合" },
+  { id: "target_vol", label: "目標標準差", note: "在客戶可承擔波動內追求報酬" },
+];
 
 function formatNumber(value: number | null | undefined, digits = 2) {
   return typeof value === "number" && Number.isFinite(value) ? value.toFixed(digits) : "--";
@@ -97,6 +110,11 @@ function equalWeightsBySymbol(symbols: string[]) {
 
 function currencyBySymbol(symbols: string[]) {
   return Object.fromEntries(symbols.map((symbol) => [symbol, inferCurrency(symbol)]));
+}
+
+function normalizeTargetVolatilityPercent(value: number) {
+  if (!Number.isFinite(value)) return 12;
+  return Math.min(Math.max(value, 1), 80);
 }
 
 function buildBenchmarkIndexByDate(
@@ -192,6 +210,8 @@ export function PortfolioAnalyticsSection({
   const [benchmarkHistory, setBenchmarkHistory] = useState<BigQueryAssetHistoryResponse | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [message, setMessage] = useState("");
+  const [optimizationMode, setOptimizationMode] = useState<OptimizationMode>("max_sharpe");
+  const [targetVolatilityPercent, setTargetVolatilityPercent] = useState(12);
 
   const displayResult = optimizationResult ?? analysisResult;
   const chartRows = useMemo(
@@ -201,6 +221,7 @@ export function PortfolioAnalyticsSection({
   const annualRows = useMemo(() => buildAnnualReturnRows(displayResult), [displayResult]);
   const activeBenchmark = benchmarkSymbol.trim();
   const canRun = hasBigQueryCredentials && selectedSymbols.length > 0;
+  const selectedOptimizationMode = optimizationModeOptions.find((option) => option.id === optimizationMode);
 
   const handleRunAnalysis = async () => {
     if (!hasBigQueryCredentials) {
@@ -241,7 +262,9 @@ export function PortfolioAnalyticsSection({
           ...basePayload,
           symbols: selectedSymbols,
           optimization_mode: optimizationMode,
-          target_volatility: null,
+          target_volatility: optimizationMode === "target_vol"
+            ? normalizeTargetVolatilityPercent(targetVolatilityPercent) / 100
+            : null,
         })
       : Promise.resolve(null);
     const benchmarkPromise = activeBenchmark
@@ -287,7 +310,7 @@ export function PortfolioAnalyticsSection({
           <p className="text-[10px] font-mono text-cyan-300">PORTFOLIO ANALYTICS</p>
           <h3 className="mt-1 text-sm font-bold text-slate-100">組合分析</h3>
           <p className="mt-1 text-[11px] leading-5 text-slate-500">
-            用已選標的建立等權組合，並輸出組合歷史線圖、年度報酬、相關係數與 AI 權重最佳化。
+            用已選標的建立等權組合，並依指定目標輸出 AI 權重、組合歷史線圖、年度報酬與相關係數。
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
@@ -309,6 +332,52 @@ export function PortfolioAnalyticsSection({
           >
             {status === "loading" ? "分析中" : "執行組合分析"}
           </button>
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-3">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+          <div>
+            <p className="text-[11px] font-bold text-slate-200">AI 調整權重目標</p>
+            <p className="mt-1 text-[11px] text-slate-500">
+              {selectedOptimizationMode?.note ?? "選擇最佳化目標後重新執行分析。"}
+            </p>
+          </div>
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-end">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {optimizationModeOptions.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => setOptimizationMode(option.id)}
+                  className={`rounded-md border px-3 py-2 text-left text-xs font-bold transition ${
+                    optimizationMode === option.id
+                      ? "border-cyan-400 bg-cyan-950/50 text-cyan-100"
+                      : "border-slate-800 bg-slate-950 text-slate-400 hover:border-slate-600 hover:text-slate-200"
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            {optimizationMode === "target_vol" ? (
+              <label className="flex min-w-[180px] flex-col gap-1 text-[11px] font-bold text-slate-500">
+                客戶可承擔標準差
+                <div className="flex items-center gap-2 rounded-md border border-slate-800 bg-slate-950 px-3 py-2">
+                  <input
+                    type="number"
+                    min={1}
+                    max={80}
+                    step={0.5}
+                    value={targetVolatilityPercent}
+                    onChange={(event) => setTargetVolatilityPercent(normalizeTargetVolatilityPercent(Number(event.target.value)))}
+                    className="w-full bg-transparent font-mono text-sm font-bold text-slate-100 outline-none"
+                  />
+                  <span className="text-xs text-slate-500">%</span>
+                </div>
+              </label>
+            ) : null}
+          </div>
         </div>
       </div>
 
@@ -401,7 +470,20 @@ export function PortfolioAnalyticsSection({
           />
           {optimizationResult?.weights?.length ? (
             <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-3">
-              <p className="text-[11px] font-bold text-slate-200">AI 調整後權重</p>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-bold text-slate-200">AI 調整後權重</p>
+                  <p className="mt-0.5 text-[11px] text-slate-500">
+                    目標：{selectedOptimizationMode?.label ?? optimizationResult.optimizationMode}
+                    {optimizationResult.optimizationMode === "target_vol" && optimizationResult.targetVolatility !== null
+                      ? `，標準差 ${formatPercent(optimizationResult.targetVolatility, 1)}`
+                      : ""}
+                  </p>
+                </div>
+                <span className="rounded bg-cyan-950 px-2 py-1 text-[10px] font-mono font-bold text-cyan-200">
+                  {optimizationResult.optimizationMode}
+                </span>
+              </div>
               <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
                 {optimizationResult.weights.map((weightRow) => (
                   <div key={weightRow.symbol} className="flex items-center justify-between gap-3 rounded-md border border-slate-800 bg-slate-950 px-3 py-2 text-xs">
