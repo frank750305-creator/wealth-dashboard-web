@@ -487,7 +487,6 @@ import { AllocationDraftSection } from "./AllocationDraftSection";
 import { AssetComparisonTable } from "./AssetComparisonTable";
 import { AssetRiskMatrixSection } from "./AssetRiskMatrixSection";
 import { BigQueryConnectionSection } from "./BigQueryConnectionSection";
-import { BigQueryPortfolioPanel } from "./BigQueryPortfolioPanel";
 import {
   BigQueryQualityCardGrid,
   BigQueryQualityScorecard,
@@ -499,7 +498,6 @@ import { AccountHealthSection } from "./AccountHealthSection";
 import { CioOperatingBriefSection } from "./CioOperatingBriefSection";
 import { CommitteeApprovalSection } from "./CommitteeApprovalSection";
 import { CommercializationSection } from "./CommercializationSection";
-import { MarketDataConsoleHeader } from "./MarketDataConsoleHeader";
 import { DataOperationsSection } from "./DataOperationsSection";
 import { DataProductClientImpactSection } from "./DataProductClientImpactSection";
 import { DataProductErrorBudgetSection } from "./DataProductErrorBudgetSection";
@@ -610,7 +608,6 @@ function combinedExecutionStatus(statuses: ExecutionReviewStatus[]): ExecutionRe
   return "pass";
 }
 
-type MarketDataWorkspace = "quotes" | "portfolio";
 type DailyQuoteFilter = "all" | "loaded" | "error";
 type DailyQuoteSortKey = "symbol" | "latestDate" | "latestPrice" | "dailyReturn" | "ytdReturn" | "status";
 type SortDirection = "asc" | "desc";
@@ -1410,7 +1407,6 @@ export function MarketDataPanel() {
   const [marketAlertAuditMessage, setMarketAlertAuditMessage] = useState("");
   const [marketAlertAuditRecords, setMarketAlertAuditRecords] = useState<MarketAlertWarehouseAuditRecord[]>([]);
   const [watchlistMemoCopyStatus, setWatchlistMemoCopyStatus] = useState<"idle" | "copied">("idle");
-  const [activeMarketWorkspace, setActiveMarketWorkspace] = useState<MarketDataWorkspace>("quotes");
   const [dailyQuoteSymbolsText, setDailyQuoteSymbolsText] = useState("");
   const [dailyQuoteQuery, setDailyQuoteQuery] = useState("");
   const [dailyQuoteCategory, setDailyQuoteCategory] = useState<BigQueryAssetCategory>("all");
@@ -4965,9 +4961,9 @@ export function MarketDataPanel() {
     dailyQuotePriceBasis,
     dailyQuoteQuery,
   ]);
-  const isOverviewWorkspace = activeMarketWorkspace === "quotes";
-  const isAssetsWorkspace = activeMarketWorkspace === "portfolio";
-  const isPortfolioWorkspace = activeMarketWorkspace === "portfolio";
+  const isOverviewWorkspace = true;
+  const isAssetsWorkspace = false;
+  const isPortfolioWorkspace = true;
   const isOperationsWorkspace = false;
   const isBackofficeWorkspace = false;
   const availableBigQuerySymbols = dedupeDailyQuoteSymbols(dailyQuoteRows.map((row) => row.symbol), 500);
@@ -5054,25 +5050,6 @@ export function MarketDataPanel() {
       rows: strongestYtdQuoteRows,
       metric: (row: DailyMarketQuoteRow) => formatSignedPercent(row.ytdReturn),
       textClass: (row: DailyMarketQuoteRow) => dailyReturnTextClass(row.ytdReturn),
-    },
-  ];
-  const marketWorkspaceItems: Array<{
-    id: MarketDataWorkspace;
-    label: string;
-    description: string;
-    metric: string;
-  }> = [
-    {
-      id: "quotes",
-      label: "今日行情",
-      description: "當日價格、漲跌幅、資料日期與資料品質",
-      metric: dailyQuoteRows.length ? `${dailyQuotePageStart}-${dailyQuotePageEnd}/${dailyQuoteTotal || dailyQuoteRows.length}` : bigQueryBadge,
-    },
-    {
-      id: "portfolio",
-      label: "投資組合分析",
-      description: "選取投資標的，建立 watchlist、配置、再平衡與投組分析",
-      metric: visibleComparisonRows.length ? `${visibleComparisonRows.length} 檔` : assetProfile?.symbol ?? assetQuery,
     },
   ];
   const dailyMarketSummaryCards = [
@@ -5204,69 +5181,40 @@ export function MarketDataPanel() {
     }
 
     handleAppendComparisonSymbol(row.symbol);
-    setActiveMarketWorkspace("portfolio");
   };
 
   return (
     <div className="space-y-6 animate-fade-in">
       <section className="bg-slate-900 border border-slate-800 p-4 md:p-6 rounded-xl shadow-2xl space-y-5">
-        <MarketDataConsoleHeader
-          sourceCount={sources.length}
-          securedCount={securedCount}
-          generatedAt={data?.generatedAt}
-          hasBigQueryCredentials={hasBigQueryCredentials}
-          bigQueryStatus={bigQueryStatus}
-          bigQueryBadge={bigQueryBadge}
-          onReload={reload}
-        />
-
-        <section className="rounded-lg border border-slate-800 bg-slate-950 p-4 space-y-4">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+        <section className="rounded-lg border border-slate-800 bg-slate-950 p-4">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
             <div>
               <p className="text-[10px] font-mono text-cyan-300">MARKET PLATFORM</p>
-              <h3 className="mt-1 text-base font-bold text-slate-100">市場資料平台</h3>
-              <p className="mt-1 text-xs text-slate-500">
-                市場平台分成兩件事：先看今日行情，再選取標的做投資組合分析。
+              <h3 className="mt-1 text-xl font-bold text-slate-100">市場資料平台</h3>
+              <p className="mt-1 text-sm text-slate-500">
+                主畫面只做兩件事：看全部標的行情，選標的做風險矩陣。
               </p>
             </div>
-            <div className="inline-grid grid-cols-2 rounded-lg border border-slate-800 bg-slate-900 p-1 text-xs">
-              {marketWorkspaceItems.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => setActiveMarketWorkspace(item.id)}
-                  className={`rounded-md px-4 py-2 font-bold transition-colors ${
-                    activeMarketWorkspace === item.id
-                      ? "bg-cyan-600 text-white"
-                      : "text-slate-400 hover:bg-slate-800 hover:text-slate-100"
-                  }`}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            {marketWorkspaceItems.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => setActiveMarketWorkspace(item.id)}
-                className={`rounded-md border p-3 text-left transition-colors ${
-                  activeMarketWorkspace === item.id
-                    ? "border-cyan-500 bg-cyan-500/10 text-cyan-100 shadow-[inset_0_0_0_1px_rgba(34,211,238,0.15)]"
-                    : "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700 hover:text-slate-100"
-                }`}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <p className="text-xs font-bold">{item.label}</p>
-                  <span className="rounded bg-slate-950 px-2 py-0.5 text-[10px] font-mono text-slate-400">
-                    {item.metric}
-                  </span>
+            <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4 lg:min-w-[620px]">
+              {[
+                ["資料源", sources.length.toLocaleString("zh-TW")],
+                ["可安全接入", securedCount.toLocaleString("zh-TW")],
+                ["BigQuery", hasBigQueryCredentials ? "已連線" : "待設定"],
+                ["最新檢查", data?.generatedAt ? new Date(data.generatedAt).toLocaleTimeString("zh-TW") : bigQueryBadge],
+              ].map(([label, value]) => (
+                <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 px-3 py-2">
+                  <p className="text-[10px] text-slate-500">{label}</p>
+                  <p className="mt-1 truncate font-mono font-bold text-slate-100">{value}</p>
                 </div>
-                <p className="mt-1 text-[11px] leading-5 text-slate-500">{item.description}</p>
+              ))}
+              <button
+                type="button"
+                onClick={reload}
+                className="col-span-2 rounded-md bg-cyan-700 px-3 py-2 font-bold text-white hover:bg-cyan-600 sm:col-span-4"
+              >
+                重新整理資料源
               </button>
-            ))}
+            </div>
           </div>
         </section>
 
@@ -5287,7 +5235,7 @@ export function MarketDataPanel() {
                 進入畫面會自動載入 BigQuery 全部標的；表格列出最新價格、前日漲跌與今年漲跌。
               </p>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-[150px_1fr_150px_120px_auto_auto] gap-2 text-xs xl:min-w-[1040px]">
+            <div className="grid grid-cols-1 gap-2 text-xs md:grid-cols-[150px_1fr_auto] xl:min-w-[760px]">
               <select
                 value={dailyQuoteCategory}
                 onChange={(event) => handleDailyQuoteCategoryChange(event.target.value as BigQueryAssetCategory)}
@@ -5308,6 +5256,22 @@ export function MarketDataPanel() {
                 placeholder="留空看全部；輸入 0050.TW 搜尋；多個代號用空白分隔"
                 className="min-w-0 bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-slate-100 font-mono outline-none focus:border-cyan-600"
               />
+              <button
+                type="button"
+                onClick={() => void handleLoadDailyQuotes()}
+                disabled={!hasBigQueryCredentials || dailyQuoteStatus === "loading"}
+                className="px-3 py-2 rounded-md bg-cyan-700 hover:bg-cyan-600 text-white font-bold disabled:cursor-not-allowed disabled:bg-slate-900 disabled:text-slate-600"
+              >
+                {dailyQuoteStatus === "loading" ? "讀取中" : "重新讀取"}
+              </button>
+            </div>
+          </div>
+
+          <details className="rounded-lg border border-slate-800 bg-slate-900/40 text-xs">
+            <summary className="cursor-pointer list-none px-3 py-2 font-bold text-slate-500">
+              進階行情設定
+            </summary>
+            <div className="grid grid-cols-1 gap-2 border-t border-slate-800 p-3 md:grid-cols-[160px_140px_auto]">
               <select
                 value={dailyQuotePriceBasis}
                 onChange={(event) => handleDailyQuotePriceBasisChange(event.target.value as "adjusted" | "raw")}
@@ -5327,22 +5291,14 @@ export function MarketDataPanel() {
               </select>
               <button
                 type="button"
-                onClick={() => void handleLoadDailyQuotes()}
-                disabled={!hasBigQueryCredentials || dailyQuoteStatus === "loading"}
-                className="px-3 py-2 rounded-md bg-cyan-700 hover:bg-cyan-600 text-white font-bold disabled:cursor-not-allowed disabled:bg-slate-900 disabled:text-slate-600"
-              >
-                {dailyQuoteStatus === "loading" ? "讀取中" : "重新讀取"}
-              </button>
-              <button
-                type="button"
                 onClick={handleExportDailyQuoteCsv}
                 disabled={!dailyQuoteRows.length}
-                className="px-3 py-2 rounded-md border border-slate-700 bg-slate-900 text-slate-100 font-bold hover:border-cyan-700 hover:text-cyan-100 disabled:cursor-not-allowed disabled:border-slate-800 disabled:bg-slate-950 disabled:text-slate-700"
+                className="rounded-md border border-slate-700 bg-slate-900 px-3 py-2 font-bold text-slate-100 hover:border-cyan-700 hover:text-cyan-100 disabled:cursor-not-allowed disabled:border-slate-800 disabled:bg-slate-950 disabled:text-slate-700"
               >
-                行情 CSV
+                匯出行情 CSV
               </button>
             </div>
-          </div>
+          </details>
 
           <div className="grid grid-cols-2 xl:grid-cols-5 gap-2">
             {dailyMarketSummaryCards.map((card) => (
@@ -6412,6 +6368,23 @@ export function MarketDataPanel() {
             onExportCsv={handleExportAssetRiskMatrixCsv}
           />
 
+          <details className="group rounded-lg border border-slate-800 bg-slate-900/40">
+            <summary className="flex cursor-pointer list-none flex-col gap-2 p-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="text-[10px] font-mono text-slate-500">ADVANCED</p>
+                <h4 className="mt-1 text-sm font-bold text-slate-100">進階投組工具</h4>
+                <p className="mt-1 text-[11px] text-slate-500">
+                  配置、再平衡、交易單、監控規則與研究任務先收合，避免干擾主流程。
+                </p>
+              </div>
+              <span className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-xs font-bold text-slate-300 group-open:hidden">
+                展開
+              </span>
+              <span className="hidden rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-xs font-bold text-slate-300 group-open:inline-block">
+                收合
+              </span>
+            </summary>
+            <div className="space-y-4 border-t border-slate-800 p-3">
           <ResearchTaskBoardSection
             tasks={researchTaskItems}
             summary={researchTaskSummary}
@@ -6804,6 +6777,8 @@ export function MarketDataPanel() {
               輸入多個商品代號後，這裡會顯示 watchlist 橫向比較。
             </div>
           )}
+            </div>
+          </details>
         </section>
         )}
 
@@ -6813,8 +6788,6 @@ export function MarketDataPanel() {
       </section>
 
       {isOperationsWorkspace && <SecurityNotesSection notes={data?.securityNotes ?? []} />}
-
-      {isPortfolioWorkspace && <BigQueryPortfolioPanel hasBigQueryCredentials={hasBigQueryCredentials} />}
     </div>
   );
 }

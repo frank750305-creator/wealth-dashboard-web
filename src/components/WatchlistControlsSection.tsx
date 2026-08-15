@@ -119,36 +119,12 @@ export function WatchlistControlsSection({
     <>
       <div className="flex flex-col xl:flex-row xl:items-start justify-between gap-3">
         <div>
-          <h3 className="text-sm font-bold text-slate-100">BigQuery Watchlist 比較</h3>
+          <h3 className="text-base font-bold text-slate-100">投資組合分析</h3>
           <p className="text-[11px] text-slate-500 mt-0.5">
-            批次比較多檔商品的報酬、波動、回撤與資料品質
+            下拉選取多檔標的，也可手動輸入；按分析後下方會顯示風險矩陣。
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {comparisonRows.length ? (
-            <>
-              <button
-                onClick={onExportAssetComparisonMemo}
-                disabled={!visibleComparisonRows.length}
-                className="px-3 py-2 text-xs font-bold rounded-md bg-emerald-700 hover:bg-emerald-600 text-white disabled:cursor-not-allowed disabled:bg-slate-900 disabled:text-slate-600"
-              >
-                Memo MD
-              </button>
-              <button
-                onClick={() => void onCopyAssetComparisonMemo()}
-                disabled={!visibleComparisonRows.length}
-                className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 disabled:cursor-not-allowed disabled:bg-slate-900 disabled:text-slate-600"
-              >
-                {watchlistMemoCopyStatus === "copied" ? "已複製" : "複製 Memo"}
-              </button>
-              <button
-                onClick={onExportAssetComparisonCsv}
-                className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
-              >
-                Watchlist CSV
-              </button>
-            </>
-          ) : null}
           <button
             onClick={() => void onCompareAssets()}
             disabled={!hasBigQueryCredentials || isLoadingComparison || !symbolCount}
@@ -158,6 +134,36 @@ export function WatchlistControlsSection({
           </button>
         </div>
       </div>
+
+      {comparisonRows.length ? (
+        <details className="rounded-lg border border-slate-800 bg-slate-900/40 text-xs">
+          <summary className="cursor-pointer list-none px-3 py-2 font-bold text-slate-500">
+            匯出與 Memo
+          </summary>
+          <div className="flex flex-wrap gap-2 border-t border-slate-800 p-3">
+            <button
+              onClick={onExportAssetComparisonMemo}
+              disabled={!visibleComparisonRows.length}
+              className="px-3 py-2 text-xs font-bold rounded-md bg-emerald-700 hover:bg-emerald-600 text-white disabled:cursor-not-allowed disabled:bg-slate-900 disabled:text-slate-600"
+            >
+              Memo MD
+            </button>
+            <button
+              onClick={() => void onCopyAssetComparisonMemo()}
+              disabled={!visibleComparisonRows.length}
+              className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100 disabled:cursor-not-allowed disabled:bg-slate-900 disabled:text-slate-600"
+            >
+              {watchlistMemoCopyStatus === "copied" ? "已複製" : "複製 Memo"}
+            </button>
+            <button
+              onClick={onExportAssetComparisonCsv}
+              className="px-3 py-2 text-xs font-bold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-100"
+            >
+              Watchlist CSV
+            </button>
+          </div>
+        </details>
+      ) : null}
 
       <div className="rounded-lg border border-cyan-900/40 bg-cyan-950/10 p-3 space-y-3">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
@@ -254,6 +260,11 @@ export function WatchlistControlsSection({
         </div>
       </div>
 
+      <details className="rounded-lg border border-slate-800 bg-slate-900/40">
+        <summary className="cursor-pointer list-none px-3 py-2 text-xs font-bold text-slate-500">
+          進階設定
+        </summary>
+        <div className="space-y-3 border-t border-slate-800 p-3">
       <label className="block space-y-1">
         <span className="text-[11px] text-slate-500">批次手動輸入 / 編輯</span>
       <textarea
@@ -369,6 +380,8 @@ export function WatchlistControlsSection({
           />
         </label>
       </div>
+        </div>
+      </details>
 
       {comparisonError ? (
         <div className="border border-red-900/60 bg-red-950/30 rounded-lg p-3 text-xs text-red-300 whitespace-pre-wrap">
