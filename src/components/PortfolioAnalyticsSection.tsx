@@ -221,6 +221,12 @@ export function PortfolioAnalyticsSection({
   const activeBenchmark = benchmarkSymbol.trim().toUpperCase();
   const canRun = hasBigQueryCredentials && selectedSymbols.length > 0;
   const selectedOptimizationMode = optimizationModeOptions.find((option) => option.id === optimizationMode);
+  const weightRows = useMemo(() => {
+    if (optimizationResult?.weights?.length) return optimizationResult.weights;
+    const initialWeight = selectedSymbols.length ? 1 / selectedSymbols.length : 0;
+    return selectedSymbols.map((symbol) => ({ symbol, weight: initialWeight }));
+  }, [optimizationResult?.weights, selectedSymbols]);
+  const hasOptimizedWeights = Boolean(optimizationResult?.weights?.length);
 
   const handleRunAnalysis = async () => {
     if (!hasBigQueryCredentials) {
@@ -380,6 +386,53 @@ export function PortfolioAnalyticsSection({
         </div>
       </div>
 
+      <div className="rounded-lg border border-cyan-900/60 bg-cyan-950/10 p-3">
+        <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+          <div>
+            <p className="text-[11px] font-bold text-slate-200">AI 調整後權重</p>
+            <p className="mt-0.5 text-[11px] leading-5 text-slate-500">
+              {hasOptimizedWeights
+                ? `已依「${selectedOptimizationMode?.label ?? optimizationResult?.optimizationMode}」重新分配。`
+                : "尚未執行 AI 最佳化；下方先顯示等權起始配置。"}
+              {optimizationResult?.optimizationMode === "target_vol" && optimizationResult.targetVolatility !== null
+                ? ` 目標標準差 ${formatPercent(optimizationResult.targetVolatility, 1)}。`
+                : ""}
+            </p>
+          </div>
+          <span className={`w-fit rounded px-2 py-1 text-[10px] font-mono font-bold ${
+            hasOptimizedWeights ? "bg-cyan-700 text-white" : "bg-slate-100 text-slate-500"
+          }`}>
+            {hasOptimizedWeights ? optimizationResult?.optimizationMode : "equal_weight"}
+          </span>
+        </div>
+
+        {weightRows.length ? (
+          <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
+            {weightRows.map((weightRow) => {
+              const normalizedWeight = Math.max(0, Math.min(1, weightRow.weight ?? 0));
+              return (
+                <div key={weightRow.symbol} className="rounded-md border border-slate-800 bg-slate-950 p-3 text-xs">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="truncate font-bold text-slate-200" title={weightRow.symbol}>{weightRow.symbol}</span>
+                    <span className="font-mono font-bold text-cyan-200">{formatPercent(weightRow.weight, 1)}</span>
+                  </div>
+                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-800">
+                    <div
+                      className="h-full rounded-full bg-cyan-500"
+                      style={{ width: `${normalizedWeight * 100}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="mt-3 rounded-md border border-dashed border-slate-800 p-4 text-center text-xs text-slate-500">
+            先在上方選取標的，這裡會顯示調整前與 AI 調整後權重。
+          </div>
+        )}
+      </div>
+
       {message ? (
         <div className="whitespace-pre-wrap rounded-lg border border-amber-900/60 bg-amber-950/10 p-3 text-xs leading-5 text-amber-200">
           {message}
@@ -467,32 +520,6 @@ export function PortfolioAnalyticsSection({
             efficientFrontier={optimizationResult?.efficientFrontier}
             formatChartPercent={formatChartPercent}
           />
-          {optimizationResult?.weights?.length ? (
-            <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-3">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-[11px] font-bold text-slate-200">AI 調整後權重</p>
-                  <p className="mt-0.5 text-[11px] text-slate-500">
-                    目標：{selectedOptimizationMode?.label ?? optimizationResult.optimizationMode}
-                    {optimizationResult.optimizationMode === "target_vol" && optimizationResult.targetVolatility !== null
-                      ? `，標準差 ${formatPercent(optimizationResult.targetVolatility, 1)}`
-                      : ""}
-                  </p>
-                </div>
-                <span className="rounded bg-cyan-950 px-2 py-1 text-[10px] font-mono font-bold text-cyan-200">
-                  {optimizationResult.optimizationMode}
-                </span>
-              </div>
-              <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
-                {optimizationResult.weights.map((weightRow) => (
-                  <div key={weightRow.symbol} className="flex items-center justify-between gap-3 rounded-md border border-slate-800 bg-slate-950 px-3 py-2 text-xs">
-                    <span className="truncate text-slate-300" title={weightRow.symbol}>{weightRow.symbol}</span>
-                    <span className="font-mono font-bold text-cyan-200">{formatPercent(weightRow.weight, 1)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
         </div>
       </div>
     </section>
