@@ -1282,7 +1282,7 @@ export function MarketDataPanel() {
   const [assetPanelError, setAssetPanelError] = useState<string | null>(null);
   const [isSearchingAssets, setIsSearchingAssets] = useState(false);
   const [isLoadingAssetProfile, setIsLoadingAssetProfile] = useState(false);
-  const [comparisonSymbols, setComparisonSymbols] = useState("0050.TW SPY QQQ");
+  const [comparisonSymbols, setComparisonSymbols] = useState("0050.TW\nSPY\nQQQ");
   const [comparisonRows, setComparisonRows] = useState<AssetComparisonRow[]>([]);
   const [comparisonError, setComparisonError] = useState<string | null>(null);
   const [isLoadingComparison, setIsLoadingComparison] = useState(false);
@@ -3433,7 +3433,15 @@ export function MarketDataPanel() {
     );
   };
   const loadAssetRiskMatrix = useCallback(async (symbols: string[]) => {
-    const cleanSymbols = parseSymbolList(symbols.join(" "));
+    const seenCleanSymbols = new Set<string>();
+    const cleanSymbols = symbols
+      .flatMap((symbol) => parseSymbolList(symbol))
+      .filter((symbol) => {
+        const key = symbol.toUpperCase();
+        if (seenCleanSymbols.has(key)) return false;
+        seenCleanSymbols.add(key);
+        return true;
+      });
     if (!hasBigQueryCredentials || !cleanSymbols.length) return;
 
     setAssetRiskMatrixStatus("loading");
@@ -3441,9 +3449,16 @@ export function MarketDataPanel() {
     setAssetRiskMatrixRows([]);
 
     const benchmarkSymbol = assetRiskBenchmarkSymbol.trim();
-    const symbolsToFetch = Array.from(
-      new Set([...cleanSymbols, benchmarkSymbol].filter(Boolean).map((symbol) => symbol.toUpperCase())),
-    );
+    const seenFetchSymbols = new Set<string>();
+    const symbolsToFetch = [...cleanSymbols, benchmarkSymbol]
+      .map((symbol) => symbol.trim())
+      .filter(Boolean)
+      .filter((symbol) => {
+        const key = symbol.toUpperCase();
+        if (seenFetchSymbols.has(key)) return false;
+        seenFetchSymbols.add(key);
+        return true;
+      });
     const settledHistories = await Promise.allSettled(
       symbolsToFetch.map((symbol) => fetchBigQueryAssetHistory(symbol, assetPriceBasis, { limit: 2000 })),
     );
@@ -3453,7 +3468,7 @@ export function MarketDataPanel() {
     settledHistories.forEach((result, index) => {
       const symbol = symbolsToFetch[index];
       if (result.status === "fulfilled") {
-        historyBySymbol.set(symbol, result.value);
+        historyBySymbol.set(symbol.toUpperCase(), result.value);
       } else {
         failedSymbols.push(`${symbol}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`);
       }
@@ -3523,7 +3538,7 @@ export function MarketDataPanel() {
     const symbols = parseSymbolList(comparisonSymbols);
     const hasSymbol = symbols.some((item) => item.toUpperCase() === cleanSymbol.toUpperCase());
     const nextSymbols = hasSymbol ? symbols : [...symbols, cleanSymbol].slice(0, 12);
-    setComparisonSymbols(nextSymbols.join(" "));
+    setComparisonSymbols(nextSymbols.join("\n"));
     setAssetQuery(cleanSymbol);
   };
   const handleExportAssetComparisonCsv = () => {
@@ -4967,7 +4982,7 @@ export function MarketDataPanel() {
   const isOperationsWorkspace = false;
   const isBackofficeWorkspace = false;
   const availableBigQuerySymbols = dedupeDailyQuoteSymbols(dailyQuoteRows.map((row) => row.symbol), 500);
-  const portfolioSelectableSymbols = availableBigQuerySymbols.filter((symbol) => !/\s/.test(symbol));
+  const portfolioSelectableSymbols = availableBigQuerySymbols;
   const loadedDailyQuoteRows = dailyQuoteRows.filter((row) => row.status === "loaded");
   const failedDailyQuoteRows = dailyQuoteRows.filter((row) => row.status === "error");
   const dailyQuoteQualitySummary = useMemo(() => {
@@ -5175,10 +5190,6 @@ export function MarketDataPanel() {
   };
   const handleAddDailyQuoteToPortfolio = (row: DailyMarketQuoteRow) => {
     if (row.status !== "loaded") return;
-    if (/\s/.test(row.symbol)) {
-      setDailyQuoteError(`「${row.symbol}」含有空格，目前投資組合分析會把空格視為分隔符；請先在 BigQuery master table 補一個不含空格的正式代號。`);
-      return;
-    }
 
     handleAppendComparisonSymbol(row.symbol);
   };

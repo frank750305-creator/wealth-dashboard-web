@@ -339,10 +339,22 @@ export function assetResearchReportMarkdown({
 
 export function parseSymbolList(value: string) {
   const seen = new Set<string>();
-  return value
-    .split(/[\s,，、]+/)
+  const explicitParts = value
+    .split(/[\n\r,;，、]+/)
     .map((symbol) => symbol.trim())
-    .filter(Boolean)
+    .filter(Boolean);
+  const tickerLikePattern = /^[A-Z0-9._=^:/-]+$/i;
+  const symbolCandidates =
+    explicitParts.length === 1
+      ? (() => {
+          const tokens = explicitParts[0].split(/\s+/).filter(Boolean);
+          return tokens.length > 1 && tokens.every((token) => tickerLikePattern.test(token))
+            ? tokens
+            : explicitParts;
+        })()
+      : explicitParts;
+
+  return symbolCandidates
     .filter((symbol) => {
       const key = symbol.toUpperCase();
       if (seen.has(key)) return false;

@@ -111,7 +111,7 @@ export function WatchlistControlsSection({
     onComparisonSymbolsChange(
       selectedSymbols
         .filter((symbol) => symbol.toUpperCase() !== symbolToRemove.toUpperCase())
-        .join(" "),
+        .join("\n"),
     );
   };
 
@@ -121,7 +121,7 @@ export function WatchlistControlsSection({
         <div>
           <h3 className="text-base font-bold text-slate-100">投資組合分析</h3>
           <p className="text-[11px] text-slate-500 mt-0.5">
-            下拉選取多檔標的，也可手動輸入；按分析後下方會顯示風險矩陣。
+            下拉選取多檔標的，也可手動輸入完整名稱；按分析後下方會顯示風險矩陣。
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -271,12 +271,12 @@ export function WatchlistControlsSection({
         value={comparisonSymbols}
         onChange={(event) => onComparisonSymbolsChange(event.target.value)}
         rows={2}
-        placeholder="0050.TW SPY QQQ"
+        placeholder={"0050.TW\nSPY\nSPDR S&P500 ETF"}
         className="w-full resize-y rounded-md border border-slate-800 bg-slate-900 px-3 py-2 font-mono text-xs text-slate-100 outline-none placeholder:text-slate-700 focus:border-cyan-600"
       />
       </label>
       <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
-        <span>最多比較 12 檔；可用空白、逗號或換行分隔</span>
+        <span>最多比較 12 檔；完整名稱可包含空白，多檔請用逗號或換行分隔</span>
         <span className="font-mono">
           {symbolCount} symbols · {assetPriceBasis}
         </span>
