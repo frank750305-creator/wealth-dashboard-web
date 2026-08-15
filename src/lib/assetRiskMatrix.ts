@@ -71,12 +71,12 @@ function skewness(values: number[]) {
   return values.reduce((sum, value) => sum + ((value - average) / std) ** 3, 0) / values.length;
 }
 
-function kurtosis(values: number[]) {
+function excessKurtosis(values: number[]) {
   if (values.length < 4) return null;
   const average = mean(values);
   const std = sampleStd(values);
   if (average === null || std === null || std <= 0) return null;
-  return values.reduce((sum, value) => sum + ((value - average) / std) ** 4, 0) / values.length;
+  return values.reduce((sum, value) => sum + ((value - average) / std) ** 4, 0) / values.length - 3;
 }
 
 function yearsBetween(startDate: string | null, endDate: string | null) {
@@ -194,7 +194,7 @@ export function buildAssetRiskMatrixRow({
     annualizedVolatility,
     downsideDeviation,
     skewness: skewness(dailyReturns),
-    kurtosis: kurtosis(dailyReturns),
+    kurtosis: excessKurtosis(dailyReturns),
     beta,
     treynor,
     alpha,
@@ -227,7 +227,7 @@ export function assetRiskMatrixCsv(rows: AssetRiskMatrixRow[], benchmarkSymbol: 
     "standard_deviation",
     "semi_deviation",
     "skewness",
-    "kurtosis",
+    "excess_kurtosis",
     "beta",
     "treynor",
     "alpha",

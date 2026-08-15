@@ -154,7 +154,7 @@ export function AssetRiskMatrixSection({
                   "標準差",
                   "半標準差",
                   "偏度",
-                  "峰度",
+                  "超額峰度",
                   "β",
                   "Treynor",
                   "α",
