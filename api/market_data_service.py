@@ -1056,6 +1056,8 @@ def load_bigquery_asset_profile(*, symbol: str, price_basis: str = "adjusted", r
     latest_price = float(valid_frame["selected_price"].iloc[-1])
     first_date = valid_frame["date"].iloc[0]
     latest_date = valid_frame["date"].iloc[-1]
+    first_any_date = frame["date"].min()
+    latest_any_date = frame["date"].max()
     elapsed_days = max(int((latest_date - first_date).days), 0)
     total_return = latest_price / first_price - 1 if first_price > 0 else None
     annualized_return = (
@@ -1087,8 +1089,10 @@ def load_bigquery_asset_profile(*, symbol: str, price_basis: str = "adjusted", r
         "symbol": clean_symbol,
         "priceBasis": normalized_price_basis,
         "summary": {
-            "first_date": frame["date"].min().strftime("%Y-%m-%d"),
-            "latest_date": frame["date"].max().strftime("%Y-%m-%d"),
+            "first_date": first_date.strftime("%Y-%m-%d"),
+            "latest_date": latest_date.strftime("%Y-%m-%d"),
+            "first_any_date": first_any_date.strftime("%Y-%m-%d"),
+            "latest_any_date": latest_any_date.strftime("%Y-%m-%d"),
             "row_count": int(len(frame)),
             "selected_price_rows": int(valid_frame.shape[0]),
             "missing_selected_price_rows": int(len(frame) - valid_frame.shape[0]),
@@ -1208,6 +1212,8 @@ def load_bigquery_asset_history(
     latest_price = float(valid_frame["selected_price"].iloc[-1])
     first_date = valid_frame["date"].iloc[0]
     latest_date = valid_frame["date"].iloc[-1]
+    first_any_date = frame["date"].min()
+    latest_any_date = frame["date"].max()
     elapsed_days = max(int((latest_date - first_date).days), 0)
     total_return = latest_price / first_price - 1 if first_price > 0 else None
     annualized_return = (
@@ -1229,8 +1235,10 @@ def load_bigquery_asset_history(
     summary = {
         "requested_start_date": start_dt.isoformat() if start_dt else None,
         "requested_end_date": end_dt.isoformat() if end_dt else None,
-        "first_date": frame["date"].min().strftime("%Y-%m-%d"),
-        "latest_date": frame["date"].max().strftime("%Y-%m-%d"),
+        "first_date": first_date.strftime("%Y-%m-%d"),
+        "latest_date": latest_date.strftime("%Y-%m-%d"),
+        "first_any_date": first_any_date.strftime("%Y-%m-%d"),
+        "latest_any_date": latest_any_date.strftime("%Y-%m-%d"),
         "row_count": int(len(frame)),
         "selected_price_rows": int(valid_frame.shape[0]),
         "missing_selected_price_rows": int(len(frame) - valid_frame.shape[0]),
