@@ -16,6 +16,9 @@ export type AssetRiskMatrixRow = {
   latestPrice: number | null;
   totalReturn: number | null;
   annualizedReturn: number | null;
+  bookDividendYield: number | null;
+  historicalDividendYield: number | null;
+  dividendEventCount: number;
   sharpe: number | null;
   annualizedVolatility: number | null;
   downsideDeviation: number | null;
@@ -31,6 +34,12 @@ export type AssetRiskMatrixRow = {
 type ReturnPoint = {
   date: string;
   dailyReturn: number;
+};
+
+type DividendYieldSummary = {
+  bookDividendYield: number | null;
+  historicalDividendYield: number | null;
+  dividendEventCount: number;
 };
 
 function finiteNumber(value: number | null | undefined) {
@@ -122,6 +131,43 @@ function returnPointsFromHistory(history: BigQueryAssetHistoryResponse): ReturnP
   return result;
 }
 
+function priceForDividend(point: BigQueryAssetHistoryResponse["prices"][number]) {
+  return finiteNumber(point.raw_price) ?? finiteNumber(point.selected_price);
+}
+
+function dividendYieldSummaryFromHistory(history: BigQueryAssetHistoryResponse): DividendYieldSummary {
+  const sortedPoints = [...history.prices]
+    .filter((point) => point.date)
+    .sort((left, right) => String(left.date).localeCompare(String(right.date)));
+
+  const firstPurchasePrice = sortedPoints
+    .map(priceForDividend)
+    .find((price): price is number => typeof price === "number" && price > 0) ?? null;
+  const bookDividendYields: number[] = [];
+  const historicalDividendYields: number[] = [];
+  let dividendEventCount = 0;
+
+  sortedPoints.forEach((point) => {
+    const dividend = finiteNumber(point.dividend);
+    if (dividend === null || dividend <= 0) return;
+    dividendEventCount += 1;
+
+    const currentPrice = priceForDividend(point);
+    if (currentPrice !== null && currentPrice > 0) {
+      bookDividendYields.push(dividend / currentPrice);
+    }
+    if (firstPurchasePrice !== null && firstPurchasePrice > 0) {
+      historicalDividendYields.push(dividend / firstPurchasePrice);
+    }
+  });
+
+  return {
+    bookDividendYield: mean(bookDividendYields),
+    historicalDividendYield: mean(historicalDividendYields),
+    dividendEventCount,
+  };
+}
+
 export function buildAssetRiskMatrixRow({
   history,
   benchmarkHistory,
@@ -178,6 +224,7 @@ export function buildAssetRiskMatrixRow({
   }
 
   const groupInfo = inferRiskGroup(history.symbol);
+  const dividendYieldSummary = dividendYieldSummaryFromHistory(history);
 
   return {
     symbol: history.symbol,
@@ -190,6 +237,9 @@ export function buildAssetRiskMatrixRow({
     latestPrice: finiteNumber(history.metrics.latestPrice),
     totalReturn: finiteNumber(history.metrics.totalReturn),
     annualizedReturn,
+    bookDividendYield: dividendYieldSummary.bookDividendYield,
+    historicalDividendYield: dividendYieldSummary.historicalDividendYield,
+    dividendEventCount: dividendYieldSummary.dividendEventCount,
     sharpe,
     annualizedVolatility,
     downsideDeviation,
@@ -223,6 +273,9 @@ export function assetRiskMatrixCsv(rows: AssetRiskMatrixRow[], benchmarkSymbol: 
     "latest_price",
     "total_return",
     "annualized_return",
+    "book_dividend_yield",
+    "historical_dividend_yield",
+    "dividend_event_count",
     "sharpe",
     "standard_deviation",
     "semi_deviation",
@@ -247,6 +300,9 @@ export function assetRiskMatrixCsv(rows: AssetRiskMatrixRow[], benchmarkSymbol: 
     row.latestPrice ?? "",
     row.totalReturn ?? "",
     row.annualizedReturn ?? "",
+    row.bookDividendYield ?? "",
+    row.historicalDividendYield ?? "",
+    row.dividendEventCount,
     row.sharpe ?? "",
     row.annualizedVolatility ?? "",
     row.downsideDeviation ?? "",

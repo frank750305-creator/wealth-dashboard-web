@@ -1007,6 +1007,7 @@ def load_bigquery_asset_profile(*, symbol: str, price_basis: str = "adjusted", r
         symbol,
         SAFE_CAST(adj_price AS FLOAT64) AS adj_price,
         SAFE_CAST(raw_price AS FLOAT64) AS raw_price,
+        SAFE_CAST(dividend AS FLOAT64) AS dividend,
         SAFE_CAST({selected_price_column} AS FLOAT64) AS selected_price
     FROM {price_table}
     WHERE symbol = @symbol
@@ -1033,6 +1034,7 @@ def load_bigquery_asset_profile(*, symbol: str, price_basis: str = "adjusted", r
             "symbol": row["symbol"],
             "adj_price": row["adj_price"],
             "raw_price": row["raw_price"],
+            "dividend": row["dividend"],
             "selected_price": row["selected_price"],
         }
         for row in rows
@@ -1042,7 +1044,7 @@ def load_bigquery_asset_profile(*, symbol: str, price_basis: str = "adjusted", r
 
     frame = pd.DataFrame.from_records(records)
     frame["date"] = pd.to_datetime(frame["date"])
-    for column in ("adj_price", "raw_price", "selected_price"):
+    for column in ("adj_price", "raw_price", "dividend", "selected_price"):
         frame[column] = pd.to_numeric(frame[column], errors="coerce")
 
     frame = frame.sort_values("date")
@@ -1118,6 +1120,7 @@ def load_bigquery_asset_profile(*, symbol: str, price_basis: str = "adjusted", r
                 "date": row["date"],
                 "raw_price": finite_or_none(row["raw_price"]),
                 "adj_price": finite_or_none(row["adj_price"]),
+                "dividend": finite_or_none(row["dividend"]),
                 "selected_price": finite_or_none(row["selected_price"]),
                 "daily_return": finite_or_none(row["daily_return"]),
             }
@@ -1167,6 +1170,7 @@ def load_bigquery_asset_history(
         DATE(date) AS price_date,
         SAFE_CAST(adj_price AS FLOAT64) AS adj_price,
         SAFE_CAST(raw_price AS FLOAT64) AS raw_price,
+        SAFE_CAST(dividend AS FLOAT64) AS dividend,
         SAFE_CAST({selected_price_column} AS FLOAT64) AS selected_price
     FROM {price_table}
     WHERE {" AND ".join(where_clauses)}
@@ -1189,6 +1193,7 @@ def load_bigquery_asset_history(
             "date": row["price_date"],
             "raw_price": row["raw_price"],
             "adj_price": row["adj_price"],
+            "dividend": row["dividend"],
             "selected_price": row["selected_price"],
         }
         for row in rows
@@ -1198,7 +1203,7 @@ def load_bigquery_asset_history(
 
     frame = pd.DataFrame.from_records(records)
     frame["date"] = pd.to_datetime(frame["date"])
-    for column in ("adj_price", "raw_price", "selected_price"):
+    for column in ("adj_price", "raw_price", "dividend", "selected_price"):
         frame[column] = pd.to_numeric(frame[column], errors="coerce")
 
     frame = frame.sort_values("date")
@@ -1268,6 +1273,7 @@ def load_bigquery_asset_history(
                 "date": row["date"],
                 "raw_price": _finite_or_none(row["raw_price"]),
                 "adj_price": _finite_or_none(row["adj_price"]),
+                "dividend": _finite_or_none(row["dividend"]),
                 "selected_price": _finite_or_none(row["selected_price"]),
                 "daily_return": _finite_or_none(row["daily_return"]),
             }

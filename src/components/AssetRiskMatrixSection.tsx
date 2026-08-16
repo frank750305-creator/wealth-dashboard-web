@@ -51,6 +51,14 @@ function matrixCellClass(extraClass = "") {
   return `border-r border-slate-800 px-3 py-2 text-right font-mono ${extraClass}`;
 }
 
+function averageMetric(rows: AssetRiskMatrixRow[], selector: (row: AssetRiskMatrixRow) => number | null) {
+  const values = rows
+    .map(selector)
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  if (!values.length) return null;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
 export function AssetRiskMatrixSection({
   rows,
   benchmarkSymbol,
@@ -68,6 +76,8 @@ export function AssetRiskMatrixSection({
     : null;
   const highBetaCount = rows.filter((row) => typeof row.beta === "number" && Math.abs(row.beta) > 1.2).length;
   const negativeAlphaCount = rows.filter((row) => typeof row.alpha === "number" && row.alpha < 0).length;
+  const averageBookDividendYield = averageMetric(rows, (row) => row.bookDividendYield);
+  const averageHistoricalDividendYield = averageMetric(rows, (row) => row.historicalDividendYield);
 
   return (
     <section className="rounded-lg border border-slate-800 bg-slate-950 p-4 space-y-4">
@@ -117,12 +127,14 @@ export function AssetRiskMatrixSection({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+      <div className="grid grid-cols-2 lg:grid-cols-6 gap-2">
         {[
           ["標的數", `${rows.length}`],
           ["平均 Sharpe", formatNumber(Number.isFinite(averageSharpe) ? averageSharpe : null, 2)],
           ["高 Beta", `${highBetaCount}`],
           ["負 Alpha", `${negativeAlphaCount}`],
+          ["平均帳面配息率", formatPercent(averageBookDividendYield)],
+          ["平均真實配息率", formatPercent(averageHistoricalDividendYield)],
         ].map(([label, value]) => (
           <div key={label} className="rounded-md border border-slate-800 bg-slate-900/70 p-3">
             <p className="text-[10px] text-slate-500">{label}</p>
@@ -139,7 +151,7 @@ export function AssetRiskMatrixSection({
 
       {rows.length ? (
         <div className="overflow-x-auto rounded-lg border border-slate-800">
-          <table className="min-w-[1760px] w-full border-collapse text-xs">
+          <table className="min-w-[2040px] w-full border-collapse text-xs">
             <thead className="bg-slate-900 text-slate-400">
               <tr>
                 {[
@@ -149,6 +161,9 @@ export function AssetRiskMatrixSection({
                   "資料年期",
                   "累積報酬",
                   "年化報酬",
+                  "歷史帳面配息率",
+                  "真實歷史配息率",
+                  "配息次數",
                   "最新價",
                   "Sharpe",
                   "標準差",
@@ -183,6 +198,9 @@ export function AssetRiskMatrixSection({
                   <td className={matrixCellClass("text-blue-200")}>{formatYears(row.ageYears)}</td>
                   <td className={matrixCellClass(metricTone(row.totalReturn))}>{formatPercent(row.totalReturn)}</td>
                   <td className={matrixCellClass(metricTone(row.annualizedReturn))}>{formatPercent(row.annualizedReturn)}</td>
+                  <td className={matrixCellClass(metricTone(row.bookDividendYield))}>{formatPercent(row.bookDividendYield)}</td>
+                  <td className={matrixCellClass(metricTone(row.historicalDividendYield))}>{formatPercent(row.historicalDividendYield)}</td>
+                  <td className={matrixCellClass("text-slate-300")}>{row.dividendEventCount.toLocaleString("zh-TW")}</td>
                   <td className={matrixCellClass("text-slate-200")}>{formatNumber(row.latestPrice, 4)}</td>
                   <td className={matrixCellClass(metricTone(row.sharpe))}>{formatNumber(row.sharpe, 3)}</td>
                   <td className={matrixCellClass(riskTone(row.annualizedVolatility, 0.12, 0.25))}>{formatPercent(row.annualizedVolatility)}</td>

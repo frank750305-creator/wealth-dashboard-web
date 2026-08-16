@@ -305,6 +305,7 @@ export type BigQueryAssetPricePoint = {
   date: string | null;
   raw_price: number | null;
   adj_price: number | null;
+  dividend?: number | null;
   selected_price: number | null;
   daily_return: number | null;
 };
