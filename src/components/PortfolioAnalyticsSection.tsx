@@ -21,6 +21,7 @@ import {
 import type {
   BigQueryAssetHistoryResponse,
   PortfolioAnalysisResponse,
+  PortfolioAnalyzeBigQueryPayload,
   PortfolioOptimizationResponse,
   PortfolioOptimizeBigQueryPayload,
   PortfolioWealthPoint,
@@ -52,9 +53,28 @@ type ManualWeightRow = {
   weightPercent: number;
 };
 
-const analysisMode = "long_rebuild" as const;
-
+type AnalysisMode = PortfolioAnalyzeBigQueryPayload["mode"];
 type OptimizationMode = PortfolioOptimizeBigQueryPayload["optimization_mode"];
+
+const analysisModeOptions: Array<{
+  id: AnalysisMode;
+  label: string;
+  shortLabel: string;
+  note: string;
+}> = [
+  {
+    id: "overlap",
+    label: "標準版：共同區間",
+    shortLabel: "標準版",
+    note: "只使用所有標的同時有資料的交易日，適合看同期間真實比較。",
+  },
+  {
+    id: "long_rebuild",
+    label: "模型版：長線重建",
+    shortLabel: "模型版",
+    note: "每檔用自己的完整歷史估報酬與波動，再用共同區間估相關，適合新舊標的混合。",
+  },
+];
 
 const optimizationModeOptions: Array<{
   id: OptimizationMode;
@@ -73,6 +93,16 @@ function formatNumber(value: number | null | undefined, digits = 2) {
 
 function formatPercent(value: number | null | undefined, digits = 2) {
   return typeof value === "number" && Number.isFinite(value) ? `${(value * 100).toFixed(digits)}%` : "--";
+}
+
+function formatSignedNumber(value: number | null | undefined, digits = 2) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "--";
+  return `${value > 0 ? "+" : ""}${value.toFixed(digits)}`;
+}
+
+function formatSignedPercent(value: number | null | undefined, digits = 2) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "--";
+  return `${value > 0 ? "+" : ""}${(value * 100).toFixed(digits)}%`;
 }
 
 function formatChartPercent(value: unknown) {
@@ -213,6 +243,17 @@ function metricCards(result: PortfolioAnalysisResponse | PortfolioOptimizationRe
   ];
 }
 
+function analysisModeLabel(mode: AnalysisMode | undefined) {
+  return analysisModeOptions.find((option) => option.id === mode)?.shortLabel ?? "分析版本";
+}
+
+function deltaClass(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "text-slate-500";
+  if (value > 0) return "text-emerald-600";
+  if (value < 0) return "text-rose-600";
+  return "text-slate-500";
+}
+
 export function PortfolioAnalyticsSection({
   symbols,
   benchmarkSymbol,
@@ -232,14 +273,21 @@ export function PortfolioAnalyticsSection({
   const [optimizationStatus, setOptimizationStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [message, setMessage] = useState("");
   const [optimizationMessage, setOptimizationMessage] = useState("");
+  const [analysisMode, setAnalysisMode] = useState<AnalysisMode>("long_rebuild");
+  const [modeComparisonResults, setModeComparisonResults] = useState<Record<AnalysisMode, PortfolioAnalysisResponse | null>>({
+    overlap: null,
+    long_rebuild: null,
+  });
   const [optimizationMode, setOptimizationMode] = useState<OptimizationMode>("max_sharpe");
   const [targetVolatilityPercent, setTargetVolatilityPercent] = useState(12);
   const [manualWeightsBySymbol, setManualWeightsBySymbol] = useState<Record<string, number>>({});
   const [analysisContextKey, setAnalysisContextKey] = useState("");
+  const [modeComparisonContextKey, setModeComparisonContextKey] = useState("");
   const [optimizationContextKey, setOptimizationContextKey] = useState("");
 
   const activeBenchmark = benchmarkSymbol.trim().toUpperCase();
   const canRun = hasBigQueryCredentials && selectedSymbols.length > 0;
+  const selectedAnalysisMode = analysisModeOptions.find((option) => option.id === analysisMode);
   const selectedOptimizationMode = optimizationModeOptions.find((option) => option.id === optimizationMode);
   const manualWeightRows = useMemo(() => {
     const fallbackWeight = equalWeightPercent(selectedSymbols.length);
@@ -251,9 +299,11 @@ export function PortfolioAnalyticsSection({
   const manualWeightTotal = manualWeightRows.reduce((sum, row) => sum + row.weightPercent, 0);
   const normalizedManualWeights = useMemo(() => normalizeManualWeights(manualWeightRows), [manualWeightRows]);
   const manualWeightKey = manualWeightRows.map((row) => `${row.symbol}:${row.weightPercent.toFixed(4)}`).join("|");
-  const currentAnalysisKey = `${selectedSymbolKey}|${activeBenchmark}|${priceBasis}|${manualWeightKey}`;
-  const currentOptimizationKey = `${selectedSymbolKey}|${activeBenchmark}|${priceBasis}|${optimizationMode}|${targetVolatilityPercent}`;
-  const displayResult = analysisContextKey === currentAnalysisKey ? analysisResult : null;
+  const currentAnalysisDataKey = `${selectedSymbolKey}|${activeBenchmark}|${priceBasis}|${riskFreeRatePercent}|${manualWeightKey}`;
+  const currentAnalysisKey = `${currentAnalysisDataKey}|${analysisMode}`;
+  const currentOptimizationKey = `${selectedSymbolKey}|${activeBenchmark}|${priceBasis}|${riskFreeRatePercent}|${analysisMode}|${optimizationMode}|${targetVolatilityPercent}`;
+  const validComparisonResults = modeComparisonContextKey === currentAnalysisDataKey ? modeComparisonResults : null;
+  const displayResult = validComparisonResults?.[analysisMode] ?? (analysisContextKey === currentAnalysisKey ? analysisResult : null);
   const currentOptimizationResult = optimizationContextKey === currentOptimizationKey ? optimizationResult : null;
   const chartRows = useMemo(
     () => buildPortfolioChartRows(displayResult, benchmarkHistory),
@@ -262,6 +312,38 @@ export function PortfolioAnalyticsSection({
   const annualRows = useMemo(() => buildAnnualReturnRows(displayResult), [displayResult]);
   const aiWeightRows = currentOptimizationResult?.weights ?? [];
   const hasOptimizedWeights = Boolean(currentOptimizationResult?.weights?.length);
+  const modeComparisonRows = useMemo(() => {
+    const overlap = validComparisonResults?.overlap;
+    const longRebuild = validComparisonResults?.long_rebuild;
+    if (!overlap && !longRebuild) return [];
+
+    const rows: Array<{
+      key: keyof PortfolioAnalysisResponse["metrics"];
+      label: string;
+      kind: "percent" | "number";
+    }> = [
+      { key: "cumulativeReturn", label: "累積報酬", kind: "percent" },
+      { key: "cagr", label: "年化報酬", kind: "percent" },
+      { key: "annualVolatility", label: "年化波動", kind: "percent" },
+      { key: "sharpe", label: "Sharpe", kind: "number" },
+      { key: "sortino", label: "Sortino", kind: "number" },
+      { key: "maxDrawdown", label: "最大回撤", kind: "percent" },
+      { key: "downsideDeviation", label: "半標準差", kind: "percent" },
+      { key: "beta", label: "Beta", kind: "number" },
+      { key: "alpha", label: "Alpha", kind: "percent" },
+      { key: "skewness", label: "偏度", kind: "number" },
+      { key: "kurtosis", label: "峰度", kind: "number" },
+    ];
+
+    return rows.map((row) => {
+      const overlapValue = overlap?.metrics[row.key] ?? null;
+      const longRebuildValue = longRebuild?.metrics[row.key] ?? null;
+      const delta = typeof overlapValue === "number" && typeof longRebuildValue === "number"
+        ? longRebuildValue - overlapValue
+        : null;
+      return { ...row, overlapValue, longRebuildValue, delta };
+    });
+  }, [validComparisonResults]);
 
   const basePayload = {
     benchmark_symbol: activeBenchmark || null,
@@ -270,7 +352,6 @@ export function PortfolioAnalyticsSection({
     price_basis: priceBasis,
     pricing_currency: "original" as const,
     currency_by_symbol: currencyBySymbol(selectedSymbols),
-    mode: analysisMode,
     confidence_level: 0.95,
     risk_free_rate: riskFreeRatePercent / 100,
   };
@@ -283,6 +364,8 @@ export function PortfolioAnalyticsSection({
     setAnalysisResult(null);
     setBenchmarkHistory(null);
     setAnalysisContextKey("");
+    setModeComparisonResults({ overlap: null, long_rebuild: null });
+    setModeComparisonContextKey("");
     setStatus("idle");
     setMessage("");
   }
@@ -293,6 +376,8 @@ export function PortfolioAnalyticsSection({
     setAnalysisResult(null);
     setBenchmarkHistory(null);
     setAnalysisContextKey("");
+    setModeComparisonResults({ overlap: null, long_rebuild: null });
+    setModeComparisonContextKey("");
     setStatus("idle");
     setMessage("");
   }
@@ -310,6 +395,8 @@ export function PortfolioAnalyticsSection({
     setAnalysisResult(null);
     setBenchmarkHistory(null);
     setAnalysisContextKey("");
+    setModeComparisonResults({ overlap: null, long_rebuild: null });
+    setModeComparisonContextKey("");
     setStatus("idle");
     setMessage("已把 AI 權重套用到輸入權重。請按「執行組合分析」重新計算主圖表與累積報酬。");
   }
@@ -335,32 +422,52 @@ export function PortfolioAnalyticsSection({
     setMessage("");
     setAnalysisResult(null);
     setAnalysisContextKey("");
+    setModeComparisonResults({ overlap: null, long_rebuild: null });
+    setModeComparisonContextKey("");
     setBenchmarkHistory(null);
 
-    const analysisPromise = analyzePortfolioFromBigQuery({
+    const overlapPromise = analyzePortfolioFromBigQuery({
       ...basePayload,
+      mode: "overlap",
+      weights_by_symbol: normalizedManualWeights,
+    });
+    const longRebuildPromise = analyzePortfolioFromBigQuery({
+      ...basePayload,
+      mode: "long_rebuild",
       weights_by_symbol: normalizedManualWeights,
     });
     const benchmarkPromise = activeBenchmark
       ? fetchBigQueryAssetHistory(activeBenchmark, priceBasis, { limit: 20000 })
       : Promise.resolve(null);
 
-    const [analysisSettled, benchmarkSettled] = await Promise.allSettled([
-      analysisPromise,
+    const [overlapSettled, longRebuildSettled, benchmarkSettled] = await Promise.allSettled([
+      overlapPromise,
+      longRebuildPromise,
       benchmarkPromise,
-    ]);
+    ] as const);
+    const selectedSettled = analysisMode === "overlap" ? overlapSettled : longRebuildSettled;
 
-    if (analysisSettled.status === "fulfilled") {
-      setAnalysisResult(analysisSettled.value);
+    if (selectedSettled.status === "fulfilled") {
+      setAnalysisResult(selectedSettled.value);
       setAnalysisContextKey(currentAnalysisKey);
+    }
+    setModeComparisonResults({
+      overlap: overlapSettled.status === "fulfilled" ? overlapSettled.value : null,
+      long_rebuild: longRebuildSettled.status === "fulfilled" ? longRebuildSettled.value : null,
+    });
+    if (overlapSettled.status === "fulfilled" || longRebuildSettled.status === "fulfilled") {
+      setModeComparisonContextKey(currentAnalysisDataKey);
     }
     if (benchmarkSettled.status === "fulfilled") {
       setBenchmarkHistory(benchmarkSettled.value);
     }
 
     const warnings = [
-      analysisSettled.status === "rejected"
-        ? `組合歷史分析失敗：${analysisSettled.reason instanceof Error ? analysisSettled.reason.message : String(analysisSettled.reason)}`
+      overlapSettled.status === "rejected"
+        ? `標準版分析失敗：${overlapSettled.reason instanceof Error ? overlapSettled.reason.message : String(overlapSettled.reason)}`
+        : "",
+      longRebuildSettled.status === "rejected"
+        ? `模型版分析失敗：${longRebuildSettled.reason instanceof Error ? longRebuildSettled.reason.message : String(longRebuildSettled.reason)}`
         : "",
       benchmarkSettled.status === "rejected"
         ? `基準線圖讀取失敗：${benchmarkSettled.reason instanceof Error ? benchmarkSettled.reason.message : String(benchmarkSettled.reason)}`
@@ -368,7 +475,7 @@ export function PortfolioAnalyticsSection({
     ].filter(Boolean);
 
     setMessage(warnings.join("\n"));
-    setStatus(analysisSettled.status === "fulfilled" ? "loaded" : "error");
+    setStatus(selectedSettled.status === "fulfilled" ? "loaded" : "error");
   }
 
   async function handleRunOptimization() {
@@ -391,6 +498,7 @@ export function PortfolioAnalyticsSection({
     try {
       const response = await optimizePortfolioFromBigQuery({
         ...basePayload,
+        mode: analysisMode,
         symbols: selectedSymbols,
         optimization_mode: optimizationMode,
         target_volatility: optimizationMode === "target_vol"
@@ -413,7 +521,7 @@ export function PortfolioAnalyticsSection({
           <p className="text-[10px] font-mono text-cyan-300">PORTFOLIO ANALYTICS</p>
           <h3 className="mt-1 text-sm font-bold text-slate-100">組合分析</h3>
           <p className="mt-1 text-[11px] leading-5 text-slate-500">
-            先輸入各標的權重，再用該組合計算歷史線圖、年度報酬、相關係數與效率前緣。
+            先輸入各標的權重，再選標準版或模型版，計算歷史線圖、年度報酬、相關係數與效率前緣。
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
@@ -501,6 +609,34 @@ export function PortfolioAnalyticsSection({
         )}
       </div>
 
+      <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-3">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p className="text-[11px] font-bold text-slate-200">步驟 2：選擇風險分析版本</p>
+            <p className="mt-0.5 text-[11px] leading-5 text-slate-500">
+              {selectedAnalysisMode?.note}
+            </p>
+          </div>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:min-w-[560px]">
+            {analysisModeOptions.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => setAnalysisMode(option.id)}
+                className={`rounded-md border px-3 py-2 text-left text-xs transition ${
+                  analysisMode === option.id
+                    ? "border-cyan-400 bg-cyan-950/50 text-cyan-100"
+                    : "border-slate-800 bg-slate-950 text-slate-400 hover:border-slate-600 hover:text-slate-200"
+                }`}
+              >
+                <span className="block font-bold">{option.label}</span>
+                <span className="mt-1 block text-[11px] leading-4 text-slate-500">{option.note}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
       {message ? (
         <div className="whitespace-pre-wrap rounded-lg border border-amber-900/60 bg-amber-950/10 p-3 text-xs leading-5 text-amber-200">
           {message}
@@ -516,12 +652,62 @@ export function PortfolioAnalyticsSection({
         ))}
       </div>
 
+      <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-3">
+        <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="text-[11px] font-bold text-slate-200">標準版 / 模型版風險差異</p>
+            <p className="mt-0.5 text-[11px] leading-5 text-slate-500">
+              Delta = 模型版 - 標準版；標準版看共同區間，模型版看長線重建。
+            </p>
+          </div>
+          <span className="w-fit rounded bg-slate-950 px-2 py-1 text-[10px] font-mono text-slate-500">
+            目前主圖：{analysisModeLabel(displayResult?.mode ?? analysisMode)}
+          </span>
+        </div>
+        {modeComparisonRows.length ? (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-xs">
+              <thead>
+                <tr className="text-left text-[11px] text-slate-500">
+                  <th className="py-2 pr-3 font-medium">指標</th>
+                  <th className="py-2 px-3 text-right font-medium">標準版</th>
+                  <th className="py-2 px-3 text-right font-medium">模型版</th>
+                  <th className="py-2 pl-3 text-right font-medium">差異</th>
+                </tr>
+              </thead>
+              <tbody>
+                {modeComparisonRows.map((row) => (
+                  <tr key={row.key} className="border-t border-slate-800">
+                    <td className="py-2 pr-3 font-bold text-slate-300">{row.label}</td>
+                    <td className="py-2 px-3 text-right font-mono text-slate-300">
+                      {row.kind === "percent" ? formatPercent(row.overlapValue) : formatNumber(row.overlapValue, 2)}
+                    </td>
+                    <td className="py-2 px-3 text-right font-mono text-cyan-200">
+                      {row.kind === "percent" ? formatPercent(row.longRebuildValue) : formatNumber(row.longRebuildValue, 2)}
+                    </td>
+                    <td className={`py-2 pl-3 text-right font-mono font-bold ${deltaClass(row.delta)}`}>
+                      {row.kind === "percent" ? formatSignedPercent(row.delta) : formatSignedNumber(row.delta, 2)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="rounded-md border border-dashed border-slate-800 p-4 text-center text-xs text-slate-500">
+            執行組合分析後，這裡會同時顯示標準版與模型版的風險差異。
+          </div>
+        )}
+      </div>
+
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.2fr_0.8fr]">
         <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-3">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
               <p className="text-[11px] font-bold text-slate-200">組合歷史線圖</p>
-              <p className="mt-0.5 text-[11px] text-slate-500">Base 100，可與右上角基準比較</p>
+              <p className="mt-0.5 text-[11px] text-slate-500">
+                Base 100，可與右上角基準比較；{analysisModeLabel(displayResult?.mode ?? analysisMode)}
+              </p>
             </div>
             <span className="rounded bg-slate-950 px-2 py-1 text-[10px] font-mono text-slate-500">
               {priceBasis}
@@ -556,7 +742,7 @@ export function PortfolioAnalyticsSection({
             <div>
               <p className="text-[11px] font-bold text-slate-200">效率前緣 / AI 調整</p>
               <p className="mt-1 text-[11px] leading-5 text-slate-500">
-                {selectedOptimizationMode?.note ?? "選擇最佳化目標後執行 AI 調整。"}
+                {analysisModeLabel(analysisMode)}：{selectedOptimizationMode?.note ?? "選擇最佳化目標後執行 AI 調整。"}
               </p>
             </div>
             <button
